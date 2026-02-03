@@ -19,7 +19,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	_ "github.com/paradedb/benchmarker" // triggers backend init() via backends.go imports
 	"github.com/paradedb/benchmarker/backends"
@@ -299,7 +298,7 @@ func runPull(datasetName, sourceURL string, anonymous bool) {
 	var cfg aws.Config
 	if anonymous {
 		cfg, err = config.LoadDefaultConfig(ctx,
-			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("", "", "")),
+			config.WithCredentialsProvider(aws.AnonymousCredentials{}),
 			config.WithRegion("us-east-1"),
 		)
 	} else {
