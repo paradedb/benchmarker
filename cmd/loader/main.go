@@ -19,6 +19,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	_ "github.com/paradedb/benchmarker" // triggers backend init() via backends.go imports
 	"github.com/paradedb/benchmarker/backends"
@@ -37,6 +38,7 @@ func main() {
 	pullCmd := flag.NewFlagSet("pull", flag.ExitOnError)
 	pullDataset := pullCmd.String("dataset", "", "Dataset name (creates ./datasets/<name>/)")
 	pullSource := pullCmd.String("source", "", "S3 source URL (s3://bucket/prefix/)")
+	pullAnonymous := pullCmd.Bool("anonymous", false, "Use anonymous access for public buckets")
 
 	if len(os.Args) < 2 {
 		printUsage()
@@ -67,7 +69,7 @@ func main() {
 			fmt.Println("Usage: loader pull --dataset <name> --source s3://bucket/prefix/")
 			os.Exit(1)
 		}
-		runPull(*pullDataset, *pullSource)
+		runPull(*pullDataset, *pullSource, *pullAnonymous)
 
 	default:
 		printUsage()
@@ -81,7 +83,7 @@ func printUsage() {
 Usage:
   loader load [--backend <name>] [--batch-size <n>] [--workers <n>] <dataset-dir>
   loader drop [--backend <name>] <dataset-dir>
-  loader pull --dataset <name> --source <s3-url>
+  loader pull --dataset <name> --source <s3-url> [--anonymous]
 
 Commands:
   load    Run pre.sql/json, bulk load CSV, run post.sql/json
@@ -96,6 +98,7 @@ Options:
   --workers <n>      Parallel workers (default: 1)
   --dataset <name>   Dataset name for pull command
   --source <url>     S3 source URL (s3://bucket/prefix/)
+  --anonymous        Use anonymous access for public S3 buckets
 
 Environment Variables:
   PARADEDB_URL       ParadeDB connection string
@@ -111,6 +114,7 @@ Examples:
   loader load ./datasets/sample
   loader load --backend paradedb --workers 4 ./datasets/sample
   loader pull --dataset large --source s3://mybucket/datasets/large/
+  loader pull --dataset test --source s3://fts-bench/datasets/test/ --anonymous
   PARADEDB_URL=postgres://user:pass@host:5432/db loader load --backend paradedb ./datasets/sample`)
 }
 
@@ -277,7 +281,7 @@ func findCSV(datasetDir string) string {
 // S3 Pull
 // ============================================================================
 
-func runPull(datasetName, sourceURL string) {
+func runPull(datasetName, sourceURL string, anonymous bool) {
 	bucket, prefix, err := parseS3URL(sourceURL)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
@@ -286,10 +290,21 @@ func runPull(datasetName, sourceURL string) {
 
 	destDir := filepath.Join("datasets", datasetName)
 	fmt.Printf("Pulling from s3://%s/%s to %s\n", bucket, prefix, destDir)
+	if anonymous {
+		fmt.Println("Using anonymous access (public bucket)")
+	}
 
 	ctx := context.Background()
 
-	cfg, err := config.LoadDefaultConfig(ctx)
+	var cfg aws.Config
+	if anonymous {
+		cfg, err = config.LoadDefaultConfig(ctx,
+			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("", "", "")),
+			config.WithRegion("us-east-1"),
+		)
+	} else {
+		cfg, err = config.LoadDefaultConfig(ctx)
+	}
 	if err != nil {
 		fmt.Printf("Error loading AWS config: %v\n", err)
 		os.Exit(1)
