@@ -1,0 +1,22 @@
+{
+  "database": "benchmark",
+  "collection": "documents",
+  "searchIndex": {
+    "name": "content_search",
+    "definition": {
+      "mappings": {
+        "dynamic": false,
+        "fields": {
+          "title": {
+            "type": "string",
+            "analyzer": "lucene.english"
+          },
+          "content": {
+            "type": "string",
+            "analyzer": "lucene.english"
+          }
+        }
+      }
+    }
+  }
+}
