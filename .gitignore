@@ -7,7 +7,7 @@ datasets/*
 
 # Build outputs
 *.exe
-k6
+./k6
 bin/
 
 # IDE
