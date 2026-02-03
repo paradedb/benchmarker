@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>k6 Search Benchmark</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
+  <style>
+    :root {
+      --c1: #7C3AED;
+      --c2: #F97316;
+      --c3: #10B981;
+      --c4: #EC4899;
+      --c5: #3B82F6;
+      --bg: #0f0f0f;
+      --panel: #1a1a1a;
+      --border: #2a2a2a;
+      --text: #e5e5e5;
+      --text-dim: #737373;
+      --grid: #252525;
+    }
+    html.light {
+      --bg: #fafafa;
+      --panel: #ffffff;
+      --border: #e5e5e5;
+      --text: #171717;
+      --text-dim: #737373;
+      --grid: #f0f0f0;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background: var(--bg);
+      color: var(--text);
+      padding: 20px;
+      min-height: 100vh;
+      transition: background 0.3s, color 0.3s;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .header h1 { font-size: 20px; font-weight: 600; }
+    .elapsed { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .theme-toggle {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .theme-toggle:hover { border-color: var(--c1); }
+    .stats-row {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .stat-group {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      border-left: 3px solid var(--c1);
+    }
+    .stat-group-header { margin-bottom: 8px; }
+    .stat-group-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+    .stat { text-align: left; }
+    .stat-value { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .stat-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; }
+    .stat-group-header { cursor: pointer; display: flex; align-items: center; gap: 6px; }
+    .stat-group-header:hover { opacity: 0.8; }
+    .expand-icon { font-size: 10px; transition: transform 0.2s; }
+    .stat-group.expanded .expand-icon { transform: rotate(90deg); }
+    .query-details { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+    .stat-group.expanded .query-details { display: flex; flex-direction: column; gap: 8px; }
+    .query-item { background: var(--bg); border-radius: 4px; padding: 8px; cursor: pointer; position: relative; }
+    .query-item:hover { background: var(--border); }
+    .query-tooltip {
+      display: none;
+      position: fixed;
+      right: 300px;
+      top: 100px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      max-width: 500px;
+      max-height: 400px;
+      overflow: auto;
+      z-index: 1000;
+      font-size: 11px;
+      white-space: pre-wrap;
+      font-family: 'JetBrains Mono', monospace;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .query-tooltip.visible { display: block; }
+    .config-modal {
+      display: none;
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      min-width: 400px;
+      max-width: 600px;
+      max-height: 80vh;
+      overflow: auto;
+      z-index: 1001;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+    .config-modal.visible { display: block; }
+    .config-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .config-modal-title { font-weight: 600; font-size: 13px; }
+    .config-modal-close {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 18px;
+      cursor: pointer;
+      padding: 0 4px;
+    }
+    .config-modal-close:hover { color: var(--text); }
+    .config-item { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border); }
+    .config-item:last-child { border-bottom: none; }
+    .config-key { color: var(--text-dim); }
+    .config-value { font-weight: 600; text-align: right; max-width: 60%; word-break: break-all; }
+    .config-section { margin-top: 12px; }
+    .config-section-title { font-weight: 600; margin-bottom: 6px; color: var(--c1); }
+    .config-tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    .config-tab {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 6px 12px;
+      color: var(--text-dim);
+      font-family: inherit;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+    }
+    .config-tab:hover { border-color: var(--c1); color: var(--text); }
+    .config-tab.active { background: var(--c1); border-color: var(--c1); color: white; }
+    .config-tab-content { display: none; }
+    .config-tab-content.active { display: block; }
+    .schema-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    .schema-table th, .schema-table td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+    .schema-table th { color: var(--text-dim); font-weight: 600; text-transform: uppercase; font-size: 9px; }
+    .index-def { background: var(--bg); padding: 8px; border-radius: 4px; margin-top: 8px; white-space: pre-wrap; word-break: break-all; font-size: 10px; }
+    .index-name { font-weight: 600; color: var(--c1); margin-bottom: 4px; }
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 1000;
+    }
+    .modal-backdrop.visible { display: block; }
+    .query-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .query-name { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .query-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+    .query-stat-value { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .query-stat-label { font-size: 8px; color: var(--text-dim); text-transform: uppercase; }
+    .chart-container {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .chart-header h2 {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .chart-controls { display: flex; align-items: center; gap: 8px; }
+    .reset-zoom {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 8px;
+      color: var(--text-dim);
+      font-family: inherit;
+      font-size: 9px;
+      cursor: pointer;
+      text-transform: uppercase;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .reset-zoom.visible { opacity: 1; }
+    .reset-zoom:hover { border-color: var(--c1); color: var(--text); }
+    .chart-header select {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+    .legend { display: flex; gap: 16px; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); cursor: pointer; user-select: none; }
+    .legend-item:hover { opacity: 0.8; }
+    .legend-item.disabled { opacity: 0.4; text-decoration: line-through; }
+    .legend-item.disabled .legend-color { opacity: 0.3; }
+    .legend-color { width: 16px; height: 3px; border-radius: 1px; }
+    .chart-wrapper { position: relative; height: clamp(140px, 30vh, 300px); }
+    .chart-wrapper.small { height: clamp(80px, 14vh, 140px); }
+    .main-row { display: grid; grid-template-columns: 1fr 340px; gap: 16px; margin-bottom: 16px; }
+    .stats-column { display: flex; flex-direction: column; gap: 12px; }
+    .stats-column .stat-group { min-width: unset; flex: unset; }
+    .two-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+    @media (max-width: 1200px) {
+      .main-row { grid-template-columns: 1fr 300px; }
+      .query-stats { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (max-width: 1000px) {
+      .main-row { grid-template-columns: 1fr 260px; gap: 12px; }
+      body { padding: 16px; }
+      .chart-container { padding: 14px; }
+      .query-stat-value { font-size: 11px; }
+      .query-stat-label { font-size: 7px; }
+    }
+    @media (max-width: 850px) {
+      .main-row { grid-template-columns: 1fr; }
+      .stats-column { flex-direction: row; flex-wrap: wrap; }
+      .stats-column .stat-group { flex: 1; min-width: 280px; }
+      .query-stats { grid-template-columns: repeat(6, 1fr); }
+    }
+    @media (max-width: 700px) {
+      .two-charts { grid-template-columns: 1fr; }
+      .stats-row { flex-direction: column; }
+      body { padding: 12px; }
+      .main-row { gap: 12px; }
+      .chart-container { padding: 12px; }
+      .stats-column .stat-group { min-width: 100%; }
+      .query-stats { grid-template-columns: repeat(3, 1fr); }
+    }
+    #runs-container { display: contents; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>K6 Search Benchmark</h1>
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <div class="elapsed" id="elapsed">00:00</div>
+      <button class="theme-toggle" onclick="toggleTheme()">◐ Theme</button>
+    </div>
+  </div>
+
+  <div class="main-row">
+    <div class="chart-container">
+      <div class="chart-header">
+        <h2>Latency <select id="metric-select" onchange="updateMetricSelection()">
+          <option value="p50">P50</option>
+          <option value="p90">P90</option>
+          <option value="p95" selected>P95</option>
+          <option value="p99">P99</option>
+        </select> (ms)</h2>
+        <div class="chart-controls">
+          <button class="reset-zoom" id="reset-latency" onclick="resetZoom()" title="Double-click chart to reset">Reset Zoom</button>
+          <div class="legend" id="latency-legend"></div>
+        </div>
+      </div>
+      <div class="chart-wrapper">
+        <canvas id="latencyChart"></canvas>
+      </div>
+    </div>
+    <div class="stats-column" id="stats-container"></div>
+  </div>
+
+  <div class="main-row" id="ingest-container" style="display: none;">
+    <div class="chart-container">
+      <div class="chart-header">
+        <h2>Ingest (docs/s)</h2>
+        <div class="chart-controls">
+          <button class="reset-zoom" id="reset-ingest" onclick="resetZoom()">Reset Zoom</button>
+          <div class="legend" id="ingest-legend"></div>
+        </div>
+      </div>
+      <div class="chart-wrapper small">
+        <canvas id="ingestChart"></canvas>
+      </div>
+    </div>
+    <div class="stats-column" id="ingest-stats-container"></div>
+  </div>
+
+  <div class="two-charts">
+    <div class="chart-container">
+      <div class="chart-header">
+        <h2>CPU %</h2>
+        <button class="reset-zoom" id="reset-cpu" onclick="resetZoom()">Reset Zoom</button>
+      </div>
+      <div class="chart-wrapper small">
+        <canvas id="cpuChart"></canvas>
+      </div>
+    </div>
+    <div class="chart-container">
+      <div class="chart-header">
+        <h2>Memory</h2>
+        <button class="reset-zoom" id="reset-memory" onclick="resetZoom()">Reset Zoom</button>
+      </div>
+      <div class="chart-wrapper small">
+        <canvas id="memoryChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div id="query-tooltip" class="query-tooltip"></div>
+  <div id="modal-backdrop" class="modal-backdrop" onclick="hideConfigModal()"></div>
+  <div id="config-modal" class="config-modal">
+    <div class="config-modal-header">
+      <span class="config-modal-title" id="config-modal-title">Configuration</span>
+      <button class="config-modal-close" onclick="hideConfigModal()">&times;</button>
+    </div>
+    <div id="config-modal-content"></div>
+  </div>
+
+  <script>
+    const COLORS = ['#7C3AED', '#F97316', '#10B981', '#EC4899', '#3B82F6', '#EAB308', '#06B6D4'];
+    let isDark = false;
+    let runColors = {};
+    let runStartTimes = {};
+    let selectedMetric = 'p95';
+    let lastMetric = 'p95';
+    let colorIndex = 0;
+    let lastElapsed = 0;
+    let chartDuration = 30; // Will be updated from server
+    let selectedQueries = new Set(); // Empty = show all (aggregated)
+    let allQueryTypes = new Set();
+    let lastData = null; // Store last data for filter updates
+    let queryTexts = {}; // Store query text per query name
+    let runConfigs = {}; // Store config per run name
+
+    function resetState() {
+      runColors = {};
+      runStartTimes = {};
+      colorIndex = 0;
+      lastElapsed = 0;
+      chartDuration = 30;
+      selectedQueries = new Set();
+      allQueryTypes = new Set();
+      lastData = null;
+      queryTexts = {};
+      runConfigs = {};
+      isZoomed = false;
+      document.querySelectorAll('.reset-zoom').forEach(btn => btn.classList.remove('visible'));
+      document.getElementById('stats-container').innerHTML = '';
+      document.getElementById('latency-legend').innerHTML = '';
+      document.getElementById('ingest-legend').innerHTML = '';
+      lastLegendKey = '';
+      document.getElementById('ingest-stats-container').innerHTML = '';
+      document.getElementById('ingest-container').style.display = 'none';
+      [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+        chart.data.datasets = [];
+        chart.options.scales.x.min = 0;
+        chart.options.scales.x.max = chartDuration;
+        delete chart.options.scales.y.max;
+        chart.update('none');
+      });
+    }
+
+    function getRunColor(run) {
+      if (!runColors[run]) {
+        runColors[run] = COLORS[colorIndex % COLORS.length];
+        colorIndex++;
+      }
+      return runColors[run];
+    }
+
+    function shadeColor(color, percent) {
+      // Lighten or darken a hex color
+      const num = parseInt(color.replace('#', ''), 16);
+      const amt = Math.round(2.55 * percent);
+      const R = Math.min(255, Math.max(0, (num >> 16) + amt));
+      const G = Math.min(255, Math.max(0, (num >> 8 & 0x00FF) + amt));
+      const B = Math.min(255, Math.max(0, (num & 0x0000FF) + amt));
+      return '#' + (0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1);
+    }
+
+    function toggleTheme() {
+      isDark = !isDark;
+      document.documentElement.classList.toggle('light', !isDark);
+      updateChartColors();
+    }
+
+    function getGridColor() { return isDark ? '#252525' : '#f0f0f0'; }
+    function getTickColor() { return '#737373'; }
+
+    function updateChartColors() {
+      [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+        chart.options.scales.x.grid.color = getGridColor();
+        chart.options.scales.y.grid.color = getGridColor();
+        chart.update('none');
+      });
+    }
+
+    function updateMetricSelection() {
+      selectedMetric = document.getElementById('metric-select').value;
+      if (lastData) update(lastData);
+    }
+
+    function createChartOptions(yUnit = '', chartId = '') {
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: 'nearest', axis: 'x', intersect: true },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}${yUnit}`,
+              title: items => items.length ? `${items[0].parsed.x.toFixed(0)}s` : ''
+            }
+          },
+          zoom: {
+            zoom: {
+              wheel: {
+                enabled: true,
+                modifierKey: 'ctrl'
+              },
+              drag: {
+                enabled: true,
+                backgroundColor: 'rgba(124, 58, 237, 0.1)',
+                borderColor: 'rgba(124, 58, 237, 0.5)',
+                borderWidth: 1
+              },
+              mode: 'x',
+              onZoomComplete: ({chart}) => syncZoom(chart)
+            },
+            pan: {
+              enabled: true,
+              mode: 'x',
+              onPanComplete: ({chart}) => syncZoom(chart)
+            },
+            limits: {
+              x: { min: 0, minRange: 1 }
+            }
+          }
+        },
+        elements: { point: { radius: 0, hitRadius: 5, hoverRadius: 3 }, line: { borderWidth: 2, tension: 0.3 } },
+        scales: {
+          x: {
+            type: 'linear',
+            min: 0,
+            max: chartDuration,
+            grid: { color: getGridColor() },
+            ticks: {
+              color: getTickColor(),
+              font: { family: 'JetBrains Mono', size: 10 },
+              maxTicksLimit: 8,
+              callback: v => Math.round(v) + 's'
+            }
+          },
+          y: {
+            min: 0,
+            suggestedMax: 10,
+            grid: { color: getGridColor() },
+            ticks: {
+              color: getTickColor(),
+              font: { family: 'JetBrains Mono', size: 10 },
+              maxTicksLimit: 6,
+              callback: v => Math.round(v) + yUnit
+            }
+          }
+        }
+      };
+    }
+
+    let isZoomed = false;
+
+    // Calculate Y min/max for visible data points within X range
+    function getVisibleYRange(chart, xMin, xMax) {
+      let yMin = Infinity;
+      let yMax = -Infinity;
+
+      chart.data.datasets.forEach(dataset => {
+        if (dataset.hidden) return;
+        dataset.data.forEach(point => {
+          if (point.x >= xMin && point.x <= xMax) {
+            if (point.y < yMin) yMin = point.y;
+            if (point.y > yMax) yMax = point.y;
+          }
+        });
+      });
+
+      if (yMin === Infinity) return null;
+
+      // Add 10% padding
+      const padding = (yMax - yMin) * 0.1 || 1;
+      return { min: Math.max(0, yMin - padding), max: yMax + padding };
+    }
+
+    function syncZoom(sourceChart) {
+      const xMin = sourceChart.scales.x.min;
+      const xMax = sourceChart.scales.x.max;
+
+      // Only consider zoomed if not showing full extent
+      const atFullExtent = xMin <= 0.1 && xMax >= chartDuration - 0.1;
+      if (atFullExtent) {
+        isZoomed = false;
+        document.querySelectorAll('.reset-zoom').forEach(btn => btn.classList.remove('visible'));
+        return;
+      }
+
+      isZoomed = true;
+      document.querySelectorAll('.reset-zoom').forEach(btn => btn.classList.add('visible'));
+
+      // Sync X axis to all charts first
+      [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+        if (chart !== sourceChart) {
+          chart.options.scales.x.min = xMin;
+          chart.options.scales.x.max = xMax;
+        }
+      });
+
+      // Defer Y axis recalculation to ensure zoom plugin has finished
+      setTimeout(() => {
+        [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+          const yRange = getVisibleYRange(chart, xMin, xMax);
+          if (yRange) {
+            chart.options.scales.y.min = yRange.min;
+            chart.options.scales.y.max = yRange.max;
+          }
+          chart.update('none');
+        });
+      }, 0);
+    }
+
+    function resetZoom() {
+      isZoomed = false;
+      [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+        // Don't use chart.resetZoom() as it can be unreliable
+        // Instead, explicitly reset all scale options
+        chart.options.scales.x.min = 0;
+        chart.options.scales.x.max = chartDuration;
+        // Reset Y axis to auto-scale based on full dataset
+        chart.options.scales.y.min = 0;
+        chart.options.scales.y.max = getYMax(chart.data.datasets);
+        // Force scales to update by triggering a full update
+        chart.update('resize');
+      });
+      document.querySelectorAll('.reset-zoom').forEach(btn => btn.classList.remove('visible'));
+    }
+
+    const latencyChart = new Chart(document.getElementById('latencyChart'), {
+      type: 'line',
+      data: { datasets: [] },
+      options: createChartOptions('ms', 'latency')
+    });
+
+    const cpuChart = new Chart(document.getElementById('cpuChart'), {
+      type: 'line',
+      data: { datasets: [] },
+      options: createChartOptions('%', 'cpu')
+    });
+
+    const memoryChart = new Chart(document.getElementById('memoryChart'), {
+      type: 'line',
+      data: { datasets: [] },
+      options: {
+        ...createChartOptions('GB', 'memory'),
+        plugins: {
+          ...createChartOptions('GB', 'memory').plugins,
+          tooltip: {
+            callbacks: {
+              label: ctx => `${ctx.dataset.label}: ${(ctx.parsed.y / 1e9).toFixed(2)}GB`,
+              title: items => items.length ? `${items[0].parsed.x.toFixed(0)}s` : ''
+            }
+          }
+        },
+        scales: {
+          ...createChartOptions().scales,
+          y: {
+            min: 0,
+            suggestedMax: 1e9,
+            grid: { color: getGridColor() },
+            ticks: {
+              color: getTickColor(),
+              font: { family: 'JetBrains Mono', size: 10 },
+              maxTicksLimit: 6,
+              callback: v => Math.round(v / 1e9 * 10) / 10 + 'GB'
+            }
+          }
+        }
+      }
+    });
+
+    const ingestChart = new Chart(document.getElementById('ingestChart'), {
+      type: 'line',
+      data: { datasets: [] },
+      options: {
+        ...createChartOptions('/s', 'ingest'),
+        plugins: {
+          ...createChartOptions('/s', 'ingest').plugins,
+          tooltip: {
+            callbacks: {
+              label: ctx => `${ctx.dataset.label}: ${formatNumber(ctx.parsed.y)}/s`,
+              title: items => items.length ? `${items[0].parsed.x.toFixed(0)}s` : ''
+            }
+          }
+        },
+        scales: {
+          ...createChartOptions().scales,
+          y: {
+            min: 0,
+            grid: { color: getGridColor() },
+            ticks: {
+              color: getTickColor(),
+              font: { family: 'JetBrains Mono', size: 10 },
+              maxTicksLimit: 6,
+              callback: v => formatNumber(Math.round(v)) + '/s'
+            }
+          }
+        }
+      }
+    });
+
+    // Add double-click to reset zoom on all charts
+    ['latencyChart', 'cpuChart', 'memoryChart', 'ingestChart'].forEach(id => {
+      document.getElementById(id).addEventListener('dblclick', resetZoom);
+    });
+
+    function getYMax(datasets) {
+      let max = 0;
+      datasets.forEach(ds => ds.data.forEach(p => { if (p.y > max) max = p.y; }));
+      return max > 0 ? max * 1.2 : 10;
+    }
+
+    // Update Y axis based on zoom state
+    function updateChartYAxis(chart) {
+      if (isZoomed) {
+        // When zoomed, recalculate Y range for visible data
+        const xMin = chart.options.scales.x.min;
+        const xMax = chart.options.scales.x.max;
+        const yRange = getVisibleYRange(chart, xMin, xMax);
+        if (yRange) {
+          chart.options.scales.y.min = yRange.min;
+          chart.options.scales.y.max = yRange.max;
+        }
+      } else {
+        // When not zoomed, auto-scale to full dataset
+        chart.options.scales.y.min = 0;
+        chart.options.scales.y.max = getYMax(chart.data.datasets);
+      }
+    }
+
+    // Update chart datasets in place to preserve hover state
+    function updateChartDatasets(chart, newDatasets, forceReplace = false) {
+      const existingLabels = new Set(chart.data.datasets.map(ds => ds.label));
+      const newLabels = new Set(newDatasets.map(ds => ds.label));
+
+      // Update existing datasets
+      chart.data.datasets.forEach(ds => {
+        const newDs = newDatasets.find(n => n.label === ds.label);
+        if (newDs) {
+          if (forceReplace) {
+            // Full replace when metric changes
+            ds.data.length = 0;
+            newDs.data.forEach(pt => ds.data.push(pt));
+          } else {
+            // Only push new points to preserve hover state
+            const lastTime = ds.data.length > 0 ? ds.data[ds.data.length - 1].x : 0;
+            newDs.data.forEach(pt => {
+              if (pt.x > lastTime) {
+                ds.data.push(pt);
+              }
+            });
+          }
+          ds.borderColor = newDs.borderColor;
+        }
+      });
+
+      // Add new datasets
+      newDatasets.forEach(ds => {
+        if (!existingLabels.has(ds.label)) {
+          chart.data.datasets.push(ds);
+        }
+      });
+
+      // Remove datasets that no longer exist (in place)
+      for (let i = chart.data.datasets.length - 1; i >= 0; i--) {
+        if (!newLabels.has(chart.data.datasets[i].label)) {
+          chart.data.datasets.splice(i, 1);
+        }
+      }
+    }
+
+    function formatElapsed(seconds) {
+      const m = Math.floor(seconds / 60);
+      const s = Math.floor(seconds % 60);
+      return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+
+    function formatNumber(n) {
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+      return Math.floor(n).toString();
+    }
+
+    function hasQueryTimelines(run) {
+      return Object.values(run.queries || {}).some(q => q.timeline?.length > 0);
+    }
+
+    function updateStats(runs) {
+      const container = document.getElementById('stats-container');
+      // Only show runs with query data
+      const runNames = Object.keys(runs).filter(name => hasQueryTimelines(runs[name])).sort();
+
+      runNames.forEach((name, idx) => {
+        const run = runs[name];
+        const color = getRunColor(name);
+
+        // Store config if available
+        if (run.config && Object.keys(run.config).length > 0) {
+          runConfigs[name] = run.config;
+        }
+
+        let el = document.getElementById(`stat-${name}`);
+
+        if (!el) {
+          el = document.createElement('div');
+          el.id = `stat-${name}`;
+          el.className = 'stat-group expanded';
+          el.style.borderLeftColor = color;
+          const hasConfig = run.config && Object.keys(run.config).length > 0;
+          const clickStyle = hasConfig ? 'cursor: pointer; text-decoration: underline; text-decoration-style: dotted;' : '';
+          const clickHandler = hasConfig ? `onclick="showConfigModal('${name}')"` : '';
+
+          // Build limits string
+          let limitsStr = '';
+          if (run.containerLimits) {
+            const parts = [];
+            if (run.containerLimits.cpu_limit) parts.push(run.containerLimits.cpu_limit);
+            if (run.containerLimits.memory_limit) parts.push(run.containerLimits.memory_limit);
+            if (parts.length > 0) limitsStr = `<span style="color: var(--text-dim); font-size: 9px; margin-left: 8px;">${parts.join(' / ')}</span>`;
+          }
+
+          el.innerHTML = `
+            <div class="stat-group-header">
+              <div class="stat-group-label" style="color: ${color}; ${clickStyle}" ${clickHandler}>${name}</div>${limitsStr}
+            </div>
+            <div class="query-details" id="${name}-queries"></div>
+          `;
+          container.appendChild(el);
+        }
+
+        // Update query details - only create if not exists, then just update values
+        const queriesEl = document.getElementById(`${name}-queries`);
+        const queries = run.queries || {};
+        const queryNames = Object.keys(queries).sort();
+
+        queryNames.forEach(qName => {
+          const q = queries[qName];
+          const queryId = `${name}-${qName}`.replace(/[^a-zA-Z0-9]/g, '_');
+          let queryEl = document.getElementById(queryId);
+
+          // Store query text if available
+          if (q.query) {
+            queryTexts[qName] = q.query;
+          }
+
+          if (!queryEl) {
+            // Create new query item
+            queryEl = document.createElement('div');
+            queryEl.id = queryId;
+            queryEl.className = 'query-item';
+            queryEl.dataset.query = qName;
+            queryEl.innerHTML = `
+              <div class="query-header">
+                <div class="query-name">${qName}</div>
+              </div>
+              <div class="query-stats">
+                <div><div class="query-stat-value" id="${queryId}-qps">0</div><div class="query-stat-label">QPS</div></div>
+                <div><div class="query-stat-value" id="${queryId}-min">0</div><div class="query-stat-label">Min</div></div>
+                <div><div class="query-stat-value" id="${queryId}-p50">0</div><div class="query-stat-label">P50</div></div>
+                <div><div class="query-stat-value" id="${queryId}-p95">0</div><div class="query-stat-label">P95</div></div>
+                <div><div class="query-stat-value" id="${queryId}-p99">0</div><div class="query-stat-label">P99</div></div>
+                <div><div class="query-stat-value" id="${queryId}-max">0</div><div class="query-stat-label">Max</div></div>
+              </div>
+            `;
+            queryEl.addEventListener('mouseenter', () => showQueryTooltip(qName));
+            queryEl.addEventListener('mouseleave', hideQueryTooltip);
+            queriesEl.appendChild(queryEl);
+          }
+
+          // Update values only
+          document.getElementById(`${queryId}-qps`).textContent = Math.floor(q.qps || 0);
+          document.getElementById(`${queryId}-min`).textContent = q.min.toFixed(1);
+          document.getElementById(`${queryId}-p50`).textContent = q.p50.toFixed(1);
+          document.getElementById(`${queryId}-p95`).textContent = q.p95.toFixed(1);
+          document.getElementById(`${queryId}-p99`).textContent = q.p99.toFixed(1);
+          document.getElementById(`${queryId}-max`).textContent = q.max.toFixed(1);
+        });
+      });
+    }
+
+    let lastLegendKey = '';
+    function updateLegend(runs) {
+      const legend = document.getElementById('latency-legend');
+      const runNames = Object.keys(runs).filter(name => hasQueryTimelines(runs[name])).sort();
+
+      // Build a key to detect if legend structure changed
+      const queryList = [];
+      runNames.forEach(name => {
+        const queries = runs[name].queries || {};
+        Object.keys(queries).sort().forEach(qName => queryList.push(qName));
+      });
+      const legendKey = queryList.join(',') + '|' + Array.from(selectedQueries).sort().join(',');
+
+      // Only rebuild if structure changed
+      if (legendKey === lastLegendKey) return;
+      lastLegendKey = legendKey;
+
+      const items = [];
+      runNames.forEach(name => {
+        const run = runs[name];
+        const baseColor = getRunColor(name);
+        const queries = run.queries || {};
+        const queryNames = Object.keys(queries).sort();
+
+        queryNames.forEach((qName, idx) => {
+          const color = idx === 0 ? baseColor : shadeColor(baseColor, idx * 15);
+          const isEnabled = selectedQueries.has(qName);
+          const disabledClass = isEnabled ? '' : ' disabled';
+          items.push(`<div class="legend-item${disabledClass}" data-query="${qName}" onclick="toggleQueryFilter('${qName}', event)" title="Click to toggle, Shift+click to isolate"><div class="legend-color" style="background: ${color}"></div> ${qName}</div>`);
+        });
+      });
+      legend.innerHTML = items.join('');
+    }
+
+    function updateQueryFilters(runs) {
+      // Collect all query names across all runs
+      const queryNames = new Set();
+      Object.values(runs).forEach(run => {
+        Object.keys(run.queries || {}).forEach(qName => {
+          queryNames.add(qName);
+        });
+      });
+
+      // Initialize selectedQueries with all queries when first discovered
+      queryNames.forEach(qn => {
+        if (!allQueryTypes.has(qn)) {
+          selectedQueries.add(qn);
+        }
+      });
+      allQueryTypes = queryNames;
+    }
+
+    function showQueryTooltip(qName) {
+      const tooltip = document.getElementById('query-tooltip');
+      const queryText = queryTexts[qName];
+      if (queryText) {
+        tooltip.textContent = queryText;
+        tooltip.classList.add('visible');
+      }
+    }
+
+    function hideQueryTooltip() {
+      const tooltip = document.getElementById('query-tooltip');
+      tooltip.classList.remove('visible');
+    }
+
+    function showConfigModal(runName) {
+      const config = runConfigs[runName];
+      if (!config || Object.keys(config).length === 0) {
+        return; // No config available
+      }
+
+      document.getElementById('config-modal-title').textContent = runName;
+
+      // Separate config into tabs
+      const tableSchema = config.table_schema;
+      const indexes = config.indexes;
+      const indexMappings = config.index_mappings;
+      const indexSettings = config.index_settings;
+
+      // Build tabs
+      let tabsHtml = '<div class="config-tabs">';
+      tabsHtml += '<button class="config-tab active" onclick="switchConfigTab(\'config\')">Config</button>';
+      if (tableSchema || indexMappings) {
+        tabsHtml += '<button class="config-tab" onclick="switchConfigTab(\'schema\')">Schema</button>';
+      }
+      if (indexes || indexSettings) {
+        tabsHtml += '<button class="config-tab" onclick="switchConfigTab(\'indexes\')">Indexes</button>';
+      }
+      tabsHtml += '</div>';
+
+      // Helper to format config values
+      function formatConfigValue(val) {
+        if (val === null || val === undefined) return '-';
+        if (typeof val === 'object') return JSON.stringify(val);
+        return String(val);
+      }
+
+      // Config tab content
+      let configHtml = '<div id="tab-config" class="config-tab-content active">';
+      for (const [section, value] of Object.entries(config)) {
+        // Skip schema/index sections - they have their own tabs
+        if (['table_schema', 'indexes', 'index_mappings', 'index_settings'].includes(section)) continue;
+
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+          configHtml += `<div class="config-section">
+            <div class="config-section-title">${section}</div>`;
+          for (const [key, val] of Object.entries(value)) {
+            configHtml += `<div class="config-item">
+              <span class="config-key">${key}</span>
+              <span class="config-value">${formatConfigValue(val)}</span>
+            </div>`;
+          }
+          configHtml += '</div>';
+        } else if (!Array.isArray(value)) {
+          configHtml += `<div class="config-item">
+            <span class="config-key">${section}</span>
+            <span class="config-value">${formatConfigValue(value)}</span>
+          </div>`;
+        }
+      }
+      configHtml += '</div>';
+
+      // Schema tab content
+      let schemaHtml = '<div id="tab-schema" class="config-tab-content">';
+      if (tableSchema) {
+        schemaHtml += '<div class="config-section-title">Table: documents</div>';
+        schemaHtml += '<table class="schema-table"><thead><tr><th>Column</th><th>Type</th><th>Nullable</th></tr></thead><tbody>';
+        for (const col of tableSchema) {
+          schemaHtml += `<tr><td>${col.name}</td><td>${col.type}</td><td>${col.nullable}</td></tr>`;
+        }
+        schemaHtml += '</tbody></table>';
+      }
+      if (indexMappings) {
+        schemaHtml += '<div class="config-section-title" style="margin-top: 16px;">Index Mappings</div>';
+        if (indexMappings.properties) {
+          schemaHtml += '<table class="schema-table"><thead><tr><th>Field</th><th>Type</th></tr></thead><tbody>';
+          for (const [field, props] of Object.entries(indexMappings.properties)) {
+            const type = props.type || 'object';
+            schemaHtml += `<tr><td>${field}</td><td>${type}</td></tr>`;
+          }
+          schemaHtml += '</tbody></table>';
+        }
+      }
+      schemaHtml += '</div>';
+
+      // Indexes tab content
+      let indexesHtml = '<div id="tab-indexes" class="config-tab-content">';
+      if (indexes) {
+        indexesHtml += '<div class="config-section-title">Indexes</div>';
+        for (const idx of indexes) {
+          indexesHtml += `<div class="index-name">${idx.name}</div>`;
+          indexesHtml += `<div class="index-def">${idx.definition}</div>`;
+        }
+      }
+      if (indexSettings) {
+        indexesHtml += '<div class="config-section-title" style="margin-top: 16px;">Index Settings</div>';
+        for (const [key, val] of Object.entries(indexSettings)) {
+          indexesHtml += `<div class="config-item">
+            <span class="config-key">${key}</span>
+            <span class="config-value">${val}</span>
+          </div>`;
+        }
+      }
+      indexesHtml += '</div>';
+
+      document.getElementById('config-modal-content').innerHTML = tabsHtml + configHtml + schemaHtml + indexesHtml;
+      document.getElementById('modal-backdrop').classList.add('visible');
+      document.getElementById('config-modal').classList.add('visible');
+    }
+
+    function switchConfigTab(tabName) {
+      // Update tab buttons
+      document.querySelectorAll('.config-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent.toLowerCase() === tabName);
+      });
+      // Update tab content
+      document.querySelectorAll('.config-tab-content').forEach(content => {
+        content.classList.toggle('active', content.id === 'tab-' + tabName);
+      });
+    }
+
+    function hideConfigModal() {
+      document.getElementById('modal-backdrop').classList.remove('visible');
+      document.getElementById('config-modal').classList.remove('visible');
+    }
+
+    function toggleQueryFilter(queryName, event) {
+      if (event && event.shiftKey) {
+        // Shift+click: isolate this query (show only this one)
+        if (selectedQueries.size === 1 && selectedQueries.has(queryName)) {
+          // Already isolated - restore all
+          allQueryTypes.forEach(q => selectedQueries.add(q));
+        } else {
+          // Isolate this query
+          selectedQueries.clear();
+          selectedQueries.add(queryName);
+        }
+      } else {
+        // Regular click: toggle visibility
+        if (selectedQueries.has(queryName)) {
+          selectedQueries.delete(queryName);
+        } else {
+          selectedQueries.add(queryName);
+        }
+      }
+      // Re-render chart with updated filters
+      if (lastData) {
+        update(lastData);
+      }
+      // Recalculate Y axis if zoomed
+      if (isZoomed) {
+        setTimeout(() => {
+          [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+            const xMin = chart.options.scales.x.min;
+            const xMax = chart.options.scales.x.max;
+            const yRange = getVisibleYRange(chart, xMin, xMax);
+            if (yRange) {
+              chart.options.scales.y.min = yRange.min;
+              chart.options.scales.y.max = yRange.max;
+            }
+            chart.update('none');
+          });
+        }, 0);
+      }
+    }
+
+    function mergeQueryTimelines(run, selectedQueries) {
+      const queries = run.queries || {};
+      const matchingTimelines = [];
+
+      Object.entries(queries).forEach(([qName, qData]) => {
+        if (selectedQueries.has(qName) && qData.timeline?.length > 0) {
+          matchingTimelines.push(qData.timeline);
+        }
+      });
+
+      if (matchingTimelines.length === 0) return [];
+      if (matchingTimelines.length === 1) return matchingTimelines[0];
+
+      // Merge multiple timelines by time - average all percentile values
+      const merged = [];
+      const byTime = {};
+      matchingTimelines.forEach(timeline => {
+        timeline.forEach(p => {
+          if (!byTime[p.time]) byTime[p.time] = [];
+          byTime[p.time].push(p);
+        });
+      });
+
+      Object.entries(byTime).sort((a, b) => a[0] - b[0]).forEach(([time, points]) => {
+        const totalCount = points.reduce((sum, p) => sum + p.count, 0);
+        if (totalCount === 0) return;
+        // Weight percentiles by sample count for accurate aggregation
+        const weightedP50 = points.reduce((sum, p) => sum + (p.p50 || 0) * p.count, 0) / totalCount;
+        const weightedP90 = points.reduce((sum, p) => sum + (p.p90 || 0) * p.count, 0) / totalCount;
+        const weightedP95 = points.reduce((sum, p) => sum + (p.p95 || 0) * p.count, 0) / totalCount;
+        const weightedP99 = points.reduce((sum, p) => sum + (p.p99 || 0) * p.count, 0) / totalCount;
+        merged.push({ time: parseInt(time), p50: weightedP50, p90: weightedP90, p95: weightedP95, p99: weightedP99, count: totalCount });
+      });
+
+      return merged;
+    }
+
+    function update(data) {
+      // Store for filter updates
+      lastData = data;
+
+      // Detect restart: elapsed time went backwards
+      if (data.elapsed < lastElapsed - 1) {
+        resetState();
+      }
+      lastElapsed = data.elapsed;
+
+      // Update chart duration from server
+      if (data.chartDuration && data.chartDuration > chartDuration) {
+        chartDuration = data.chartDuration;
+        // Only auto-scroll when not zoomed
+        if (!isZoomed) {
+          [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+            chart.options.scales.x.min = 0;
+            chart.options.scales.x.max = chartDuration;
+          });
+        }
+      }
+
+      document.getElementById('elapsed').textContent = formatElapsed(data.elapsed);
+
+      const runs = data.runs || {};
+      // Only show runs with query timeline data
+      const runNames = Object.keys(runs).filter(name => hasQueryTimelines(runs[name])).sort();
+
+      updateQueryFilters(runs);  // Initialize selected queries first
+      updateStats(runs);
+      updateLegend(runs);
+
+      // Update latency chart - show separate line per query
+      const datasets = [];
+      runNames.forEach(name => {
+        const run = runs[name];
+        const baseColor = getRunColor(name);
+        const queries = run.queries || {};
+        const queryNames = Object.keys(queries).filter(qn => selectedQueries.has(qn));
+
+        // Set start time from first query timeline if not set
+        if (!runStartTimes[name]) {
+          for (const qName of Object.keys(queries)) {
+            if (queries[qName].timeline?.length > 0) {
+              runStartTimes[name] = queries[qName].timeline[0].time;
+              break;
+            }
+          }
+        }
+        const startTime = runStartTimes[name] || 0;
+
+        if (queryNames.length === 0 && Object.keys(queries).length === 0) {
+          // No query breakdown available, skip this run
+        } else {
+          // Show each selected query as separate line
+          queryNames.forEach((qName, idx) => {
+            const q = queries[qName];
+            // Slightly vary color for multiple queries in same run
+            const color = idx === 0 ? baseColor : shadeColor(baseColor, idx * 15);
+            datasets.push({
+              label: qName,
+              borderColor: color,
+              data: (q.timeline || []).map(p => ({
+                x: (p.time - startTime) / 1000,
+                y: p[selectedMetric]
+              }))
+            });
+          });
+        }
+      });
+      const metricChanged = selectedMetric !== lastMetric;
+      lastMetric = selectedMetric;
+      updateChartDatasets(latencyChart, datasets, metricChanged);
+      updateChartYAxis(latencyChart);
+      latencyChart.update('none');
+
+      // Update CPU chart
+      const cpuDatasets = runNames.map(name => {
+        const run = runs[name];
+        const color = getRunColor(name);
+        const startTime = runStartTimes[name] || 0;
+        return {
+          label: name,
+          borderColor: color,
+          data: (run.cpu || [])
+            .filter(p => p.time >= startTime)
+            .map(p => ({
+              x: (p.time - startTime) / 1000,
+              y: p.value
+            }))
+        };
+      });
+      updateChartDatasets(cpuChart, cpuDatasets);
+      updateChartYAxis(cpuChart);
+      cpuChart.update('none');
+
+      // Update memory chart
+      const memoryDatasets = runNames.map(name => {
+        const run = runs[name];
+        const color = getRunColor(name);
+        const startTime = runStartTimes[name] || 0;
+        return {
+          label: name,
+          borderColor: color,
+          data: (run.memory || [])
+            .filter(p => p.time >= startTime)
+            .map(p => ({
+              x: (p.time - startTime) / 1000,
+              y: p.value
+            }))
+        };
+      });
+      updateChartDatasets(memoryChart, memoryDatasets);
+      updateChartYAxis(memoryChart);
+      memoryChart.update('none');
+
+      // Update ingest chart (only if any run has ingest data)
+      const runsWithIngest = runNames.filter(name => runs[name].totalIngested > 0);
+      if (runsWithIngest.length > 0) {
+        document.getElementById('ingest-container').style.display = 'grid';
+        document.getElementById('ingest-legend').innerHTML = runsWithIngest.map(name => {
+          const color = getRunColor(name);
+          return `<div class="legend-item"><div class="legend-color" style="background: ${color}"></div> ${name}</div>`;
+        }).join('');
+
+        // Update ingest stats
+        const ingestStatsContainer = document.getElementById('ingest-stats-container');
+        runsWithIngest.forEach(name => {
+          const run = runs[name];
+          const color = getRunColor(name);
+          let el = document.getElementById(`ingest-stat-${name}`);
+          if (!el) {
+            el = document.createElement('div');
+            el.id = `ingest-stat-${name}`;
+            el.className = 'stat-group';
+            el.style.borderLeftColor = color;
+            el.innerHTML = `
+              <div class="stat-group-header">
+                <div class="stat-group-label" style="color: ${color}">${name}</div>
+              </div>
+              <div class="stats" style="grid-template-columns: 1fr 1fr;">
+                <div class="stat"><div class="stat-value" id="ingest-${name}-total">0</div><div class="stat-label">Total</div></div>
+                <div class="stat"><div class="stat-value" id="ingest-${name}-rate">0</div><div class="stat-label">Rate/s</div></div>
+              </div>
+            `;
+            ingestStatsContainer.appendChild(el);
+          }
+          document.getElementById(`ingest-${name}-total`).textContent = formatNumber(run.totalIngested);
+          document.getElementById(`ingest-${name}-rate`).textContent = formatNumber(Math.floor(run.avgIngestRate || 0));
+        });
+
+        const ingestDatasets = runsWithIngest.map(name => {
+          const run = runs[name];
+          const color = getRunColor(name);
+          const startTime = runStartTimes[name] || (run.ingestRate?.[0]?.time || 0);
+          if (!runStartTimes[name] && run.ingestRate?.length > 0) {
+            runStartTimes[name] = run.ingestRate[0].time;
+          }
+          return {
+            label: name,
+            borderColor: color,
+            data: (run.ingestRate || []).map(p => ({
+              x: (p.time - startTime) / 1000,
+              y: p.value
+            }))
+          };
+        });
+        updateChartDatasets(ingestChart, ingestDatasets);
+        updateChartYAxis(ingestChart);
+        ingestChart.update('none');
+      }
+    }
+
+    const events = new EventSource('/events');
+    events.onmessage = (e) => {
+      try { update(JSON.parse(e.data)); } catch (err) { console.error(err); }
+    };
+
+    // Force charts to resize when window resizes
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+          chart.resize();
+        });
+      }, 100);
+    });
+
+    // Close modal on escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        hideConfigModal();
+      }
+    });
+  </script>
+</body>
+</html>

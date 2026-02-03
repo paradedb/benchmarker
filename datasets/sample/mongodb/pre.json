@@ -1,0 +1,5 @@
+{
+  "database": "benchmark",
+  "collection": "documents",
+  "drop": true
+}

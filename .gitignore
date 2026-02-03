@@ -1,0 +1,19 @@
+# Data files
+dashboard*.json
+
+# Datasets - only include sample (everything in it)
+datasets/*
+!datasets/sample
+
+# Build outputs
+*.exe
+k6
+bin/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store

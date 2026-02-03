@@ -1,0 +1,6 @@
+id,title,content
+550e8400-e29b-41d4-a716-446655440001,Introduction to Search,Full-text search is a technique for searching natural language documents.
+550e8400-e29b-41d4-a716-446655440002,Database Indexing,Indexes improve query performance by reducing the number of rows to scan.
+550e8400-e29b-41d4-a716-446655440003,Text Analysis,Tokenization breaks text into individual terms for indexing and searching.
+550e8400-e29b-41d4-a716-446655440004,Relevance Scoring,BM25 is a ranking function used to estimate relevance of documents to a query.
+550e8400-e29b-41d4-a716-446655440005,Inverted Indexes,An inverted index maps terms to the documents containing them.
