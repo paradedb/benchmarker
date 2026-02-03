@@ -19,11 +19,11 @@ Compare search performance across **ParadeDB**, **PostgreSQL FTS**, ****, **Elas
 ### 1. Start the backends
 
 ```bash
-# Start all backends
-docker compose --profile all up -d
+# Start the backends you need
+docker compose --profile paradedb up -d
 
-# Or just the ones you need
-docker compose --profile paradedb --profile elasticsearch up -d
+# Or just all of them 
+docker compose --profile all up -d
 ```
 
 ### 2. Build
@@ -47,7 +47,7 @@ make loader # Build the loader CLI
 ### 4. Run a benchmark
 
 ```bash
-./k6 run --out dashboard datasets/sample/simple.js
+./k6 run --out dashboard datasets/sample/k6/simple.js
 ```
 
 Open http://localhost:5665 to see real-time results.
