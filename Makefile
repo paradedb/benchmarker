@@ -12,7 +12,7 @@ build: k6 loader
 # Build k6 with the search extension
 k6: $(XK6)
 	@echo "Building k6 with xk6-search extension..."
-	$(XK6) build --with github.com/jamesblackwood-sewell/xk6-search=.
+	$(XK6) build --with github.com/paradedb/benchmarker=.
 	@echo "Done: ./k6"
 
 $(XK6):

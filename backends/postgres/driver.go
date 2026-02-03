@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jamesblackwood-sewell/xk6-search/backends"
-	"github.com/jamesblackwood-sewell/xk6-search/metrics"
+	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/metrics"
 )
 
 func init() {

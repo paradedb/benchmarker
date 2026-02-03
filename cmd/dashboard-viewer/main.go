@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jamesblackwood-sewell/xk6-search/dashboard"
+	"github.com/paradedb/benchmarker/dashboard"
 )
 
 func main() {
