@@ -3,12 +3,12 @@ package search
 import (
 	"context"
 
-	"github.com/jamesblackwood-sewell/xk6-search/backends"
-	"github.com/jamesblackwood-sewell/xk6-search/backends/clickhouse"
-	"github.com/jamesblackwood-sewell/xk6-search/backends/elasticsearch"
-	"github.com/jamesblackwood-sewell/xk6-search/backends/mongodb"
-	"github.com/jamesblackwood-sewell/xk6-search/backends/postgres"
-	"github.com/jamesblackwood-sewell/xk6-search/metrics"
+	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/backends/clickhouse"
+	"github.com/paradedb/benchmarker/backends/elasticsearch"
+	"github.com/paradedb/benchmarker/backends/mongodb"
+	"github.com/paradedb/benchmarker/backends/postgres"
+	"github.com/paradedb/benchmarker/metrics"
 	"go.k6.io/k6/js/modules"
 )
 

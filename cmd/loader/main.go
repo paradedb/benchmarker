@@ -20,8 +20,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	_ "github.com/jamesblackwood-sewell/xk6-search" // triggers backend init() via backends.go imports
-	"github.com/jamesblackwood-sewell/xk6-search/backends"
+	_ "github.com/paradedb/benchmarker" // triggers backend init() via backends.go imports
+	"github.com/paradedb/benchmarker/backends"
 	"gopkg.in/yaml.v3"
 )
 

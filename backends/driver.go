@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jamesblackwood-sewell/xk6-search/metrics"
+	"github.com/paradedb/benchmarker/metrics"
 	"go.k6.io/k6/js/modules"
 )
 

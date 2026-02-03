@@ -1,4 +1,4 @@
-module github.com/jamesblackwood-sewell/xk6-search
+module github.com/paradedb/benchmarker
 
 go 1.24.5
 
@@ -7,7 +7,6 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.41.1
 	github.com/aws/aws-sdk-go-v2/config v1.32.7
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.0
-	github.com/elastic/go-elasticsearch/v8 v8.19.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.8.0
 	go.k6.io/k6 v1.5.0
@@ -36,7 +35,6 @@ require (
 	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
-	github.com/elastic/elastic-transport-go/v8 v8.8.0 // indirect
 	github.com/evanw/esbuild v0.25.10 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/go-faster/city v1.0.1 // indirect

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jamesblackwood-sewell/xk6-search/backends"
-	"github.com/jamesblackwood-sewell/xk6-search/metrics"
+	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/metrics"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"

@@ -2,9 +2,9 @@
 package search
 
 import (
-	_ "github.com/jamesblackwood-sewell/xk6-search/dashboard"
-	"github.com/jamesblackwood-sewell/xk6-search/loader"
-	"github.com/jamesblackwood-sewell/xk6-search/metrics"
+	_ "github.com/paradedb/benchmarker/dashboard"
+	"github.com/paradedb/benchmarker/loader"
+	"github.com/paradedb/benchmarker/metrics"
 	"go.k6.io/k6/js/modules"
 )
 

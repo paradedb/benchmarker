@@ -9,8 +9,8 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
-	"github.com/jamesblackwood-sewell/xk6-search/backends"
-	"github.com/jamesblackwood-sewell/xk6-search/metrics"
+	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/metrics"
 )
 
 func init() {
