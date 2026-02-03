@@ -47,7 +47,7 @@ make loader # Build the loader CLI
 ### 4. Run a benchmark
 
 ```bash
-./k6 run --out dashboard examples/benchmark.js
+./k6 run --out dashboard datasets/sample/simple.js
 ```
 
 Open http://localhost:5665 to see real-time results.
