@@ -1,4 +1,4 @@
-# xk6-search
+# ParadeDB Benchmarker (xk6-search)
 
 A k6 extension for benchmarking full-text search backends with a unified API, real-time dashboard, and comprehensive data loading tools.
 
