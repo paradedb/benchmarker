@@ -1,0 +1,9 @@
+{
+  "index": "documents",
+  "max_num_segments": 1,
+  "settings": {
+    "index": {
+      "refresh_interval": "1s"
+    }
+  }
+}
