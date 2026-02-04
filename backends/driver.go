@@ -248,6 +248,9 @@ func (c *K6Client) Close() {
 
 // convertValue converts a raw CSV string value to the appropriate Go type based on schema type.
 func convertValue(rawValue, schemaType string) any {
+	// Strip null bytes (invalid in PostgreSQL text)
+	rawValue = strings.ReplaceAll(rawValue, "\x00", "")
+
 	// Handle empty strings as NULL for most types
 	if rawValue == "" {
 		return nil
