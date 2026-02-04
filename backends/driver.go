@@ -295,8 +295,19 @@ func convertValue(rawValue, schemaType string) any {
 		return arr
 
 	case "timestamp", "timestamptz":
-		// Return as string, let pgx parse it
-		return rawValue
+		// Try common timestamp formats
+		formats := []string{
+			"2006-01-02 15:04:05",
+			"2006-01-02T15:04:05Z",
+			"2006-01-02T15:04:05-07:00",
+			"2006-01-02",
+		}
+		for _, format := range formats {
+			if t, err := time.Parse(format, rawValue); err == nil {
+				return t
+			}
+		}
+		return nil // Unparseable timestamp
 
 	default:
 		// text, varchar, etc - return as-is
