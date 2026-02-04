@@ -4,10 +4,12 @@ package backends
 import (
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -163,13 +165,24 @@ func NewK6Client(vu modules.VU, driver Driver, backend string) *K6Client {
 // Search executes a query and emits metrics.
 func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
 	ctx := context.Background()
-	metrics.CaptureQueryPattern(c.vu, strings.TrimSpace(query))
+
+	// Capture query pattern - for ES/OS style queries (index, queryObj), serialize the query object
+	queryPattern := strings.TrimSpace(query)
+	if len(args) > 0 {
+		if queryMap, ok := args[0].(map[string]interface{}); ok {
+			if jsonBytes, err := json.Marshal(queryMap); err == nil {
+				queryPattern = string(jsonBytes)
+			}
+		}
+	}
+	metrics.CaptureQueryPattern(c.vu, queryPattern)
 
 	start := time.Now()
 	hits, err := c.driver.Query(ctx, query, args...)
 	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
 
 	if err != nil {
+		fmt.Printf("[%s] search error: %v\n", c.backend, err)
 		return map[string]interface{}{
 			"hits":      0,
 			"latencyMs": latencyMs,
@@ -210,6 +223,7 @@ func (c *K6Client) InsertBatch(table string, docs []map[string]interface{}) map[
 	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
 
 	if err != nil {
+		fmt.Printf("[%s] insert error: %v\n", c.backend, err)
 		return map[string]interface{}{
 			"rows":      0,
 			"latencyMs": latencyMs,
@@ -230,6 +244,64 @@ func (c *K6Client) Insert(table string, doc map[string]interface{}) map[string]i
 // Close closes the underlying driver.
 func (c *K6Client) Close() {
 	c.driver.Close()
+}
+
+// convertValue converts a raw CSV string value to the appropriate Go type based on schema type.
+func convertValue(rawValue, schemaType string) any {
+	// Handle empty strings as NULL for most types
+	if rawValue == "" {
+		return nil
+	}
+
+	schemaType = strings.ToLower(schemaType)
+
+	switch schemaType {
+	case "bigint", "int8":
+		v, err := strconv.ParseInt(rawValue, 10, 64)
+		if err != nil {
+			return nil
+		}
+		return v
+
+	case "integer", "int", "int4":
+		v, err := strconv.ParseInt(rawValue, 10, 32)
+		if err != nil {
+			return nil
+		}
+		return int32(v)
+
+	case "boolean", "bool":
+		return rawValue == "true" || rawValue == "t" || rawValue == "1"
+
+	case "bigint[]", "int8[]":
+		var arr []int64
+		if err := json.Unmarshal([]byte(rawValue), &arr); err != nil {
+			return []int64{} // Return empty array on parse error
+		}
+		return arr
+
+	case "integer[]", "int[]", "int4[]":
+		var arr []int32
+		if err := json.Unmarshal([]byte(rawValue), &arr); err != nil {
+			return []int32{}
+		}
+		return arr
+
+	case "text[]", "varchar[]":
+		var arr []string
+		if err := json.Unmarshal([]byte(rawValue), &arr); err != nil {
+			return []string{}
+		}
+		return arr
+
+	case "timestamp", "timestamptz":
+		// Return as string, let pgx parse it
+		return rawValue
+
+	default:
+		// text, varchar, etc - return as-is
+		return rawValue
+	}
 }
 
 // CLILoader wraps a Driver for CLI bulk loading.
@@ -343,7 +415,7 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, csvPath string, ba
 
 		row := make([]any, len(cols))
 		for i, col := range cols {
-			row[i] = record[headerIdx[col]]
+			row[i] = convertValue(record[headerIdx[col]], schema.Columns[col])
 		}
 		batch = append(batch, row)
 

@@ -7,6 +7,7 @@ import (
 	"github.com/paradedb/benchmarker/backends/clickhouse"
 	"github.com/paradedb/benchmarker/backends/elasticsearch"
 	"github.com/paradedb/benchmarker/backends/mongodb"
+	"github.com/paradedb/benchmarker/backends/opensearch"
 	"github.com/paradedb/benchmarker/backends/postgres"
 	"github.com/paradedb/benchmarker/metrics"
 	"go.k6.io/k6/js/modules"
@@ -19,6 +20,7 @@ type Backends struct {
 	PgFTS      *backends.K6Client `js:"postgresFts"`
 	Textsearch *backends.K6Client `js:"textsearch"`
 	Elastic    *backends.K6Client `js:"elasticsearch"`
+	OpenSearch *backends.K6Client `js:"opensearch"`
 	Click      *backends.K6Client `js:"clickhouse"`
 	Mongo      *backends.K6Client `js:"mongodb"`
 	Metrics    *metrics.Collector `js:"metrics"`
@@ -65,6 +67,14 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 				b.Elastic = backends.NewK6Client(m.vu, driver, "elasticsearch")
 				enabledContainers = append(enabledContainers, parseContainer(cfg, containers["elasticsearch"]))
 				driver.CaptureConfig(ctx, "elasticsearch")
+			}
+
+		case "opensearch":
+			conn := parseConn(cfg, defaults["opensearch"])
+			if driver, err := opensearch.New(conn); err == nil {
+				b.OpenSearch = backends.NewK6Client(m.vu, driver, "opensearch")
+				enabledContainers = append(enabledContainers, parseContainer(cfg, containers["opensearch"]))
+				driver.CaptureConfig(ctx, "opensearch")
 			}
 
 		case "clickhouse":
