@@ -26,6 +26,13 @@ loader:
 	go build -o bin/loader ./cmd/loader
 	@echo "Done: ./bin/loader"
 
+# Build the dashboard-viewer CLI
+viewer:
+	@echo "Building dashboard-viewer..."
+	@mkdir -p bin
+	go build -o bin/dashboard-viewer ./cmd/dashboard-viewer
+	@echo "Done: ./bin/dashboard-viewer"
+
 # Run tests
 test:
 	go test -v ./...

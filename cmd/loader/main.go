@@ -26,15 +26,15 @@ import (
 )
 
 func main() {
-	loadCmd := flag.NewFlagSet("load", flag.ExitOnError)
+	loadCmd := flag.NewFlagSet("load", flag.ContinueOnError)
 	loadBackend := loadCmd.String("backend", "", "Specific backend ("+strings.Join(backends.RegisteredBackends(), ", ")+")")
 	loadBatchSize := loadCmd.Int("batch-size", 10000, "Batch size for bulk loading")
 	loadWorkers := loadCmd.Int("workers", 1, "Number of parallel workers")
 
-	dropCmd := flag.NewFlagSet("drop", flag.ExitOnError)
+	dropCmd := flag.NewFlagSet("drop", flag.ContinueOnError)
 	dropBackend := dropCmd.String("backend", "", "Specific backend to drop")
 
-	pullCmd := flag.NewFlagSet("pull", flag.ExitOnError)
+	pullCmd := flag.NewFlagSet("pull", flag.ContinueOnError)
 	pullDataset := pullCmd.String("dataset", "", "Dataset name (creates ./datasets/<name>/)")
 	pullSource := pullCmd.String("source", "", "S3 source URL (s3://bucket/prefix/)")
 	pullAnonymous := pullCmd.Bool("anonymous", false, "Use anonymous access for public buckets")
@@ -45,33 +45,70 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "help", "-h", "--help":
+		printUsage()
+		os.Exit(0)
+
 	case "load":
-		loadCmd.Parse(os.Args[2:])
+		if err := loadCmd.Parse(os.Args[2:]); err != nil {
+			if err == flag.ErrHelp {
+				os.Exit(0)
+			}
+			os.Exit(1)
+		}
 		if loadCmd.NArg() < 1 {
-			fmt.Println("Error: dataset directory required")
+			fmt.Fprintln(os.Stderr, "Error: dataset directory required")
+			fmt.Fprintln(os.Stderr, "Usage: loader load [--backend <name>] <dataset-dir>")
+			os.Exit(1)
+		}
+		if loadCmd.NArg() > 1 {
+			fmt.Fprintf(os.Stderr, "Error: unexpected argument: %s\n", loadCmd.Arg(1))
+			fmt.Fprintln(os.Stderr, "Usage: loader load [--backend <name>] <dataset-dir>")
 			os.Exit(1)
 		}
 		runLoad(loadCmd.Arg(0), *loadBackend, *loadBatchSize, *loadWorkers)
 
 	case "drop":
-		dropCmd.Parse(os.Args[2:])
+		if err := dropCmd.Parse(os.Args[2:]); err != nil {
+			if err == flag.ErrHelp {
+				os.Exit(0)
+			}
+			os.Exit(1)
+		}
 		if dropCmd.NArg() < 1 {
-			fmt.Println("Error: dataset directory required")
+			fmt.Fprintln(os.Stderr, "Error: dataset directory required")
+			fmt.Fprintln(os.Stderr, "Usage: loader drop [--backend <name>] <dataset-dir>")
+			os.Exit(1)
+		}
+		if dropCmd.NArg() > 1 {
+			fmt.Fprintf(os.Stderr, "Error: unexpected argument: %s\n", dropCmd.Arg(1))
+			fmt.Fprintln(os.Stderr, "Usage: loader drop [--backend <name>] <dataset-dir>")
 			os.Exit(1)
 		}
 		runDrop(dropCmd.Arg(0), *dropBackend)
 
 	case "pull":
-		pullCmd.Parse(os.Args[2:])
+		if err := pullCmd.Parse(os.Args[2:]); err != nil {
+			if err == flag.ErrHelp {
+				os.Exit(0)
+			}
+			os.Exit(1)
+		}
+		if pullCmd.NArg() > 0 {
+			fmt.Fprintf(os.Stderr, "Error: unexpected argument: %s\n", pullCmd.Arg(0))
+			fmt.Fprintln(os.Stderr, "Usage: loader pull --dataset <name> --source s3://bucket/prefix/")
+			os.Exit(1)
+		}
 		if *pullDataset == "" || *pullSource == "" {
-			fmt.Println("Error: --dataset and --source are required")
-			fmt.Println("Usage: loader pull --dataset <name> --source s3://bucket/prefix/")
+			fmt.Fprintln(os.Stderr, "Error: --dataset and --source are required")
+			fmt.Fprintln(os.Stderr, "Usage: loader pull --dataset <name> --source s3://bucket/prefix/")
 			os.Exit(1)
 		}
 		runPull(*pullDataset, *pullSource, *pullAnonymous)
 
 	default:
-		printUsage()
+		fmt.Fprintf(os.Stderr, "Error: unknown command: %s\n", os.Args[1])
+		fmt.Fprintln(os.Stderr, "Run 'loader help' for usage")
 		os.Exit(1)
 	}
 }
@@ -83,16 +120,19 @@ Usage:
   loader load [--backend <name>] [--batch-size <n>] [--workers <n>] <dataset-dir>
   loader drop [--backend <name>] <dataset-dir>
   loader pull --dataset <name> --source <s3-url> [--anonymous]
+  loader help
 
 Commands:
   load    Run pre.sql/json, bulk load CSV, run post.sql/json
   drop    Drop tables/indexes for the dataset
   pull    Download dataset from S3 to ./datasets/<name>/
+  help    Show this help message
 
 Backends:
   ` + strings.Join(backends.RegisteredBackends(), ", ") + `
 
 Options:
+  --backend <name>   Load/drop specific backend (default: all backends)
   --batch-size <n>   Rows per batch (default: 10000)
   --workers <n>      Parallel workers (default: 1)
   --dataset <name>   Dataset name for pull command
@@ -104,14 +144,17 @@ Environment Variables:
   POSTGRES_FTS_URL   PostgreSQL FTS connection string
   _URL   connection string
   ELASTICSEARCH_URL  Elasticsearch address
+  OPENSEARCH_URL     OpenSearch address
   CLICKHOUSE_URL     ClickHouse connection string
   MONGODB_URL        MongoDB connection string
   AWS_REGION         AWS region for S3 (default: us-east-1)
   AWS_PROFILE        AWS profile to use for credentials
 
 Examples:
-  loader load ./datasets/sample
+  loader load --backend paradedb ./datasets/sample
   loader load --backend paradedb --workers 4 ./datasets/sample
+  loader load ./datasets/sample                                    # all backends
+  loader drop --backend paradedb ./datasets/sample
   loader pull --dataset large --source s3://mybucket/datasets/large/
   loader pull --dataset test --source s3://fts-bench/datasets/test/ --anonymous
   PARADEDB_URL=postgres://user:pass@host:5432/db loader load --backend paradedb ./datasets/sample`)

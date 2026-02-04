@@ -205,6 +205,18 @@ func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 		if version, ok := result["version"]; ok {
 			config["version"] = version
 		}
+		if bits, ok := result["bits"]; ok {
+			config["bits"] = bits
+		}
+		if allocator, ok := result["allocator"]; ok {
+			config["allocator"] = allocator
+		}
+		if engines, ok := result["storageEngines"].(bson.A); ok && len(engines) > 0 {
+			config["storageEngines"] = engines
+		}
+		if jsEngine, ok := result["javascriptEngine"]; ok {
+			config["javascriptEngine"] = jsEngine
+		}
 	}
 
 	metrics.RegisterBackendConfig(backendName, config)

@@ -35,7 +35,7 @@ type Driver struct {
 func New(address string) (backends.Driver, error) {
 	return &Driver{
 		address: strings.TrimSuffix(address, "/"),
-		client:  &http.Client{Timeout: 60 * time.Second},
+		client:  &http.Client{Timeout: 5 * time.Minute},
 	}, nil
 }
 
@@ -70,6 +70,9 @@ func (d *Driver) createIndex(ctx context.Context, index string, config map[strin
 	// Delete existing index
 	req, _ := http.NewRequestWithContext(ctx, "DELETE", fmt.Sprintf("%s/%s", d.address, index), nil)
 	d.client.Do(req)
+
+	// Remove "index" key before sending - it's only used for routing
+	delete(config, "index")
 
 	// Create with settings
 	body, _ := json.Marshal(config)
@@ -208,14 +211,25 @@ func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 	config := make(map[string]interface{})
 
 	resp, err := d.client.Get(d.address)
-	if err == nil && resp.StatusCode == 200 {
+	if err != nil {
+		fmt.Printf("[%s] config capture failed: %v\n", backendName, err)
+	} else if resp.StatusCode == 200 {
 		defer resp.Body.Close()
 		var info map[string]interface{}
 		if json.NewDecoder(resp.Body).Decode(&info) == nil {
+			if clusterName, ok := info["cluster_name"].(string); ok {
+				config["cluster_name"] = clusterName
+			}
 			if version, ok := info["version"].(map[string]interface{}); ok {
 				config["version"] = version["number"]
+				config["build_flavor"] = version["build_flavor"]
+				config["build_type"] = version["build_type"]
+				config["lucene_version"] = version["lucene_version"]
 			}
 		}
+	} else {
+		resp.Body.Close()
+		fmt.Printf("[%s] config capture failed: HTTP %d\n", backendName, resp.StatusCode)
 	}
 
 	metrics.RegisterBackendConfig(backendName, config)

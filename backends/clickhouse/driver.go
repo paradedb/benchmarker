@@ -136,5 +136,24 @@ func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 		config["version"] = version
 	}
 
+	// Capture key settings
+	rows, err := d.conn.Query(ctx, `
+		SELECT name, value FROM system.settings
+		WHERE name IN ('max_threads', 'max_memory_usage', 'max_block_size', 'max_insert_threads')
+	`)
+	if err == nil {
+		defer rows.Close()
+		settings := make(map[string]string)
+		for rows.Next() {
+			var name, value string
+			if rows.Scan(&name, &value) == nil {
+				settings[name] = value
+			}
+		}
+		if len(settings) > 0 {
+			config["settings"] = settings
+		}
+	}
+
 	metrics.RegisterBackendConfig(backendName, config)
 }
