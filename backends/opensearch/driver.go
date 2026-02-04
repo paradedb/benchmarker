@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -28,19 +29,34 @@ func init() {
 
 // Driver implements the backends.Driver interface for OpenSearch.
 type Driver struct {
-	address string
-	client  *http.Client
+	address      string
+	client       *http.Client
+	requestCache bool // whether to use request cache (default false)
 }
 
 // New creates a new OpenSearch driver.
+// Supports URL query params: ?request_cache=true
 func New(address string) (backends.Driver, error) {
+	requestCache := false
+
+	// Parse URL to extract settings
+	if u, err := url.Parse(address); err == nil {
+		if u.Query().Get("request_cache") == "true" {
+			requestCache = true
+		}
+		// Remove query params from address
+		u.RawQuery = ""
+		address = u.String()
+	}
+
 	// OpenSearch often uses self-signed certs in dev
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	return &Driver{
-		address: strings.TrimSuffix(address, "/"),
-		client:  &http.Client{Timeout: 5 * time.Minute, Transport: transport},
+		address:      strings.TrimSuffix(address, "/"),
+		client:       &http.Client{Timeout: 5 * time.Minute, Transport: transport},
+		requestCache: requestCache,
 	}, nil
 }
 
@@ -143,7 +159,7 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 
 	jsonBody, _ := json.Marshal(body)
 	req, _ := http.NewRequestWithContext(ctx, "POST",
-		fmt.Sprintf("%s/%s/_search", d.address, index), bytes.NewReader(jsonBody))
+		fmt.Sprintf("%s/%s/_search?request_cache=%t", d.address, index, d.requestCache), bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := d.client.Do(req)
