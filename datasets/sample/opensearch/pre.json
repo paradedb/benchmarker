@@ -1,0 +1,15 @@
+{
+  "index": "documents",
+  "mappings": {
+    "properties": {
+      "id": { "type": "keyword" },
+      "title": { "type": "text", "analyzer": "english" },
+      "content": { "type": "text", "analyzer": "english" }
+    }
+  },
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "refresh_interval": "-1"
+  }
+}
