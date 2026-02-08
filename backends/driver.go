@@ -151,15 +151,28 @@ type DriverFactory func(connString string) (Driver, error)
 
 // K6Client wraps a Driver with k6 metrics emission.
 type K6Client struct {
-	driver  Driver
-	vu      modules.VU
-	backend string
+	driver    Driver
+	vu        modules.VU
+	backend   string
+	container string
+	alias     string
+}
+
+// K6ClientOptions configures a K6Client.
+type K6ClientOptions struct {
+	Container string
+	Alias     string
 }
 
 // NewK6Client creates a k6 client that wraps a driver.
-func NewK6Client(vu modules.VU, driver Driver, backend string) *K6Client {
+func NewK6Client(vu modules.VU, driver Driver, backend string, opts ...K6ClientOptions) *K6Client {
 	metrics.RegisterMetrics(vu)
-	return &K6Client{driver: driver, vu: vu, backend: backend}
+	c := &K6Client{driver: driver, vu: vu, backend: backend}
+	if len(opts) > 0 {
+		c.container = opts[0].Container
+		c.alias = opts[0].Alias
+	}
+	return c
 }
 
 // Search executes a query and emits metrics.
@@ -191,7 +204,7 @@ func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
 	}
 
 	result := &metrics.SearchResult{Hits: int64(hits), LatencyMs: latencyMs}
-	result.Emit(ctx, c.vu, c.backend)
+	result.Emit(ctx, c.vu, c.backend, metrics.EmitOptions{Container: c.container, Alias: c.alias})
 	return result.ToMap()
 }
 
@@ -232,7 +245,7 @@ func (c *K6Client) InsertBatch(table string, docs []map[string]interface{}) map[
 	}
 
 	result := &metrics.IngestResult{Rows: count, LatencyMs: latencyMs}
-	result.Emit(ctx, c.vu, c.backend)
+	result.Emit(ctx, c.vu, c.backend, metrics.EmitOptions{Container: c.container, Alias: c.alias})
 	return result.ToMap()
 }
 

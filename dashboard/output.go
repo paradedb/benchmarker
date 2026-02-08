@@ -51,7 +51,8 @@ type DashboardData struct {
 type RunMetrics struct {
 	Name           string                   `json:"name"`
 	Backend        string                   `json:"backend"`   // Backend type: paradedb, elasticsearch, clickhouse, mongodb, etc.
-	Container      string                   `json:"container"`
+	Container      string                   `json:"container"` // Docker container name for resource metrics
+	Alias          string                   `json:"alias"`     // User-defined alias for this backend instance
 	Latencies      []float64                `json:"latencies"`
 	Timeline       []TimelinePoint          `json:"timeline"`
 	CPU            []TimeValue              `json:"cpu"`
@@ -196,8 +197,11 @@ func (o *Output) flush() {
 
 			switch {
 			case name == "search_duration":
-				// Get run from tags (prefer backend, then run, then scenario)
-				run := tags["backend"]
+				// Get run identifier: prefer alias, then backend, then run, then scenario
+				run := tags["alias"]
+				if run == "" {
+					run = tags["backend"]
+				}
 				if run == "" {
 					run = tags["run"]
 				}
@@ -214,13 +218,20 @@ func (o *Output) flush() {
 						Name:      run,
 						Backend:   tags["backend"],
 						Container: tags["container"],
+						Alias:     tags["alias"],
 						Queries:   make(map[string]*QueryMetrics),
 					}
 				}
-				// Update backend if provided and not yet set
+				// Update backend/container/alias if provided and not yet set
 				rm := o.data.Runs[run]
 				if rm.Backend == "" && tags["backend"] != "" {
 					rm.Backend = tags["backend"]
+				}
+				if rm.Container == "" && tags["container"] != "" {
+					rm.Container = tags["container"]
+				}
+				if rm.Alias == "" && tags["alias"] != "" {
+					rm.Alias = tags["alias"]
 				}
 				rm.Latencies = append(rm.Latencies, value)
 				if rm.StartTime == 0 {
@@ -256,8 +267,11 @@ func (o *Output) flush() {
 				}
 
 			case name == "ingest_docs":
-				// Get run from tags (prefer backend, then run, then scenario)
-				run := tags["backend"]
+				// Get run identifier: prefer alias, then backend, then run, then scenario
+				run := tags["alias"]
+				if run == "" {
+					run = tags["backend"]
+				}
 				if run == "" {
 					run = tags["run"]
 				}
@@ -273,12 +287,19 @@ func (o *Output) flush() {
 						Name:      run,
 						Backend:   tags["backend"],
 						Container: tags["container"],
+						Alias:     tags["alias"],
 						Queries:   make(map[string]*QueryMetrics),
 					}
 				}
 				rm := o.data.Runs[run]
 				if rm.Backend == "" && tags["backend"] != "" {
 					rm.Backend = tags["backend"]
+				}
+				if rm.Container == "" && tags["container"] != "" {
+					rm.Container = tags["container"]
+				}
+				if rm.Alias == "" && tags["alias"] != "" {
+					rm.Alias = tags["alias"]
 				}
 				rm.TotalIngested += int64(value)
 				if rm.StartTime == 0 {
@@ -373,7 +394,12 @@ func (o *Output) findActiveRunForContainer(container string) *RunMetrics {
 			continue
 		}
 
-		// Match using backend tag
+		// First, try exact match on container name (handles custom containers and aliases)
+		if rm.Container == container {
+			return rm
+		}
+
+		// Fall back to matching container name against backend type
 		if rm.Backend != "" && containerMatchesBackend(container, rm.Backend) {
 			if rm.Container == "" {
 				rm.Container = container
@@ -554,12 +580,13 @@ func (o *Output) getSummary() map[string]interface{} {
 		}
 
 		// Add database config based on backend tag
-		config, containerLimits := getBackendConfig(rm.Backend)
+		config, containerLimits := getBackendConfig(rm.Backend, rm.Container)
 
 		runs[name] = map[string]interface{}{
 			"name":            rm.Name,
 			"backend":         rm.Backend,
 			"container":       rm.Container,
+			"alias":           rm.Alias,
 			"cpu":             rm.CPU,
 			"memory":          rm.Memory,
 			"ingestRate":      rm.IngestRate,
@@ -688,11 +715,18 @@ func getQueryPattern(qName string) string {
 }
 
 // getBackendConfig returns the database config and container limits for a backend type.
-func getBackendConfig(backend string) (map[string]interface{}, map[string]interface{}) {
+// Container limits are looked up by container name, not backend name.
+func getBackendConfig(backend, container string) (map[string]interface{}, map[string]interface{}) {
 	if backend == "" {
 		return nil, nil
 	}
-	return metrics.GetBackendConfig(backend), metrics.ContainerLimits[backend]
+	// Look up limits by container name (which may be alias or custom container name)
+	limits := metrics.ContainerLimits[container]
+	if limits == nil && container != backend {
+		// Fall back to backend name for backwards compatibility
+		limits = metrics.ContainerLimits[backend]
+	}
+	return metrics.GetBackendConfig(backend), limits
 }
 
 // ServeFile starts a server to view a saved dashboard JSON file.

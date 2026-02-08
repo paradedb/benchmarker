@@ -4,13 +4,15 @@ import (
 	"context"
 
 	"github.com/paradedb/benchmarker/backends"
-	"github.com/paradedb/benchmarker/backends/clickhouse"
-	"github.com/paradedb/benchmarker/backends/elasticsearch"
-	"github.com/paradedb/benchmarker/backends/mongodb"
-	"github.com/paradedb/benchmarker/backends/opensearch"
-	"github.com/paradedb/benchmarker/backends/postgres"
 	"github.com/paradedb/benchmarker/metrics"
 	"go.k6.io/k6/js/modules"
+
+	// Import backends to register them via init()
+	_ "github.com/paradedb/benchmarker/backends/clickhouse"
+	_ "github.com/paradedb/benchmarker/backends/elasticsearch"
+	_ "github.com/paradedb/benchmarker/backends/mongodb"
+	_ "github.com/paradedb/benchmarker/backends/opensearch"
+	_ "github.com/paradedb/benchmarker/backends/postgres"
 )
 
 // Backends holds all configured backend clients.
@@ -36,62 +38,36 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	containers := backends.DefaultContainers()
 
 	for name, cfg := range config {
+		alias := parseAlias(cfg)
+		container := parseContainer(cfg, containers[name], alias)
+		opts := backends.K6ClientOptions{Container: container, Alias: alias}
+		conn := parseConn(cfg, defaults[name])
+
+		driver, err := backends.NewDriver(name, conn)
+		if err != nil {
+			continue
+		}
+
+		client := backends.NewK6Client(m.vu, driver, name, opts)
+		enabledContainers = append(enabledContainers, container)
+		driver.CaptureConfig(ctx, name)
+
+		// Assign to named fields for JS API compatibility
 		switch name {
 		case "paradedb":
-			conn := parseConn(cfg, defaults["paradedb"])
-			if driver, err := postgres.New(conn); err == nil {
-				b.Paradedb = backends.NewK6Client(m.vu, driver, "paradedb")
-				enabledContainers = append(enabledContainers, parseContainer(cfg, containers["paradedb"]))
-				driver.CaptureConfig(ctx, "paradedb")
-			}
-
+			b.Paradedb = client
 		case "postgres-fts":
-			conn := parseConn(cfg, defaults["postgres-fts"])
-			if driver, err := postgres.New(conn); err == nil {
-				b.PgFTS = backends.NewK6Client(m.vu, driver, "postgres-fts")
-				enabledContainers = append(enabledContainers, parseContainer(cfg, containers["postgres-fts"]))
-				driver.CaptureConfig(ctx, "postgres-fts")
-			}
-
+			b.PgFTS = client
 		case "pg-textsearch":
-			conn := parseConn(cfg, defaults["pg-textsearch"])
-			if driver, err := postgres.New(conn); err == nil {
-				b.Textsearch = backends.NewK6Client(m.vu, driver, "pg-textsearch")
-				enabledContainers = append(enabledContainers, parseContainer(cfg, containers["pg-textsearch"]))
-				driver.CaptureConfig(ctx, "pg-textsearch")
-			}
-
+			b.Textsearch = client
 		case "elasticsearch":
-			conn := parseConn(cfg, defaults["elasticsearch"])
-			if driver, err := elasticsearch.New(conn); err == nil {
-				b.Elastic = backends.NewK6Client(m.vu, driver, "elasticsearch")
-				enabledContainers = append(enabledContainers, parseContainer(cfg, containers["elasticsearch"]))
-				driver.CaptureConfig(ctx, "elasticsearch")
-			}
-
+			b.Elastic = client
 		case "opensearch":
-			conn := parseConn(cfg, defaults["opensearch"])
-			if driver, err := opensearch.New(conn); err == nil {
-				b.OpenSearch = backends.NewK6Client(m.vu, driver, "opensearch")
-				enabledContainers = append(enabledContainers, parseContainer(cfg, containers["opensearch"]))
-				driver.CaptureConfig(ctx, "opensearch")
-			}
-
+			b.OpenSearch = client
 		case "clickhouse":
-			conn := parseConn(cfg, defaults["clickhouse"])
-			if driver, err := clickhouse.New(conn); err == nil {
-				b.Click = backends.NewK6Client(m.vu, driver, "clickhouse")
-				enabledContainers = append(enabledContainers, parseContainer(cfg, containers["clickhouse"]))
-				driver.CaptureConfig(ctx, "clickhouse")
-			}
-
+			b.Click = client
 		case "mongodb":
-			conn := parseConn(cfg, defaults["mongodb"])
-			if driver, err := mongodb.New(conn); err == nil {
-				b.Mongo = backends.NewK6Client(m.vu, driver, "mongodb")
-				enabledContainers = append(enabledContainers, parseContainer(cfg, containers["mongodb"]))
-				driver.CaptureConfig(ctx, "mongodb")
-			}
+			b.Mongo = client
 		}
 	}
 
@@ -133,13 +109,28 @@ func parseConn(cfg interface{}, defaultConn string) string {
 }
 
 // parseContainer extracts container name from config, or returns default.
-func parseContainer(cfg interface{}, defaultContainer string) string {
+// If alias is provided and container is not, container defaults to alias.
+func parseContainer(cfg interface{}, defaultContainer string, alias string) string {
 	if m, ok := cfg.(map[string]interface{}); ok {
 		if c, ok := m["container"].(string); ok {
 			return c
 		}
 	}
+	// Default container to alias if alias is set
+	if alias != "" {
+		return alias
+	}
 	return defaultContainer
+}
+
+// parseAlias extracts alias name from config.
+func parseAlias(cfg interface{}) string {
+	if m, ok := cfg.(map[string]interface{}); ok {
+		if a, ok := m["alias"].(string); ok {
+			return a
+		}
+	}
+	return ""
 }
 
 // Collect collects metrics from all enabled containers.

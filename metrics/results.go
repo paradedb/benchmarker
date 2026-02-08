@@ -69,8 +69,14 @@ type SearchResult struct {
 	Error     string
 }
 
+// EmitOptions contains optional tags for metric emission.
+type EmitOptions struct {
+	Container string
+	Alias     string
+}
+
 // Emit pushes search metrics to k6 with the backend tag.
-func (r *SearchResult) Emit(ctx context.Context, vu modules.VU, backend string) {
+func (r *SearchResult) Emit(ctx context.Context, vu modules.VU, backend string, opts ...EmitOptions) {
 	if r.Error != "" {
 		return // Don't emit metrics on error
 	}
@@ -84,6 +90,16 @@ func (r *SearchResult) Emit(ctx context.Context, vu modules.VU, backend string) 
 	tags := state.Tags.GetCurrentValues().Tags
 	if backend != "" {
 		tags = tags.With("backend", backend)
+	}
+
+	// Add container and alias tags if provided
+	if len(opts) > 0 {
+		if opts[0].Container != "" {
+			tags = tags.With("container", opts[0].Container)
+		}
+		if opts[0].Alias != "" {
+			tags = tags.With("alias", opts[0].Alias)
+		}
 	}
 
 	metrics.PushIfNotDone(ctx, state.Samples, metrics.Sample{
@@ -118,7 +134,7 @@ type IngestResult struct {
 }
 
 // Emit pushes ingest metrics to k6 with the backend tag.
-func (r *IngestResult) Emit(ctx context.Context, vu modules.VU, backend string) {
+func (r *IngestResult) Emit(ctx context.Context, vu modules.VU, backend string, opts ...EmitOptions) {
 	if r.Error != "" {
 		return // Don't emit metrics on error
 	}
@@ -132,6 +148,16 @@ func (r *IngestResult) Emit(ctx context.Context, vu modules.VU, backend string) 
 	tags := state.Tags.GetCurrentValues().Tags
 	if backend != "" {
 		tags = tags.With("backend", backend)
+	}
+
+	// Add container and alias tags if provided
+	if len(opts) > 0 {
+		if opts[0].Container != "" {
+			tags = tags.With("container", opts[0].Container)
+		}
+		if opts[0].Alias != "" {
+			tags = tags.With("alias", opts[0].Alias)
+		}
 	}
 
 	metrics.PushIfNotDone(ctx, state.Samples, metrics.Sample{
