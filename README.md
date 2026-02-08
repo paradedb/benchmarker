@@ -424,7 +424,7 @@ Without Docker, you lose container CPU/memory metrics in the dashboard, but ever
 
 ### Local Development with Docker
 
-The included `docker-compose.yml` provides all backends with optimized settings. Each backend has its own profile so you only start what you need.
+The included `docker-compose.yml` file applies optimized settings to all backends. Each backend has its own profile so you only start what you need.
 
 | Service | Profile | Port | Description |
 |---------|---------|------|-------------|
@@ -506,4 +506,4 @@ k6-search/
 
 ## License
 
-MIT
+MIT License - see [LICENSE](LICENSE) for details.
