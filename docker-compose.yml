@@ -1,7 +1,7 @@
 services:
   paradedb:
     profiles: [paradedb, all]
-    image: paradedb/paradedb:latest-pg17
+    image: paradedb/paradedb:v0.21.6-pg18
     container_name: paradedb
     privileged: true
     cap_add:
@@ -15,7 +15,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - paradedb_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -68,7 +68,7 @@ services:
 
   postgres-fts:
     profiles: [postgres-fts, all]
-    image: postgres:17
+    image: postgres:18
     container_name: postgres-fts
     environment:
       POSTGRES_USER: postgres
@@ -262,7 +262,7 @@ services:
 
   clickhouse:
     profiles: [clickhouse, all]
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:25.12
     container_name: clickhouse
     environment:
       - CLICKHOUSE_DB=benchmark
@@ -308,7 +308,7 @@ services:
           memory: 4G
 
 volumes:
-  postgres_data:
+  paradedb_data:
   postgres_fts_data:
   pg_textsearch_data:
   es_data:

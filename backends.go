@@ -17,15 +17,15 @@ import (
 
 // Backends holds all configured backend clients.
 type Backends struct {
-	vu         modules.VU
-	Paradedb   *backends.K6Client `js:"paradedb"`
-	PgFTS      *backends.K6Client `js:"postgresFts"`
-	Textsearch *backends.K6Client `js:"textsearch"`
-	Elastic    *backends.K6Client `js:"elasticsearch"`
-	OpenSearch *backends.K6Client `js:"opensearch"`
-	Click      *backends.K6Client `js:"clickhouse"`
-	Mongo      *backends.K6Client `js:"mongodb"`
-	Metrics    *metrics.Collector `js:"metrics"`
+	vu            modules.VU
+	ParadeDB      *backends.K6Client `js:"paradedb"`
+	PostgresFts   *backends.K6Client `js:"postgresfts"`
+	PgTextsearch  *backends.K6Client `js:"textsearch"`
+	Elasticsearch *backends.K6Client `js:"elasticsearch"`
+	OpenSearch    *backends.K6Client `js:"opensearch"`
+	Clickhouse    *backends.K6Client `js:"clickhouse"`
+	MongoDB       *backends.K6Client `js:"mongodb"`
+	Metrics       *metrics.Collector `js:"metrics"`
 }
 
 // newBackends creates a new backends registry with the specified configuration.
@@ -55,19 +55,19 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 		// Assign to named fields for JS API compatibility
 		switch name {
 		case "paradedb":
-			b.Paradedb = client
+			b.ParadeDB = client
 		case "postgres-fts":
-			b.PgFTS = client
+			b.PostgresFts = client
 		case "pg-textsearch":
-			b.Textsearch = client
+			b.PgTextsearch = client
 		case "elasticsearch":
-			b.Elastic = client
+			b.Elasticsearch = client
 		case "opensearch":
 			b.OpenSearch = client
 		case "clickhouse":
-			b.Click = client
+			b.Clickhouse = client
 		case "mongodb":
-			b.Mongo = client
+			b.MongoDB = client
 		}
 	}
 
