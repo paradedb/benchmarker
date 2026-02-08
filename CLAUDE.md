@@ -17,12 +17,14 @@ make clean        # Remove k6 binary and bin/
 ```
 
 Start backends with Docker Compose profiles:
+
 ```bash
 docker compose --profile paradedb up -d         # Single backend
 docker compose --profile all up -d              # All backends
 ```
 
 Load data and run benchmarks:
+
 ```bash
 ./bin/loader load ./datasets/sample             # Load into all running backends
 ./bin/loader load --backend paradedb ./datasets/sample
@@ -64,6 +66,7 @@ The `Driver` interface is minimal: `Close()`, `Exec()`, `Query()`, `Insert()`, `
 ### Loader
 
 Two modes:
+
 - **CLI** (`cmd/loader/main.go`): Reads `schema.yaml` + `data.csv`, runs backend-specific `pre.sql`/`pre.json`, bulk inserts, then runs `post.sql`/`post.json`. Supports `--batch-size`, `--workers`, and S3 pulls.
 - **k6 module** (`loader/loader.go`): Opens JSONL files with global caching, provides `Next()`, `NextBatch()`, `NextBatchNewIds()` with atomic counters for thread-safe VU pagination.
 

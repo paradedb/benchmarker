@@ -22,7 +22,7 @@ Compare search performance across **ParadeDB**, **PostgreSQL FTS**, **pg_textsea
 # Start the backends you need
 docker compose --profile paradedb up -d
 
-# Or just all of them 
+# Or just all of them
 docker compose --profile all up -d
 ```
 
@@ -33,6 +33,7 @@ make        # Builds both k6 and loader
 ```
 
 Or individually:
+
 ```bash
 make k6     # Build k6 with the extension
 make loader # Build the loader CLI
@@ -89,13 +90,16 @@ Full-text search with BM25 ranking via the `pg_search` extension.
 ```javascript
 const backends = search.backends({ paradedb: true });
 
-backends.paradedb.search(`
+backends.paradedb.search(
+  `
   SELECT id, title, paradedb.score(id) as score
   FROM documents
   WHERE content @@@ $1
   ORDER BY score DESC
   LIMIT 10
-`, 'search term');
+`,
+  "search term",
+);
 ```
 
 ### PostgreSQL FTS
@@ -103,15 +107,18 @@ backends.paradedb.search(`
 Native PostgreSQL full-text search with tsvector/GIN indexes.
 
 ```javascript
-const backends = search.backends({ 'postgres-fts': true });
+const backends = search.backends({ "postgres-fts": true });
 
-backends.postgresFts.search(`
+backends.postgresFts.search(
+  `
   SELECT id, title, ts_rank(tsv, plainto_tsquery('english', $1)) as score
   FROM documents
   WHERE tsv @@ plainto_tsquery('english', $1)
   ORDER BY score DESC
   LIMIT 10
-`, 'search term');
+`,
+  "search term",
+);
 ```
 
 ### pg_textsearch
@@ -119,14 +126,17 @@ backends.postgresFts.search(`
 PostgreSQL with the pg_textsearch extension for BM25 search.
 
 ```javascript
-const backends = search.backends({ 'pg-textsearch': true });
+const backends = search.backends({ "pg-textsearch": true });
 
-backends.textsearch.search(`
+backends.textsearch.search(
+  `
   SELECT id, title, content <@> $1 as score
   FROM documents
   ORDER BY score
   LIMIT 10
-`, 'search term');
+`,
+  "search term",
+);
 ```
 
 ### Elasticsearch
@@ -136,15 +146,15 @@ Full Elasticsearch Query DSL support.
 ```javascript
 const backends = search.backends({
   elasticsearch: {
-    address: 'http://localhost:9200',
-    username: 'elastic',
-    password: 'changeme'
-  }
+    address: "http://localhost:9200",
+    username: "elastic",
+    password: "changeme",
+  },
 });
 
-backends.elastic.search('documents', {
-  query: { match: { content: 'search term' } },
-  size: 10
+backends.elastic.search("documents", {
+  query: { match: { content: "search term" } },
+  size: 10,
 });
 ```
 
@@ -170,10 +180,10 @@ Document search with aggregation pipelines.
 ```javascript
 const backends = search.backends({ mongodb: true });
 
-backends.mongodb.search('documents', {
+backends.mongodb.search("documents", {
   $search: {
-    text: { query: 'search term', path: 'content' }
-  }
+    text: { query: "search term", path: "content" },
+  },
 });
 ```
 
@@ -246,28 +256,28 @@ columns:
 ### Basic Example
 
 ```javascript
-import search from 'k6/x/search';
+import search from "k6/x/search";
 
 const backends = search.backends({
   paradedb: true,
-  elasticsearch: true
+  elasticsearch: true,
 });
 
 export const options = {
   scenarios: {
     paradedb_search: {
-      executor: 'constant-vus',
+      executor: "constant-vus",
       vus: 10,
-      duration: '30s',
-      exec: 'paradedbSearch'
+      duration: "30s",
+      exec: "paradedbSearch",
     },
     elasticsearch_search: {
-      executor: 'constant-vus',
+      executor: "constant-vus",
       vus: 10,
-      duration: '30s',
-      exec: 'elasticsearchSearch'
-    }
-  }
+      duration: "30s",
+      exec: "elasticsearchSearch",
+    },
+  },
 };
 
 export function paradedbSearch() {
@@ -279,9 +289,9 @@ export function paradedbSearch() {
 }
 
 export function elasticsearchSearch() {
-  backends.elastic.search('documents', {
-    query: { match: { content: 'test' } },
-    size: 10
+  backends.elastic.search("documents", {
+    query: { match: { content: "test" } },
+    size: 10,
   });
 }
 ```
@@ -289,32 +299,32 @@ export function elasticsearchSearch() {
 ### With Ingest
 
 ```javascript
-import search from 'k6/x/search';
-import { SharedArray } from 'k6/data';
+import search from "k6/x/search";
+import { SharedArray } from "k6/data";
 
 const backends = search.backends({ paradedb: true });
 const loader = search.loader();
 
-const docs = loader.openDocuments('./data/documents.json');
+const docs = loader.openDocuments("./data/documents.json");
 
 export const options = {
   scenarios: {
     query: {
-      executor: 'constant-vus',
+      executor: "constant-vus",
       vus: 5,
-      duration: '60s',
-      exec: 'queryTest'
+      duration: "60s",
+      exec: "queryTest",
     },
     ingest: {
-      executor: 'constant-arrival-rate',
+      executor: "constant-arrival-rate",
       rate: 10,
-      timeUnit: '1s',
-      duration: '30s',
-      startTime: '30s',
+      timeUnit: "1s",
+      duration: "30s",
+      startTime: "30s",
       preAllocatedVUs: 2,
-      exec: 'ingestTest'
-    }
-  }
+      exec: "ingestTest",
+    },
+  },
 };
 
 export function queryTest() {
@@ -327,7 +337,7 @@ export function queryTest() {
 
 export function ingestTest() {
   const batch = docs.nextBatchNewIds(100);
-  backends.paradedb.insertBatch('documents', batch);
+  backends.paradedb.insertBatch("documents", batch);
 }
 ```
 
@@ -335,22 +345,22 @@ export function ingestTest() {
 
 The extension emits standard k6 metrics with backend tags:
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `search_duration` | Trend | Search latency in milliseconds |
-| `search_hits` | Gauge | Number of results returned |
-| `ingest_duration` | Trend | Insert latency in milliseconds |
-| `ingest_docs` | Counter | Documents inserted |
+| Metric            | Type    | Description                    |
+| ----------------- | ------- | ------------------------------ |
+| `search_duration` | Trend   | Search latency in milliseconds |
+| `search_hits`     | Gauge   | Number of results returned     |
+| `ingest_duration` | Trend   | Insert latency in milliseconds |
+| `ingest_docs`     | Counter | Documents inserted             |
 
 ### Thresholds
 
 ```javascript
 export const options = {
   thresholds: {
-    'search_duration{backend:paradedb}': ['p(95)<50'],
-    'search_duration{backend:elasticsearch}': ['p(95)<50'],
-    'search_hits': ['min>0']
-  }
+    "search_duration{backend:paradedb}": ["p(95)<50"],
+    "search_duration{backend:elasticsearch}": ["p(95)<50"],
+    search_hits: ["min>0"],
+  },
 };
 ```
 
@@ -373,14 +383,14 @@ Or configure in code:
 
 ```javascript
 const backends = search.backends({
-  paradedb: { connection: 'postgres://...' },
+  paradedb: { connection: "postgres://..." },
   elasticsearch: {
-    address: 'https://...',
-    username: 'elastic',
-    password: 'secret'
+    address: "https://...",
+    username: "elastic",
+    password: "secret",
   },
-  clickhouse: { connection: 'clickhouse://...' },
-  mongodb: { connection: 'mongodb://...', database: 'mydb' }
+  clickhouse: { connection: "clickhouse://..." },
+  mongodb: { connection: "mongodb://...", database: "mydb" },
 });
 ```
 
@@ -389,24 +399,24 @@ const backends = search.backends({
 ```javascript
 search.backends({
   paradedb: {
-    connection: 'postgres://...',
+    connection: "postgres://...",
     maxConns: 20,
     minConns: 5,
-    preparedStatements: true
+    preparedStatements: true,
   },
   elasticsearch: {
-    addresses: ['https://node1:9200', 'https://node2:9200'],
-    apiKey: 'base64_api_key'
+    addresses: ["https://node1:9200", "https://node2:9200"],
+    apiKey: "base64_api_key",
   },
   clickhouse: {
-    connection: 'clickhouse://...',
+    connection: "clickhouse://...",
     maxConns: 20,
-    minConns: 5
+    minConns: 5,
   },
   mongodb: {
-    connection: 'mongodb://...',
-    database: 'benchmark'
-  }
+    connection: "mongodb://...",
+    database: "benchmark",
+  },
 });
 ```
 
@@ -426,14 +436,14 @@ Without Docker, you lose container CPU/memory metrics in the dashboard, but ever
 
 The included `docker-compose.yml` file applies optimized settings to all backends. Each backend has its own profile so you only start what you need.
 
-| Service | Profile | Port | Description |
-|---------|---------|------|-------------|
-| paradedb | `paradedb` | 5432 | ParadeDB (PostgreSQL + pg_search) |
-| postgres-fts | `postgres-fts` | 5433 | PostgreSQL 17 with GIN indexes |
-| pg-textsearch | `pg-textsearch` | 5435 | PostgreSQL + pg_textsearch |
-| elasticsearch | `elasticsearch` | 9200 | Elasticsearch 8.17 |
-| clickhouse | `clickhouse` | 9000/8123 | ClickHouse (native/HTTP) |
-| mongodb | `mongodb` | 27017 | MongoDB with Atlas Search |
+| Service       | Profile         | Port      | Description                       |
+| ------------- | --------------- | --------- | --------------------------------- |
+| paradedb      | `paradedb`      | 5432      | ParadeDB (PostgreSQL + pg_search) |
+| postgres-fts  | `postgres-fts`  | 5433      | PostgreSQL 17 with GIN indexes    |
+| pg-textsearch | `pg-textsearch` | 5435      | PostgreSQL + pg_textsearch        |
+| elasticsearch | `elasticsearch` | 9200      | Elasticsearch 8.17                |
+| clickhouse    | `clickhouse`    | 9000/8123 | ClickHouse (native/HTTP)          |
+| mongodb       | `mongodb`       | 27017     | MongoDB with Atlas Search         |
 
 ### Start Services
 
@@ -450,6 +460,7 @@ docker compose --profile all down
 ### Resource Limits
 
 All services configured with:
+
 - **CPU**: 4 cores limit, 2 cores reserved
 - **Memory**: 8GB limit, 4GB reserved
 
@@ -466,6 +477,7 @@ Pull datasets from S3:
 ```
 
 Required AWS configuration:
+
 - `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, or
 - `AWS_PROFILE` for named profiles
 

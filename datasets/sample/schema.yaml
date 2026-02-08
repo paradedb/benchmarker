@@ -5,5 +5,5 @@ columns:
 
 primaryKey: id
 table: documents
-index: documents      # Elasticsearch index name
+index: documents # Elasticsearch index name
 collection: documents # MongoDB collection name
