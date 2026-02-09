@@ -36,9 +36,14 @@ type DocumentReader struct {
 }
 
 // OpenDocuments loads documents from a CSV file.
+// Defaults to "../data.csv" if no path provided.
 // Paths are resolved relative to the k6 script location.
 // The file is loaded once and cached - subsequent calls return the cached reader.
 func (l *Loader) OpenDocuments(filePath string) *DocumentReader {
+	if filePath == "" {
+		filePath = "../data.csv"
+	}
+
 	// Resolve path relative to script location
 	if l.vu != nil {
 		if initEnv := l.vu.InitEnv(); initEnv != nil {
@@ -65,11 +70,9 @@ func (l *Loader) OpenDocuments(filePath string) *DocumentReader {
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		fmt.Printf("[loader] failed to open %s: %v\n", filePath, err)
 		return &DocumentReader{size: 0}
 	}
 	defer file.Close()
-	fmt.Printf("[loader] opened %s\n", filePath)
 
 	csvReader := csv.NewReader(file)
 
@@ -104,7 +107,6 @@ func (l *Loader) OpenDocuments(filePath string) *DocumentReader {
 		size:      len(docs),
 	}
 	documentCache[filePath] = reader
-	fmt.Printf("[loader] loaded %d documents from %s\n", len(docs), filePath)
 	return reader
 }
 
