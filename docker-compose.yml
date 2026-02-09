@@ -127,7 +127,7 @@ services:
   :
     profiles: [, all]
     build:
-      context: ./backends/docker/
+      context: ./backends//docker/
       dockerfile: Dockerfile
     container_name: 
     environment:

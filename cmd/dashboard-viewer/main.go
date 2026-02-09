@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/paradedb/benchmarker/dashboard"
+	"github.com/paradedb/benchmarks/dashboard"
 )
 
 func main() {

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paradedb/benchmarker/backends"
-	"github.com/paradedb/benchmarker/metrics"
+	"github.com/paradedb/benchmarks/backends"
+	"github.com/paradedb/benchmarks/metrics"
 )
 
 func init() {
