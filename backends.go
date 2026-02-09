@@ -3,16 +3,18 @@ package search
 import (
 	"context"
 
-	"github.com/paradedb/benchmarker/backends"
-	"github.com/paradedb/benchmarker/metrics"
+	"github.com/paradedb/benchmarks/backends"
+	"github.com/paradedb/benchmarks/metrics"
 	"go.k6.io/k6/js/modules"
 
 	// Import backends to register them via init()
-	_ "github.com/paradedb/benchmarker/backends/clickhouse"
-	_ "github.com/paradedb/benchmarker/backends/elasticsearch"
-	_ "github.com/paradedb/benchmarker/backends/mongodb"
-	_ "github.com/paradedb/benchmarker/backends/opensearch"
-	_ "github.com/paradedb/benchmarker/backends/postgres"
+	_ "github.com/paradedb/benchmarks/backends/clickhouse"
+	_ "github.com/paradedb/benchmarks/backends/elasticsearch"
+	_ "github.com/paradedb/benchmarks/backends/mongodb"
+	_ "github.com/paradedb/benchmarks/backends/opensearch"
+	_ "github.com/paradedb/benchmarks/backends/paradedb"
+	_ "github.com/paradedb/benchmarks/backends/pgtextsearch"
+	_ "github.com/paradedb/benchmarks/backends/postgresfts"
 )
 
 // Backends holds all configured backend clients.
@@ -34,6 +36,9 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	var enabledContainers []string
 	ctx := context.Background()
 
+	// Extract dataset path from config, or try to auto-detect
+	datasetPath := parseDatasetPath(config)
+
 	defaults := backends.DefaultConnections()
 	containers := backends.DefaultContainers()
 
@@ -42,6 +47,11 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 		container := parseContainer(cfg, containers[name], alias)
 		color := parseColor(cfg)
 		conn := parseConn(cfg, defaults[name])
+
+		backendCfg, ok := backends.GetConfig(name)
+		if !ok {
+			continue
+		}
 
 		driver, err := backends.NewDriver(name, conn)
 		if err != nil {
@@ -58,6 +68,9 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 		client := backends.NewK6Client(m.vu, driver, name)
 		enabledContainers = append(enabledContainers, container)
 		driver.CaptureConfig(ctx, name)
+
+		// Capture pre/post scripts from dataset directory
+		metrics.CapturePrePostScripts(name, datasetPath, backendCfg.FileType)
 
 		// Assign to named fields for JS API compatibility
 		switch name {
@@ -156,4 +169,13 @@ func (b *Backends) Collect() map[string]interface{} {
 		return b.Metrics.Collect()
 	}
 	return nil
+}
+
+// parseDatasetPath extracts dataset path from config.
+// The dataset path is the directory containing schema.yaml and backend subdirectories.
+func parseDatasetPath(config map[string]interface{}) string {
+	if dp, ok := config["datasetPath"].(string); ok {
+		return dp
+	}
+	return ""
 }

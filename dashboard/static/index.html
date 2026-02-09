@@ -1298,10 +1298,9 @@
                   <div><div class="query-stat-value" id="${queryId}-max">0</div><div class="query-stat-label">Max</div></div>
                 </div>
               `;
-                  queryEl.addEventListener("mouseenter", () =>
-                    showQueryTooltip(qName),
+                  queryEl.addEventListener("click", () =>
+                    showQueryModal(qName),
                   );
-                  queryEl.addEventListener("mouseleave", hideQueryTooltip);
                   queriesEl.appendChild(queryEl);
                 }
 
@@ -1408,18 +1407,22 @@
         allQueryTypes = queryNames;
       }
 
-      function showQueryTooltip(qName) {
-        const tooltip = document.getElementById("query-tooltip");
+      function showQueryModal(qName) {
         const queryText = queryTexts[qName];
-        if (queryText) {
-          tooltip.textContent = queryText;
-          tooltip.classList.add("visible");
-        }
+        if (!queryText) return;
+
+        document.getElementById("config-modal-title").textContent = qName;
+        document.getElementById("config-modal-content").innerHTML = `
+          <pre style="white-space: pre-wrap; word-break: break-word; font-size: 11px; margin: 0;">${escapeHtml(queryText)}</pre>
+        `;
+        document.getElementById("modal-backdrop").classList.add("visible");
+        document.getElementById("config-modal").classList.add("visible");
       }
 
-      function hideQueryTooltip() {
-        const tooltip = document.getElementById("query-tooltip");
-        tooltip.classList.remove("visible");
+      function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
       }
 
       function showConfigModal(runName) {
@@ -1431,22 +1434,20 @@
         document.getElementById("config-modal-title").textContent = runName;
 
         // Separate config into tabs
-        const tableSchema = config.table_schema;
-        const indexes = config.indexes;
-        const indexMappings = config.index_mappings;
-        const indexSettings = config.index_settings;
+        const preScript = config.pre_script;
+        const postScript = config.post_script;
 
         // Build tabs
         let tabsHtml = '<div class="config-tabs">';
         tabsHtml +=
           '<button class="config-tab active" onclick="switchConfigTab(\'config\')">Config</button>';
-        if (tableSchema || indexMappings) {
+        if (preScript) {
           tabsHtml +=
-            '<button class="config-tab" onclick="switchConfigTab(\'schema\')">Schema</button>';
+            '<button class="config-tab" onclick="switchConfigTab(\'pre\')">Pre</button>';
         }
-        if (indexes || indexSettings) {
+        if (postScript) {
           tabsHtml +=
-            '<button class="config-tab" onclick="switchConfigTab(\'indexes\')">Indexes</button>';
+            '<button class="config-tab" onclick="switchConfigTab(\'post\')">Post</button>';
         }
         tabsHtml += "</div>";
 
@@ -1461,15 +1462,8 @@
         let configHtml =
           '<div id="tab-config" class="config-tab-content active">';
         for (const [section, value] of Object.entries(config)) {
-          // Skip schema/index sections - they have their own tabs
-          if (
-            [
-              "table_schema",
-              "indexes",
-              "index_mappings",
-              "index_settings",
-            ].includes(section)
-          )
+          // Skip sections that have their own tabs
+          if (["pre_script", "post_script"].includes(section))
             continue;
 
           if (
@@ -1495,58 +1489,22 @@
         }
         configHtml += "</div>";
 
-        // Schema tab content
-        let schemaHtml = '<div id="tab-schema" class="config-tab-content">';
-        if (tableSchema) {
-          schemaHtml +=
-            '<div class="config-section-title">Table: documents</div>';
-          schemaHtml +=
-            '<table class="schema-table"><thead><tr><th>Column</th><th>Type</th><th>Nullable</th></tr></thead><tbody>';
-          for (const col of tableSchema) {
-            schemaHtml += `<tr><td>${col.name}</td><td>${col.type}</td><td>${col.nullable}</td></tr>`;
-          }
-          schemaHtml += "</tbody></table>";
+        // Pre script tab content
+        let preHtml = '<div id="tab-pre" class="config-tab-content">';
+        if (preScript) {
+          preHtml += `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 0; background: var(--bg); padding: 12px; border-radius: 4px;">${escapeHtml(preScript)}</pre>`;
         }
-        if (indexMappings) {
-          schemaHtml +=
-            '<div class="config-section-title" style="margin-top: 16px;">Index Mappings</div>';
-          if (indexMappings.properties) {
-            schemaHtml +=
-              '<table class="schema-table"><thead><tr><th>Field</th><th>Type</th></tr></thead><tbody>';
-            for (const [field, props] of Object.entries(
-              indexMappings.properties,
-            )) {
-              const type = props.type || "object";
-              schemaHtml += `<tr><td>${field}</td><td>${type}</td></tr>`;
-            }
-            schemaHtml += "</tbody></table>";
-          }
-        }
-        schemaHtml += "</div>";
+        preHtml += "</div>";
 
-        // Indexes tab content
-        let indexesHtml = '<div id="tab-indexes" class="config-tab-content">';
-        if (indexes) {
-          indexesHtml += '<div class="config-section-title">Indexes</div>';
-          for (const idx of indexes) {
-            indexesHtml += `<div class="index-name">${idx.name}</div>`;
-            indexesHtml += `<div class="index-def">${idx.definition}</div>`;
-          }
+        // Post script tab content
+        let postHtml = '<div id="tab-post" class="config-tab-content">';
+        if (postScript) {
+          postHtml += `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 0; background: var(--bg); padding: 12px; border-radius: 4px;">${escapeHtml(postScript)}</pre>`;
         }
-        if (indexSettings) {
-          indexesHtml +=
-            '<div class="config-section-title" style="margin-top: 16px;">Index Settings</div>';
-          for (const [key, val] of Object.entries(indexSettings)) {
-            indexesHtml += `<div class="config-item">
-            <span class="config-key">${key}</span>
-            <span class="config-value">${val}</span>
-          </div>`;
-          }
-        }
-        indexesHtml += "</div>";
+        postHtml += "</div>";
 
         document.getElementById("config-modal-content").innerHTML =
-          tabsHtml + configHtml + schemaHtml + indexesHtml;
+          tabsHtml + configHtml + preHtml + postHtml;
         document.getElementById("modal-backdrop").classList.add("visible");
         document.getElementById("config-modal").classList.add("visible");
       }

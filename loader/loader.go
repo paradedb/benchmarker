@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarks/backends"
 	"go.k6.io/k6/js/modules"
 )
 

@@ -8,6 +8,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -55,6 +57,33 @@ func GetBackendConfig(backend string) map[string]interface{} {
 	backendConfigsMu.RLock()
 	defer backendConfigsMu.RUnlock()
 	return backendConfigs[backend]
+}
+
+// CapturePrePostScripts reads pre/post scripts from the dataset directory
+// and adds them to the backend's config. The fileType should be "sql" or "json".
+func CapturePrePostScripts(backend, datasetPath, fileType string) {
+	if datasetPath == "" {
+		return
+	}
+
+	backendConfigsMu.Lock()
+	defer backendConfigsMu.Unlock()
+
+	config := backendConfigs[backend]
+	if config == nil {
+		config = make(map[string]interface{})
+		backendConfigs[backend] = config
+	}
+
+	preFile := filepath.Join(datasetPath, backend, "pre."+fileType)
+	if data, err := os.ReadFile(preFile); err == nil {
+		config["pre_script"] = string(data)
+	}
+
+	postFile := filepath.Join(datasetPath, backend, "post."+fileType)
+	if data, err := os.ReadFile(postFile); err == nil {
+		config["post_script"] = string(data)
+	}
 }
 
 // RegisterBackendOptions stores user-specified options for a backend.

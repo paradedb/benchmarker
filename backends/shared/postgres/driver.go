@@ -1,4 +1,6 @@
-// Package postgres provides the PostgreSQL/ParadeDB driver implementation.
+// Package postgres provides the shared PostgreSQL driver implementation.
+// Individual PostgreSQL-based backends (paradedb, postgresfts, pgtextsearch)
+// import this package and register themselves separately.
 package postgres
 
 import (
@@ -8,38 +10,15 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/paradedb/benchmarker/backends"
-	"github.com/paradedb/benchmarker/metrics"
+	"github.com/paradedb/benchmarks/backends"
+	"github.com/paradedb/benchmarks/metrics"
 )
-
-func init() {
-	backends.Register("paradedb", backends.BackendConfig{
-		Factory:     New,
-		FileType:    "sql",
-		EnvVar:      "PARADEDB_URL",
-		DefaultConn: "postgres://postgres:postgres@localhost:5432/benchmark",
-		Container:   "paradedb",
-	})
-	backends.Register("postgres-fts", backends.BackendConfig{
-		Factory:     New,
-		FileType:    "sql",
-		EnvVar:      "POSTGRES_FTS_URL",
-		DefaultConn: "postgres://postgres:postgres@localhost:5433/benchmark",
-		Container:   "postgres-fts",
-	})
-	backends.Register("pg-textsearch", backends.BackendConfig{
-		Factory:     New,
-		FileType:    "sql",
-		EnvVar:      "PG_TEXTSEARCH_URL",
-		DefaultConn: "postgres://postgres:postgres@localhost:5435/benchmark",
-		Container:   "pg-textsearch",
-	})
-}
 
 // Driver implements the backends.Driver interface for PostgreSQL.
 type Driver struct {
 	pool       *pgxpool.Pool
 	connString string
+	extraGUCs  []string // Additional GUCs to capture (e.g., "paradedb.xxx")
 }
 
 // New creates a new PostgreSQL driver.
@@ -70,6 +49,17 @@ func (d *Driver) Close() error {
 		d.pool.Close()
 	}
 	return nil
+}
+
+// Pool returns the underlying connection pool for custom queries.
+func (d *Driver) Pool() *pgxpool.Pool {
+	return d.pool
+}
+
+// SetExtraGUCs sets additional GUCs to capture in CaptureConfig.
+// GUCs are grouped by prefix (e.g., "paradedb.xxx" -> "paradedb" section).
+func (d *Driver) SetExtraGUCs(gucs []string) {
+	d.extraGUCs = gucs
 }
 
 // Exec executes SQL statements separated by semicolons.
@@ -128,31 +118,52 @@ func (d *Driver) Insert(ctx context.Context, table string, cols []string, rows [
 func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 	config := make(map[string]interface{})
 
-	settings := []string{
+	// Base PostgreSQL settings
+	baseSettings := []string{
 		"shared_buffers", "work_mem", "effective_cache_size",
 		"random_page_cost", "max_connections", "max_parallel_workers",
 	}
+
+	// Combine base + extra GUCs
+	allSettings := append(baseSettings, d.extraGUCs...)
 
 	rows, err := d.pool.Query(ctx, `
 		SELECT name, setting, unit
 		FROM pg_settings
 		WHERE name = ANY($1)
-	`, settings)
+	`, allSettings)
 	if err == nil {
 		defer rows.Close()
 		pgSettings := make(map[string]string)
+		extraByPrefix := make(map[string]map[string]string)
+
 		for rows.Next() {
 			var name, setting string
 			var unit *string
 			if rows.Scan(&name, &setting, &unit) == nil {
+				value := setting
 				if unit != nil && *unit != "" {
-					pgSettings[name] = setting + *unit
+					value = setting + *unit
+				}
+
+				// Check if this is an extra GUC (has a dot prefix like "paradedb.xxx")
+				if idx := strings.Index(name, "."); idx > 0 {
+					prefix := name[:idx]
+					if extraByPrefix[prefix] == nil {
+						extraByPrefix[prefix] = make(map[string]string)
+					}
+					extraByPrefix[prefix][name] = value
 				} else {
-					pgSettings[name] = setting
+					pgSettings[name] = value
 				}
 			}
 		}
 		config["postgresql"] = pgSettings
+
+		// Add extra GUC sections
+		for prefix, settings := range extraByPrefix {
+			config[prefix] = settings
+		}
 	}
 
 	var version string
