@@ -68,7 +68,7 @@ import exec from "k6/execution";
 
 // 1. Configure backends
 const backends = search.backends({
-  datasetPath: "../",  // Path to dataset directory (for pre/post script capture)
+  datasetPath: "../", // Path to dataset directory (for pre/post script capture)
   backends: ["paradedb", "elasticsearch"],
 });
 
@@ -110,10 +110,12 @@ export function collectMetrics() {
 // 6. Execute search queries
 export function searchQuery() {
   const term = getTerm();
-  backends.get("paradedb").search(
-    `SELECT id, title FROM documents WHERE content @@@ $1 LIMIT 10`,
-    term
-  );
+  backends
+    .get("paradedb")
+    .search(
+      `SELECT id, title FROM documents WHERE content @@@ $1 LIMIT 10`,
+      term,
+    );
 }
 ```
 
@@ -145,28 +147,28 @@ backends.get("elasticsearch").search(...);
 
 ### Available Backend Types
 
-| Type            | Description                        | Connection Env Var    |
-| --------------- | ---------------------------------- | --------------------- |
-| `paradedb`      | ParadeDB with pg_search (BM25)     | `PARADEDB_URL`        |
-| `postgresfts`  | PostgreSQL native FTS              | `POSTGRES_FTS_URL`    |
-| `pgtextsearch` | PostgreSQL with pg_textsearch      | `PG_TEXTSEARCH_URL`   |
-| `elasticsearch` | Elasticsearch                      | `ELASTICSEARCH_URL`   |
-| `opensearch`    | OpenSearch                         | `OPENSEARCH_URL`      |
-| `clickhouse`    | ClickHouse                         | `CLICKHOUSE_URL`      |
-| `mongodb`       | MongoDB with Atlas Search          | `MONGODB_URL`         |
+| Type            | Description                    | Connection Env Var  |
+| --------------- | ------------------------------ | ------------------- |
+| `paradedb`      | ParadeDB with pg_search (BM25) | `PARADEDB_URL`      |
+| `postgresfts`   | PostgreSQL native FTS          | `POSTGRES_FTS_URL`  |
+| `pgtextsearch`  | PostgreSQL with pg_textsearch  | `PG_TEXTSEARCH_URL` |
+| `elasticsearch` | Elasticsearch                  | `ELASTICSEARCH_URL` |
+| `opensearch`    | OpenSearch                     | `OPENSEARCH_URL`    |
+| `clickhouse`    | ClickHouse                     | `CLICKHOUSE_URL`    |
+| `mongodb`       | MongoDB with Atlas Search      | `MONGODB_URL`       |
 
 ### Defining Scenarios
 
 Scenarios control how your test runs. Each scenario specifies:
 
-| Option     | Description                                      |
-| ---------- | ------------------------------------------------ |
-| `executor` | How VUs are scheduled (`constant-vus`, `ramping-vus`, `per-vu-iterations`, etc.) |
-| `vus`      | Number of virtual users                          |
-| `duration` | How long the scenario runs                       |
-| `startTime`| When to start (for sequential tests)             |
-| `exec`     | Which function to run                            |
-| `tags`     | Custom tags for grouping metrics in charts       |
+| Option      | Description                                                                      |
+| ----------- | -------------------------------------------------------------------------------- |
+| `executor`  | How VUs are scheduled (`constant-vus`, `ramping-vus`, `per-vu-iterations`, etc.) |
+| `vus`       | Number of virtual users                                                          |
+| `duration`  | How long the scenario runs                                                       |
+| `startTime` | When to start (for sequential tests)                                             |
+| `exec`      | Which function to run                                                            |
+| `tags`      | Custom tags for grouping metrics in charts                                       |
 
 ```javascript
 export const options = {
@@ -207,19 +209,19 @@ The API validates configuration and fails fast with clear error messages:
 
 ```javascript
 // Unknown backend type
-backends: ["unknown"]
+backends: ["unknown"];
 // → panic: backends: unknown backend type 'unknown'. Valid types: [paradedb elasticsearch ...]
 
 // Missing backends array
-search.backends({ paradedb: true })
+search.backends({ paradedb: true });
 // → panic: backends: 'backends' array is required
 
 // Missing type in object config
-backends: [{ alias: "test" }]
+backends: [{ alias: "test" }];
 // → panic: backends: each backend config must have a 'type' field
 
 // Duplicate alias
-backends: ["paradedb", { type: "paradedb" }]
+backends: ["paradedb", { type: "paradedb" }];
 // → panic: backends: duplicate alias 'paradedb'
 ```
 
@@ -474,6 +476,7 @@ VACUUM ANALYZE documents;
 ```
 
 Each operation in the array specifies:
+
 - `endpoint` - The API endpoint (e.g., `_settings`, `_refresh`, `_forcemerge`)
 - `body` - Optional JSON body (uses PUT method if present)
 - `params` - Optional query parameters
@@ -583,15 +586,15 @@ docker compose --profile all up -d            # Everything
 docker compose --profile all down
 ```
 
-| Service         | Profile         | Port      |
-| --------------- | --------------- | --------- |
-| paradedb        | `paradedb`      | 5432      |
-| postgresfts    | `postgresfts`  | 5433      |
-| pgtextsearch   | `pgtextsearch` | 5435      |
-| elasticsearch   | `elasticsearch` | 9200      |
-| opensearch      | `opensearch`    | 9201      |
-| clickhouse      | `clickhouse`    | 9000/8123 |
-| mongodb         | `mongodb`       | 27017     |
+| Service       | Profile         | Port      |
+| ------------- | --------------- | --------- |
+| paradedb      | `paradedb`      | 5432      |
+| postgresfts   | `postgresfts`   | 5433      |
+| pgtextsearch  | `pgtextsearch`  | 5435      |
+| elasticsearch | `elasticsearch` | 9200      |
+| opensearch    | `opensearch`    | 9201      |
+| clickhouse    | `clickhouse`    | 9000/8123 |
+| mongodb       | `mongodb`       | 27017     |
 
 ## Project Structure
 
