@@ -57,73 +57,90 @@ make loader # Build the loader CLI
 
 Open http://localhost:5665 to see real-time results.
 
-## Backends API
+## Writing k6 Scripts
 
-### Basic Usage
+### Basic Script Structure
 
 ```javascript
 import search from "k6/x/search";
+import { SharedArray } from "k6/data";
+import exec from "k6/execution";
 
+// 1. Configure backends
 const backends = search.backends({
-  datasetPath: "./datasets/sample",
+  datasetPath: "../",  // Path to dataset directory (for pre/post script capture)
   backends: ["paradedb", "elasticsearch"],
 });
 
-export default function () {
-  backends.get("paradedb").search(`
-    SELECT id, title FROM documents
-    WHERE content @@@ 'test'
-    LIMIT 10
-  `);
+// 2. Load search terms (shared across all VUs)
+const terms = new SharedArray("search_terms", function () {
+  return JSON.parse(open("./search_terms.json"));
+});
 
-  backends.get("elasticsearch").search("documents", {
-    query: { match: { content: "test" } },
-    size: 10,
-  });
+// 3. Helper to rotate through search terms
+function getTerm() {
+  return terms[exec.vu.iterationInScenario % terms.length];
+}
+
+// 4. Define test scenarios
+export const options = {
+  scenarios: {
+    // Metrics collector runs throughout
+    metrics_collector: {
+      executor: "constant-vus",
+      vus: 1,
+      duration: "60s",
+      exec: "collectMetrics",
+    },
+    // Search scenario
+    search_test: {
+      executor: "constant-vus",
+      vus: 5,
+      duration: "30s",
+      exec: "searchQuery",
+    },
+  },
+};
+
+// 5. Collect container metrics (CPU, memory)
+export function collectMetrics() {
+  backends.collect();
+}
+
+// 6. Execute search queries
+export function searchQuery() {
+  const term = getTerm();
+  backends.get("paradedb").search(
+    `SELECT id, title FROM documents WHERE content @@@ $1 LIMIT 10`,
+    term
+  );
 }
 ```
 
-### Comparing Multiple Instances
+### Backend Configuration
 
-Compare different versions or configurations of the same backend:
+Each backend in the `backends` array can be a string (uses defaults) or an object (full config):
 
 ```javascript
 const backends = search.backends({
-  datasetPath: "./datasets/sample",
+  datasetPath: "../",
   backends: [
-    "paradedb", // uses defaults, alias = "paradedb"
+    "paradedb",  // String shorthand - uses defaults
     {
-      type: "paradedb",
-      alias: "paradedb-new",
+      type: "paradedb",           // Required: backend type
+      alias: "paradedb-v2",       // Display name (defaults to type)
       connection: "postgres://localhost:5433/benchmark",
-      container: "paradedb-new", // for Docker metrics
-      color: "#ff6b6b", // custom chart color
+      container: "paradedb-v2",   // Docker container for metrics
+      color: "#ff6b6b",           // Dashboard chart color
     },
     "elasticsearch",
   ],
 });
 
-// Access by alias
+// Access backends by alias
 backends.get("paradedb").search(...);
-backends.get("paradedb-new").search(...);
+backends.get("paradedb-v2").search(...);
 backends.get("elasticsearch").search(...);
-```
-
-### Backend Configuration Options
-
-Each backend in the array can be:
-
-- **String** - Just the backend type name with defaults: `"paradedb"`
-- **Object** - Full configuration:
-
-```javascript
-{
-  type: "paradedb",           // Required: backend type
-  alias: "paradedb-prod",     // Display name (defaults to type)
-  connection: "postgres://...", // Connection string
-  container: "paradedb-prod", // Docker container name for metrics
-  color: "#ff0000",           // Chart color in dashboard
-}
 ```
 
 ### Available Backend Types
@@ -137,6 +154,52 @@ Each backend in the array can be:
 | `opensearch`    | OpenSearch                         | `OPENSEARCH_URL`      |
 | `clickhouse`    | ClickHouse                         | `CLICKHOUSE_URL`      |
 | `mongodb`       | MongoDB with Atlas Search          | `MONGODB_URL`         |
+
+### Defining Scenarios
+
+Scenarios control how your test runs. Each scenario specifies:
+
+| Option     | Description                                      |
+| ---------- | ------------------------------------------------ |
+| `executor` | How VUs are scheduled (`constant-vus`, `ramping-vus`, `per-vu-iterations`, etc.) |
+| `vus`      | Number of virtual users                          |
+| `duration` | How long the scenario runs                       |
+| `startTime`| When to start (for sequential tests)             |
+| `exec`     | Which function to run                            |
+| `tags`     | Custom tags for grouping metrics in charts       |
+
+```javascript
+export const options = {
+  scenarios: {
+    // Always include metrics collector
+    metrics_collector: {
+      executor: "constant-vus",
+      vus: 1,
+      duration: "120s",
+      exec: "collectMetrics",
+    },
+    // ParadeDB: 0s - 30s
+    pdb_search: {
+      executor: "constant-vus",
+      vus: 5,
+      duration: "30s",
+      exec: "pdbSearch",
+    },
+    // Elasticsearch: 35s - 65s (5s gap for cleanup)
+    es_search: {
+      executor: "constant-vus",
+      vus: 5,
+      duration: "30s",
+      startTime: "35s",
+      exec: "esSearch",
+    },
+  },
+};
+```
+
+By default, all metrics appear on the same chart. Use `tags: { chart: "name" }` to separate scenarios into different dashboard charts.
+
+The `metrics_collector` scenario should run for the entire test duration to capture CPU/memory metrics throughout.
 
 ### Error Handling
 
@@ -251,6 +314,35 @@ backends.get("mongodb").search("documents", {
   },
 });
 ```
+
+### Ingesting Data
+
+To benchmark ingest performance, use the loader to open a document file and insert batches:
+
+```javascript
+import search from "k6/x/search";
+
+const backends = search.backends({
+  datasetPath: "../",
+  backends: ["paradedb", "elasticsearch"],
+});
+
+// Load documents from JSON file
+const loader = search.loader();
+const docs = loader.openDocuments("/path/to/documents.json");
+
+const BATCH_SIZE = 1000;
+
+export function ingestTest() {
+  // Get next batch with auto-generated UUIDs
+  const batch = docs.nextBatchNewIds(BATCH_SIZE);
+
+  // Insert into any backend
+  backends.get("paradedb").insertBatch("documents", batch);
+}
+```
+
+The `nextBatchNewIds()` method returns documents with new UUID strings in the `id` field, cycling through the source file. This allows continuous ingestion without ID conflicts.
 
 ## Data Loader
 
@@ -422,12 +514,14 @@ Each operation in the array specifies:
 
 The extension emits standard k6 metrics with backend tags:
 
-| Metric            | Type    | Description                    |
-| ----------------- | ------- | ------------------------------ |
-| `search_duration` | Trend   | Search latency in milliseconds |
-| `search_hits`     | Gauge   | Number of results returned     |
-| `ingest_duration` | Trend   | Insert latency in milliseconds |
-| `ingest_docs`     | Counter | Documents inserted             |
+| Metric                   | Type    | Description                    |
+| ------------------------ | ------- | ------------------------------ |
+| `search_duration`        | Trend   | Search latency in milliseconds |
+| `search_hits`            | Gauge   | Number of results returned     |
+| `ingest_duration`        | Trend   | Insert latency in milliseconds |
+| `ingest_docs`            | Counter | Documents inserted             |
+| `container_cpu_percent`  | Gauge   | Container CPU usage percentage |
+| `container_memory_bytes` | Gauge   | Container memory usage         |
 
 ### Thresholds
 
