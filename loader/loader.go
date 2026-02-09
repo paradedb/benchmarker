@@ -2,10 +2,10 @@
 package loader
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/csv"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -28,14 +28,14 @@ var (
 	documentCacheMu sync.RWMutex
 )
 
-// DocumentReader provides access to documents from a JSONL file.
+// DocumentReader provides access to documents from a CSV file.
 type DocumentReader struct {
 	documents []map[string]interface{}
 	index     atomic.Int64
 	size      int
 }
 
-// OpenDocuments loads documents from a JSONL file.
+// OpenDocuments loads documents from a CSV file.
 // The file is loaded once and cached - subsequent calls return the cached reader.
 func (l *Loader) OpenDocuments(filePath string) *DocumentReader {
 	// Check cache first
@@ -61,19 +61,30 @@ func (l *Loader) OpenDocuments(filePath string) *DocumentReader {
 	}
 	defer file.Close()
 
-	var docs []map[string]interface{}
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 10*1024*1024)
+	csvReader := csv.NewReader(file)
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
+	// Read header
+	headers, err := csvReader.Read()
+	if err != nil {
+		return &DocumentReader{size: 0}
+	}
+
+	// Read all rows
+	var docs []map[string]interface{}
+	for {
+		record, err := csvReader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
 			continue
 		}
-		var doc map[string]interface{}
-		if err := json.Unmarshal(line, &doc); err != nil {
-			continue
+
+		doc := make(map[string]interface{}, len(headers))
+		for i, header := range headers {
+			if i < len(record) {
+				doc[header] = record[i]
+			}
 		}
 		docs = append(docs, doc)
 	}
@@ -159,28 +170,43 @@ func parseConfig(config map[string]interface{}) (filePath, tableName, dataset st
 	return
 }
 
-// readJSONLDocuments reads documents from a JSONL file.
-func readJSONLDocuments(filePath string) ([]map[string]interface{}, error) {
+// readCSVDocuments reads documents from a CSV file.
+func readCSVDocuments(filePath string) ([]map[string]interface{}, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
-	var docs []map[string]interface{}
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 10*1024*1024)
+	csvReader := csv.NewReader(file)
 
-	for scanner.Scan() {
-		var doc map[string]interface{}
-		if err := json.Unmarshal(scanner.Bytes(), &doc); err != nil {
+	// Read header
+	headers, err := csvReader.Read()
+	if err != nil {
+		return nil, err
+	}
+
+	// Read all rows
+	var docs []map[string]interface{}
+	for {
+		record, err := csvReader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
 			continue
+		}
+
+		doc := make(map[string]interface{}, len(headers))
+		for i, header := range headers {
+			if i < len(record) {
+				doc[header] = record[i]
+			}
 		}
 		docs = append(docs, doc)
 	}
 
-	return docs, scanner.Err()
+	return docs, nil
 }
 
 // readFile reads a file and returns its contents as a string.
@@ -221,7 +247,7 @@ func loadWithDriver(driver backends.Driver, tableName, filePath, dataset, backen
 	}
 
 	// Read documents
-	docs, err := readJSONLDocuments(filePath)
+	docs, err := readCSVDocuments(filePath)
 	if err != nil {
 		return map[string]interface{}{"error": fmt.Sprintf("read file failed: %v", err)}
 	}
@@ -281,7 +307,7 @@ func loadWithDriverJSON(driver backends.Driver, tableName, filePath, dataset, ba
 	}
 
 	// Read documents
-	docs, err := readJSONLDocuments(filePath)
+	docs, err := readCSVDocuments(filePath)
 	if err != nil {
 		return map[string]interface{}{"error": fmt.Sprintf("read file failed: %v", err)}
 	}
@@ -323,9 +349,9 @@ func loadWithDriverJSON(driver backends.Driver, tableName, filePath, dataset, ba
 	}
 }
 
-// Load loads JSONL data into any registered backend.
+// Load loads CSV data into any registered backend.
 // Config options:
-//   - file: path to JSONL file (required)
+//   - file: path to CSV file (required)
 //   - table: table/index/collection name (default: "documents")
 //   - dataset: path to dataset directory with backend-specific pre/post files
 //   - batchSize: batch size for loading (default: 10000)
@@ -350,22 +376,22 @@ func (l *Loader) Load(backendName, connectionString string, config map[string]in
 	return loadWithDriver(driver, tableName, filePath, dataset, backendName, columns, batchSize)
 }
 
-// LoadParadeDB loads JSONL data into ParadeDB.
+// LoadParadeDB loads CSV data into ParadeDB.
 func (l *Loader) LoadParadeDB(connectionString string, config map[string]interface{}) map[string]interface{} {
 	return l.Load("paradedb", connectionString, config)
 }
 
-// LoadPostgresFTS loads JSONL data into vanilla PostgreSQL with tsquery/tsvector.
+// LoadPostgresFTS loads CSV data into vanilla PostgreSQL with tsquery/tsvector.
 func (l *Loader) LoadPostgresFTS(connectionString string, config map[string]interface{}) map[string]interface{} {
 	return l.Load("postgresfts", connectionString, config)
 }
 
-// Load loads JSONL data into PostgreSQL with  extension.
+// Load loads CSV data into PostgreSQL with  extension.
 func (l *Loader) Load(connectionString string, config map[string]interface{}) map[string]interface{} {
 	return l.Load("", connectionString, config)
 }
 
-// LoadElasticsearch loads JSONL data into Elasticsearch.
+// LoadElasticsearch loads CSV data into Elasticsearch.
 func (l *Loader) LoadElasticsearch(config map[string]interface{}) map[string]interface{} {
 	address, _ := config["address"].(string)
 	if address == "" {
@@ -375,12 +401,12 @@ func (l *Loader) LoadElasticsearch(config map[string]interface{}) map[string]int
 	return l.Load("elasticsearch", address, config)
 }
 
-// LoadClickHouse loads JSONL data into ClickHouse.
+// LoadClickHouse loads CSV data into ClickHouse.
 func (l *Loader) LoadClickHouse(connectionString string, config map[string]interface{}) map[string]interface{} {
 	return l.Load("clickhouse", connectionString, config)
 }
 
-// LoadMongoDB loads JSONL data into MongoDB with Atlas Search index.
+// LoadMongoDB loads CSV data into MongoDB with Atlas Search index.
 func (l *Loader) LoadMongoDB(connectionString string, config map[string]interface{}) map[string]interface{} {
 	return l.Load("mongodb", connectionString, config)
 }
