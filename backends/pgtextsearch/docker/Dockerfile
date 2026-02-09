@@ -14,7 +14,7 @@ ARG PG_TEXTSEARCH_VERSION=0.4.2
 ARG TARGETARCH
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") && \
     curl -L -o /tmp/pg_textsearch.zip \
-    "https://github.com/timescale/pg_textsearch/releases/download/v${PG_TEXTSEARCH_VERSION}/pg-textsearch-v${PG_TEXTSEARCH_VERSION}-pg17-${ARCH}.zip" && \
+    "https://github.com/timescale/pg_textsearch/releases/download/v${PG_TEXTSEARCH_VERSION}/pg-textsearch-v${PG_TEXTSEARCH_VERSION}-pg18-${ARCH}.zip" && \
     unzip /tmp/pg_textsearch.zip -d /tmp/pg_textsearch && \
     dpkg -i /tmp/pg_textsearch/*.deb && \
     rm -rf /tmp/pg_textsearch.zip /tmp/pg_textsearch

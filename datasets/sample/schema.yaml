@@ -1,9 +1,5 @@
+table: documents
 columns:
   id: uuid
   title: text
   content: text
-
-primaryKey: id
-table: documents
-index: documents # Elasticsearch index name
-collection: documents # MongoDB collection name

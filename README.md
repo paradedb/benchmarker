@@ -148,8 +148,8 @@ backends.get("elasticsearch").search(...);
 | Type            | Description                        | Connection Env Var    |
 | --------------- | ---------------------------------- | --------------------- |
 | `paradedb`      | ParadeDB with pg_search (BM25)     | `PARADEDB_URL`        |
-| `postgres-fts`  | PostgreSQL native FTS              | `POSTGRES_FTS_URL`    |
-| `pg-textsearch` | PostgreSQL with pg_textsearch      | `PG_TEXTSEARCH_URL`   |
+| `postgresfts`  | PostgreSQL native FTS              | `POSTGRES_FTS_URL`    |
+| `pgtextsearch` | PostgreSQL with pg_textsearch      | `PG_TEXTSEARCH_URL`   |
 | `elasticsearch` | Elasticsearch                      | `ELASTICSEARCH_URL`   |
 | `opensearch`    | OpenSearch                         | `OPENSEARCH_URL`      |
 | `clickhouse`    | ClickHouse                         | `CLICKHOUSE_URL`      |
@@ -273,7 +273,7 @@ backends.get("paradedb").search(
 ### PostgreSQL FTS
 
 ```javascript
-backends.get("postgres-fts").search(
+backends.get("postgresfts").search(
   `
   SELECT id, title, ts_rank(tsv, plainto_tsquery('english', $1)) as score
   FROM documents
@@ -398,11 +398,6 @@ datasets/
 
 ```yaml
 table: documents
-index: documents
-collection: documents
-database: benchmark
-primaryKey: id
-
 columns:
   id: bigint
   title: text
@@ -591,8 +586,8 @@ docker compose --profile all down
 | Service         | Profile         | Port      |
 | --------------- | --------------- | --------- |
 | paradedb        | `paradedb`      | 5432      |
-| postgres-fts    | `postgres-fts`  | 5433      |
-| pg-textsearch   | `pg-textsearch` | 5435      |
+| postgresfts    | `postgresfts`  | 5433      |
+| pgtextsearch   | `pgtextsearch` | 5435      |
 | elasticsearch   | `elasticsearch` | 9200      |
 | opensearch      | `opensearch`    | 9201      |
 | clickhouse      | `clickhouse`    | 9000/8123 |

@@ -502,15 +502,17 @@ func containerMatchesBackend(container, backend string) bool {
 	switch strings.ToLower(backend) {
 	case "paradedb":
 		return strings.Contains(containerLower, "paradedb")
-	case "elasticsearch", "es":
+	case "elasticsearch":
 		return strings.Contains(containerLower, "elastic")
-	case "postgres-fts", "fts", "tsquery":
-		return strings.Contains(containerLower, "postgres-fts") || strings.Contains(containerLower, "postgres_fts")
-	case "pg-textsearch", "textsearch":
-		return strings.Contains(containerLower, "textsearch")
-	case "clickhouse", "ch":
+	case "opensearch":
+		return strings.Contains(containerLower, "opensearch")
+	case "postgresfts":
+		return strings.Contains(containerLower, "postgresfts")
+	case "pgtextsearch":
+		return strings.Contains(containerLower, "pgtextsearch") || strings.Contains(containerLower, "textsearch")
+	case "clickhouse":
 		return strings.Contains(containerLower, "clickhouse")
-	case "mongodb", "mongo":
+	case "mongodb":
 		return strings.Contains(containerLower, "mongo")
 	}
 	return false

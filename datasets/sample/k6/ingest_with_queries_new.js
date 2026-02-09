@@ -1,6 +1,5 @@
 import search from "k6/x/search";
 import { SharedArray } from "k6/data";
-import { sleep } from "k6";
 import exec from "k6/execution";
 
 // Configure backends - uses sensible defaults, override as needed
@@ -9,7 +8,7 @@ const backends = search.backends({
   backends: [
     "paradedb",
     "elasticsearch",
-    "pg-textsearch",
+    "pgtextsearch",
     "clickhouse",
     "mongodb",
   ],
@@ -142,7 +141,6 @@ export function setup() {
 
 export function collectMetrics() {
   backends.collect();
-  sleep(0.5);
 }
 
 // ==================== ParadeDB ====================
@@ -185,7 +183,7 @@ export function esIngest() {
 // ==================== pg_textsearch ====================
 export function textsearchSimple() {
   const term = getTerm();
-  backends.get("pg-textsearch").search(`
+  backends.get("pgtextsearch").search(`
     SELECT id, title
     FROM documents
     ORDER BY content <@> '${term}'
@@ -195,7 +193,7 @@ export function textsearchSimple() {
 
 export function textsearchIngest() {
   const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
-  backends.get("pg-textsearch").insertBatch("documents", batch);
+  backends.get("pgtextsearch").insertBatch("documents", batch);
 }
 
 // ==================== ClickHouse ====================

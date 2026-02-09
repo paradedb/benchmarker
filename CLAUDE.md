@@ -47,7 +47,7 @@ This is a **k6 extension** (`xk6-search`) that provides a unified API for benchm
 
 Backends use a **registry pattern** with factory functions:
 
-1. Each backend package calls `Register()` in its `init()` function (e.g., `backends/postgres/driver.go` registers "paradedb", "postgres-fts", "pg-textsearch")
+1. Each backend package calls `Register()` in its `init()` function (e.g., `backends/postgres/driver.go` registers "paradedb", "postgresfts", "pgtextsearch")
 2. `backends.go:newBackends()` reads the JS config, looks up registered factories, creates drivers, and wraps each in a `K6Client`
 3. `K6Client` (in `backends/driver.go`) is the adapter that wraps every `Driver` to add k6 metric emission (timing, tagging, sample pushing)
 
@@ -75,4 +75,4 @@ Two modes:
 - Backend connection strings come from environment variables (`PARADEDB_URL`, `ELASTICSEARCH_URL`, etc.) or inline config in k6 scripts
 - SQL backends (PostgreSQL variants, ClickHouse) use `.sql` lifecycle scripts; HTTP backends (Elasticsearch, OpenSearch, MongoDB) use `.json`
 - Dataset directories follow a strict structure: `schema.yaml`, `data.csv`, per-backend subdirectories with `pre`/`post` scripts, and a `k6/` directory for benchmark scripts
-- The postgres driver (`backends/postgres/`) handles three separate backends (paradedb, postgres-fts, pg-textsearch) via different registrations with different default ports and env vars
+- The postgres driver (`backends/postgres/`) handles three separate backends (paradedb, postgresfts, pgtextsearch) via different registrations with different default ports and env vars

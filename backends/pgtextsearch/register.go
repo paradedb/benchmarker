@@ -7,11 +7,11 @@ import (
 )
 
 func init() {
-	backends.Register("pg-textsearch", backends.BackendConfig{
+	backends.Register("pgtextsearch", backends.BackendConfig{
 		Factory:     postgres.New,
 		FileType:    "sql",
 		EnvVar:      "PG_TEXTSEARCH_URL",
 		DefaultConn: "postgres://postgres:postgres@localhost:5435/benchmark",
-		Container:   "pg-textsearch",
+		Container:   "pgtextsearch",
 	})
 }

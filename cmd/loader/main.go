@@ -292,18 +292,8 @@ func loadSchema(datasetDir string) (*backends.Schema, error) {
 		return nil, fmt.Errorf("parsing schema.yaml: %w", err)
 	}
 
-	// Defaults
 	if schema.Table == "" {
 		schema.Table = "documents"
-	}
-	if schema.Index == "" {
-		schema.Index = schema.Table
-	}
-	if schema.Collection == "" {
-		schema.Collection = schema.Table
-	}
-	if schema.Database == "" {
-		schema.Database = "benchmark"
 	}
 
 	return &schema, nil
