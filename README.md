@@ -1,18 +1,19 @@
-# ParadeDB Benchmarker (xk6-search)
+# k6-search
 
 A k6 extension for benchmarking full-text search backends with a unified API, real-time dashboard, and comprehensive data loading tools.
 
-Compare search performance across **ParadeDB**, **PostgreSQL FTS**, ****, **Elasticsearch**, **ClickHouse**, and **MongoDB Atlas Search** with consistent metrics and visualization.
+Compare search performance across **ParadeDB**, **PostgreSQL FTS**, ****, **Elasticsearch**, **OpenSearch**, **ClickHouse**, and **MongoDB Atlas Search** with consistent metrics and visualization.
 
 ## Features
 
-- **6 Search Backends** - ParadeDB (BM25), PostgreSQL FTS, , Elasticsearch, ClickHouse, MongoDB
+- **7 Search Backends** - ParadeDB (BM25), PostgreSQL FTS, , Elasticsearch, OpenSearch, ClickHouse, MongoDB
 - **Unified API** - Write once, benchmark everywhere
+- **Multiple Instances** - Compare different versions or configurations of the same backend
 - **Real-time Dashboard** - Live latency graphs, QPS, CPU/memory monitoring
-- **Data Loader CLI** - Bulk load CSVs with pre/post SQL scripts
+- **Reproducibility** - Pre/post scripts captured in dashboard for full reproducibility
+- **Data Loader CLI** - Bulk load CSVs with pre/post SQL/JSON scripts
 - **S3 Integration** - Pull datasets directly from S3
 - **Container Metrics** - Automatic Docker resource monitoring
-- **Per-Query Breakdown** - Track latencies by scenario and query type
 
 ## Quick Start
 
@@ -22,7 +23,10 @@ Compare search performance across **ParadeDB**, **PostgreSQL FTS**, ****, **Elas
 # Start the backends you need
 docker compose --profile paradedb up -d
 
-# Or just all of them
+# Or multiple backends
+docker compose --profile paradedb --profile elasticsearch up -d
+
+# Or all of them
 docker compose --profile all up -d
 ```
 
@@ -53,15 +57,120 @@ make loader # Build the loader CLI
 
 Open http://localhost:5665 to see real-time results.
 
+## Backends API
+
+### Basic Usage
+
+```javascript
+import search from "k6/x/search";
+
+const backends = search.backends({
+  datasetPath: "./datasets/sample",
+  backends: ["paradedb", "elasticsearch"],
+});
+
+export default function () {
+  backends.get("paradedb").search(`
+    SELECT id, title FROM documents
+    WHERE content @@@ 'test'
+    LIMIT 10
+  `);
+
+  backends.get("elasticsearch").search("documents", {
+    query: { match: { content: "test" } },
+    size: 10,
+  });
+}
+```
+
+### Comparing Multiple Instances
+
+Compare different versions or configurations of the same backend:
+
+```javascript
+const backends = search.backends({
+  datasetPath: "./datasets/sample",
+  backends: [
+    "paradedb", // uses defaults, alias = "paradedb"
+    {
+      type: "paradedb",
+      alias: "paradedb-new",
+      connection: "postgres://localhost:5433/benchmark",
+      container: "paradedb-new", // for Docker metrics
+      color: "#ff6b6b", // custom chart color
+    },
+    "elasticsearch",
+  ],
+});
+
+// Access by alias
+backends.get("paradedb").search(...);
+backends.get("paradedb-new").search(...);
+backends.get("elasticsearch").search(...);
+```
+
+### Backend Configuration Options
+
+Each backend in the array can be:
+
+- **String** - Just the backend type name with defaults: `"paradedb"`
+- **Object** - Full configuration:
+
+```javascript
+{
+  type: "paradedb",           // Required: backend type
+  alias: "paradedb-prod",     // Display name (defaults to type)
+  connection: "postgres://...", // Connection string
+  container: "paradedb-prod", // Docker container name for metrics
+  color: "#ff0000",           // Chart color in dashboard
+}
+```
+
+### Available Backend Types
+
+| Type            | Description                        | Connection Env Var    |
+| --------------- | ---------------------------------- | --------------------- |
+| `paradedb`      | ParadeDB with pg_search (BM25)     | `PARADEDB_URL`        |
+| `postgres-fts`  | PostgreSQL native FTS              | `POSTGRES_FTS_URL`    |
+| `` | PostgreSQL with       | `_URL`   |
+| `elasticsearch` | Elasticsearch                      | `ELASTICSEARCH_URL`   |
+| `opensearch`    | OpenSearch                         | `OPENSEARCH_URL`      |
+| `clickhouse`    | ClickHouse                         | `CLICKHOUSE_URL`      |
+| `mongodb`       | MongoDB with Atlas Search          | `MONGODB_URL`         |
+
+### Error Handling
+
+The API validates configuration and fails fast with clear error messages:
+
+```javascript
+// Unknown backend type
+backends: ["unknown"]
+// → panic: backends: unknown backend type 'unknown'. Valid types: [paradedb elasticsearch ...]
+
+// Missing backends array
+search.backends({ paradedb: true })
+// → panic: backends: 'backends' array is required
+
+// Missing type in object config
+backends: [{ alias: "test" }]
+// → panic: backends: each backend config must have a 'type' field
+
+// Duplicate alias
+backends: ["paradedb", { type: "paradedb" }]
+// → panic: backends: duplicate alias 'paradedb'
+```
+
 ## Dashboard
 
 The real-time dashboard shows:
 
-- **Latency over time** - P50/P90/P95/P99 percentiles per query
+- **Latency over time** - P50/P90/P95/P99 percentiles per backend
 - **Query throughput** - Queries per second
 - **Ingest rate** - Documents inserted per second
 - **Container resources** - CPU and memory usage from Docker
-- **Backend configuration** - Database settings, indexes, and schema
+- **Backend configuration** - Database settings and version info
+- **Pre/Post scripts** - Full SQL/JSON scripts used for setup (for reproducibility)
+- **Query patterns** - Actual queries executed per scenario
 
 Enable with the `--out dashboard` flag:
 
@@ -81,16 +190,12 @@ DASHBOARD_EXPORT=true ./k6 run --out dashboard benchmark.js
 ./bin/dashboard-viewer ./dashboard-export.json
 ```
 
-## Backends
+## Backend Examples
 
 ### ParadeDB (BM25)
 
-Full-text search with BM25 ranking via the `pg_search` extension.
-
 ```javascript
-const backends = search.backends({ paradedb: true });
-
-backends.paradedb.search(
+backends.get("paradedb").search(
   `
   SELECT id, title, paradedb.score(id) as score
   FROM documents
@@ -104,12 +209,8 @@ backends.paradedb.search(
 
 ### PostgreSQL FTS
 
-Native PostgreSQL full-text search with tsvector/GIN indexes.
-
 ```javascript
-const backends = search.backends({ "postgres-fts": true });
-
-backends.postgresFts.search(
+backends.get("postgres-fts").search(
   `
   SELECT id, title, ts_rank(tsv, plainto_tsquery('english', $1)) as score
   FROM documents
@@ -121,38 +222,10 @@ backends.postgresFts.search(
 );
 ```
 
-### 
-
-PostgreSQL with the  extension for BM25 search.
+### Elasticsearch / OpenSearch
 
 ```javascript
-const backends = search.backends({ "": true });
-
-backends..search(
-  `
-  SELECT id, title, content <@> $1 as score
-  FROM documents
-  ORDER BY score
-  LIMIT 10
-`,
-  "search term",
-);
-```
-
-### Elasticsearch
-
-Full Elasticsearch Query DSL support.
-
-```javascript
-const backends = search.backends({
-  elasticsearch: {
-    address: "http://localhost:9200",
-    username: "elastic",
-    password: "changeme",
-  },
-});
-
-backends.elastic.search("documents", {
+backends.get("elasticsearch").search("documents", {
   query: { match: { content: "search term" } },
   size: 10,
 });
@@ -160,12 +233,8 @@ backends.elastic.search("documents", {
 
 ### ClickHouse
 
-OLAP database with full-text search capabilities.
-
 ```javascript
-const backends = search.backends({ clickhouse: true });
-
-backends.clickhouse.search(`
+backends.get("clickhouse").search(`
   SELECT id, title
   FROM documents
   WHERE hasToken(content, 'term')
@@ -175,12 +244,8 @@ backends.clickhouse.search(`
 
 ### MongoDB Atlas Search
 
-Document search with aggregation pipelines.
-
 ```javascript
-const backends = search.backends({ mongodb: true });
-
-backends.mongodb.search("documents", {
+backends.get("mongodb").search("documents", {
   $search: {
     text: { query: "search term", path: "content" },
   },
@@ -214,26 +279,27 @@ The loader CLI handles bulk data loading with lifecycle scripts.
 
 ```
 datasets/
-├── sample/
-│   ├── schema.yaml              # Column definitions
-│   ├── data.csv                 # Source data
-│   ├── paradedb/
-│   │   ├── pre.sql              # Create tables
-│   │   └── post.sql             # Create indexes, VACUUM
-│   ├── postgres-fts/
-│   │   ├── pre.sql
-│   │   └── post.sql
-│   ├── elasticsearch/
-│   │   ├── pre.json             # Create index with mappings
-│   │   └── post.json            # Refresh, force merge
-│   ├── clickhouse/
-│   │   ├── pre.sql
-│   │   └── post.sql
-│   ├── mongodb/
-│   │   ├── pre.json             # Create search indexes
-│   │   └── post.json
-│   └── k6/
-│       └── benchmark.js         # k6 test scripts
+└── sample/
+    ├── schema.yaml              # Column definitions
+    ├── data.csv                 # Source data
+    ├── paradedb/
+    │   ├── pre.sql              # Create tables, indexes
+    │   └── post.sql             # VACUUM, ANALYZE
+    ├── elasticsearch/
+    │   ├── pre.json             # Create index with mappings
+    │   └── post.json            # Refresh, force merge
+    ├── opensearch/
+    │   ├── pre.json
+    │   └── post.json
+    ├── clickhouse/
+    │   ├── pre.sql
+    │   └── post.sql
+    ├── mongodb/
+    │   ├── pre.json             # Drop collection
+    │   └── post.json            # Create search indexes
+    └── k6/
+        ├── simple.js            # k6 test scripts
+        └── search_terms.json    # Search terms data
 ```
 
 ### schema.yaml
@@ -246,98 +312,109 @@ database: benchmark
 primaryKey: id
 
 columns:
-  id: uuid
+  id: bigint
   title: text
   content: text
 ```
 
-## k6 Scripts
+### Pre/Post Scripts
 
-### Basic Example
+#### SQL Backends (ParadeDB, PostgreSQL, ClickHouse)
 
-```javascript
-import search from "k6/x/search";
+Pre and post scripts are standard SQL executed directly:
 
-const backends = search.backends({
-  paradedb: true,
-  elasticsearch: true,
-});
+```sql
+-- pre.sql: Create table and prepare for bulk load
+DROP TABLE IF EXISTS documents;
+CREATE TABLE documents (
+  id BIGINT PRIMARY KEY,
+  title TEXT,
+  content TEXT
+);
 
-export const options = {
-  scenarios: {
-    paradedb_search: {
-      executor: "constant-vus",
-      vus: 10,
-      duration: "30s",
-      exec: "paradedbSearch",
-    },
-    elasticsearch_search: {
-      executor: "constant-vus",
-      vus: 10,
-      duration: "30s",
-      exec: "elasticsearchSearch",
-    },
+-- post.sql: Create indexes after load
+CREATE INDEX ON documents USING bm25 (content);
+VACUUM ANALYZE documents;
+```
+
+#### Elasticsearch / OpenSearch
+
+**pre.json** - Creates index with mappings (single object, sent to PUT /{index}):
+
+```json
+{
+  "index": "documents",
+  "mappings": {
+    "properties": {
+      "id": { "type": "keyword" },
+      "title": { "type": "text", "analyzer": "english" },
+      "content": { "type": "text", "analyzer": "english" }
+    }
   },
-};
-
-export function paradedbSearch() {
-  backends.paradedb.search(`
-    SELECT id, title FROM documents
-    WHERE content @@@ 'test'
-    LIMIT 10
-  `);
-}
-
-export function elasticsearchSearch() {
-  backends.elastic.search("documents", {
-    query: { match: { content: "test" } },
-    size: 10,
-  });
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "refresh_interval": "-1"
+  }
 }
 ```
 
-### With Ingest
+**post.json** - Array of API operations to execute:
 
-```javascript
-import search from "k6/x/search";
-import { SharedArray } from "k6/data";
-
-const backends = search.backends({ paradedb: true });
-const loader = search.loader();
-
-const docs = loader.openDocuments("./data/documents.json");
-
-export const options = {
-  scenarios: {
-    query: {
-      executor: "constant-vus",
-      vus: 5,
-      duration: "60s",
-      exec: "queryTest",
-    },
-    ingest: {
-      executor: "constant-arrival-rate",
-      rate: 10,
-      timeUnit: "1s",
-      duration: "30s",
-      startTime: "30s",
-      preAllocatedVUs: 2,
-      exec: "ingestTest",
-    },
+```json
+[
+  {
+    "index": "documents",
+    "endpoint": "_settings",
+    "body": {
+      "index": {
+        "refresh_interval": "1s"
+      }
+    }
   },
-};
+  {
+    "endpoint": "_refresh"
+  },
+  {
+    "endpoint": "_forcemerge",
+    "params": {
+      "max_num_segments": 1
+    }
+  }
+]
+```
 
-export function queryTest() {
-  backends.paradedb.search(`
-    SELECT id, title FROM documents
-    WHERE content @@@ 'test'
-    LIMIT 10
-  `);
+Each operation in the array specifies:
+- `endpoint` - The API endpoint (e.g., `_settings`, `_refresh`, `_forcemerge`)
+- `body` - Optional JSON body (uses PUT method if present)
+- `params` - Optional query parameters
+- `index` - Optional index override (defaults to "documents")
+
+#### MongoDB
+
+```json
+// pre.json: Drop existing collection
+{
+  "database": "benchmark",
+  "collection": "documents",
+  "drop": true
 }
 
-export function ingestTest() {
-  const batch = docs.nextBatchNewIds(100);
-  backends.paradedb.insertBatch("documents", batch);
+// post.json: Create search index
+{
+  "database": "benchmark",
+  "collection": "documents",
+  "searchIndex": {
+    "name": "content_search",
+    "definition": {
+      "mappings": {
+        "dynamic": false,
+        "fields": {
+          "content": { "type": "string", "analyzer": "lucene.english" }
+        }
+      }
+    }
+  }
 }
 ```
 
@@ -375,80 +452,38 @@ export PARADEDB_URL="postgres://postgres:postgres@localhost:5432/benchmark"
 export POSTGRES_FTS_URL="postgres://postgres:postgres@localhost:5433/benchmark"
 export _URL="postgres://postgres:postgres@localhost:5435/benchmark"
 export ELASTICSEARCH_URL="http://localhost:9200"
+export OPENSEARCH_URL="http://localhost:9201"
 export CLICKHOUSE_URL="clickhouse://default:clickhouse@localhost:9000/default"
 export MONGODB_URL="mongodb://localhost:27017"
 ```
 
-Or configure in code:
+Or configure per-backend:
 
 ```javascript
 const backends = search.backends({
-  paradedb: { connection: "postgres://..." },
-  elasticsearch: {
-    address: "https://...",
-    username: "elastic",
-    password: "secret",
-  },
-  clickhouse: { connection: "clickhouse://..." },
-  mongodb: { connection: "mongodb://...", database: "mydb" },
-});
-```
-
-### Backend Options
-
-```javascript
-search.backends({
-  paradedb: {
-    connection: "postgres://...",
-    maxConns: 20,
-    minConns: 5,
-    preparedStatements: true,
-  },
-  elasticsearch: {
-    addresses: ["https://node1:9200", "https://node2:9200"],
-    apiKey: "base64_api_key",
-  },
-  clickhouse: {
-    connection: "clickhouse://...",
-    maxConns: 20,
-    minConns: 5,
-  },
-  mongodb: {
-    connection: "mongodb://...",
-    database: "benchmark",
-  },
+  datasetPath: "./datasets/sample",
+  backends: [
+    {
+      type: "paradedb",
+      connection: "postgres://user:pass@host:5432/db",
+    },
+    {
+      type: "elasticsearch",
+      connection: "https://user:pass@cluster.es.amazonaws.com:443",
+    },
+  ],
 });
 ```
 
 ## Docker Setup
 
-Docker is **optional**. You can run benchmarks against any database instance - local installs, cloud services, or remote servers. Just set the connection strings:
+Docker is **optional**. You can run benchmarks against any database instance - local installs, cloud services, or remote servers.
 
-```bash
-export PARADEDB_URL="postgres://user:pass@your-server:5432/db"
-export ELASTICSEARCH_URL="https://your-cluster.es.amazonaws.com:443"
-./k6 run --out dashboard script.js
-```
-
-Without Docker, you lose container CPU/memory metrics in the dashboard, but everything else works: latency graphs, QPS, query breakdown, data loading, etc.
+Without Docker, you lose container CPU/memory metrics in the dashboard, but everything else works.
 
 ### Local Development with Docker
 
-The included `docker-compose.yml` file applies optimized settings to all backends. Each backend has its own profile so you only start what you need.
-
-| Service       | Profile         | Port      | Description                       |
-| ------------- | --------------- | --------- | --------------------------------- |
-| paradedb      | `paradedb`      | 5432      | ParadeDB (PostgreSQL + pg_search) |
-| postgres-fts  | `postgres-fts`  | 5433      | PostgreSQL 17 with GIN indexes    |
-|  | `` | 5435      | PostgreSQL +         |
-| elasticsearch | `elasticsearch` | 9200      | Elasticsearch 8.17                |
-| clickhouse    | `clickhouse`    | 9000/8123 | ClickHouse (native/HTTP)          |
-| mongodb       | `mongodb`       | 27017     | MongoDB with Atlas Search         |
-
-### Start Services
-
 ```bash
-docker compose up -d                          # Starts nothing (all have profiles)
 docker compose --profile paradedb up -d       # Just ParadeDB
 docker compose --profile paradedb --profile elasticsearch up -d  # Multiple
 docker compose --profile all up -d            # Everything
@@ -457,29 +492,43 @@ docker compose --profile all up -d            # Everything
 docker compose --profile all down
 ```
 
-### Resource Limits
+| Service         | Profile         | Port      |
+| --------------- | --------------- | --------- |
+| paradedb        | `paradedb`      | 5432      |
+| postgres-fts    | `postgres-fts`  | 5433      |
+|    | `` | 5435      |
+| elasticsearch   | `elasticsearch` | 9200      |
+| opensearch      | `opensearch`    | 9201      |
+| clickhouse      | `clickhouse`    | 9000/8123 |
+| mongodb         | `mongodb`       | 27017     |
 
-All services configured with:
+## Project Structure
 
-- **CPU**: 4 cores limit, 2 cores reserved
-- **Memory**: 8GB limit, 4GB reserved
-
-## S3 Integration
-
-Pull datasets from S3:
-
-```bash
-# Uses AWS credentials from environment or ~/.aws/credentials
-./bin/loader pull --dataset wikipedia --source s3://fts-bench/datasets/wikipedia/
-
-# Then load normally
-./bin/loader load ./datasets/wikipedia
 ```
-
-Required AWS configuration:
-
-- `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, or
-- `AWS_PROFILE` for named profiles
+k6-search/
+├── module.go                    # k6 module registration
+├── backends.go                  # Backend configuration for k6
+├── backends/
+│   ├── driver.go                # Driver interface and registry
+│   ├── shared/
+│   │   ├── postgres/            # Shared PostgreSQL driver
+│   │   └── elastic/             # Shared Elasticsearch/OpenSearch driver
+│   ├── paradedb/                # ParadeDB registration
+│   ├── postgresfts/             # PostgreSQL FTS registration
+│   ├── /            #  registration
+│   ├── elasticsearch/           # Elasticsearch registration
+│   ├── opensearch/              # OpenSearch registration
+│   ├── clickhouse/              # ClickHouse driver
+│   └── mongodb/                 # MongoDB driver
+├── metrics/                     # Metrics collection and backend config
+├── dashboard/                   # Real-time web dashboard
+├── loader/                      # k6 data loader module
+├── cmd/
+│   ├── loader/                  # Data loader CLI
+│   └── dashboard-viewer/        # Dashboard replay viewer
+├── datasets/                    # Sample datasets
+└── docker-compose.yml           # Local development setup
+```
 
 ## Development
 
@@ -488,32 +537,7 @@ make              # Build everything
 make k6           # Build k6 with extension
 make loader       # Build loader CLI
 make test         # Run tests
-make fmt          # Format code
-make lint         # Run linter
 make clean        # Remove build artifacts
-make deps         # Install dependencies
-make help         # Show all targets
-```
-
-## Project Structure
-
-```
-k6-search/
-├── module.go              # k6 module registration
-├── backends.go            # Backend configuration for k6
-├── backends/
-│   ├── driver.go          # Driver interface and shared infrastructure
-│   ├── postgres/          # PostgreSQL driver (paradedb, postgres-fts, )
-│   ├── elasticsearch/     # Elasticsearch driver
-│   ├── clickhouse/        # ClickHouse driver
-│   └── mongodb/           # MongoDB driver
-├── metrics/               # Metrics collection
-├── dashboard/             # Real-time web dashboard
-├── loader/                # k6 data loader module
-├── cmd/loader/            # Data loader CLI
-├── datasets/              # Sample datasets
-├── examples/              # k6 script examples
-└── docker-compose.yml     # Local development setup
 ```
 
 ## License

@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/paradedb/benchmarks/backends"
 	"github.com/paradedb/benchmarks/metrics"
@@ -19,76 +20,109 @@ import (
 
 // Backends holds all configured backend clients.
 type Backends struct {
-	vu            modules.VU
-	ParadeDB      *backends.K6Client `js:"paradedb"`
-	PostgresFts   *backends.K6Client `js:"postgresfts"`
-	  *backends.K6Client `js:""`
-	Elasticsearch *backends.K6Client `js:"elasticsearch"`
-	OpenSearch    *backends.K6Client `js:"opensearch"`
-	Clickhouse    *backends.K6Client `js:"clickhouse"`
-	MongoDB       *backends.K6Client `js:"mongodb"`
-	Metrics       *metrics.Collector `js:"metrics"`
+	vu      modules.VU
+	clients map[string]*backends.K6Client
+	Metrics *metrics.Collector `js:"metrics"`
+}
+
+// Get returns a backend client by its alias/name.
+func (b *Backends) Get(alias string) *backends.K6Client {
+	return b.clients[alias]
 }
 
 // newBackends creates a new backends registry with the specified configuration.
 func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
-	b := &Backends{vu: m.vu}
+	b := &Backends{
+		vu:      m.vu,
+		clients: make(map[string]*backends.K6Client),
+	}
 	var enabledContainers []string
 	ctx := context.Background()
 
-	// Extract dataset path from config, or try to auto-detect
 	datasetPath := parseDatasetPath(config)
-
 	defaults := backends.DefaultConnections()
-	containers := backends.DefaultContainers()
+	defaultContainers := backends.DefaultContainers()
 
-	for name, cfg := range config {
-		alias := parseAlias(cfg)
-		container := parseContainer(cfg, containers[name], alias)
-		color := parseColor(cfg)
-		conn := parseConn(cfg, defaults[name])
+	// Parse backends array
+	backendsArray, ok := config["backends"].([]interface{})
+	if !ok {
+		panic("backends: 'backends' array is required")
+	}
 
-		backendCfg, ok := backends.GetConfig(name)
+	for _, item := range backendsArray {
+		var backendType, alias, container, color, conn string
+
+		switch v := item.(type) {
+		case string:
+			// Shorthand: just the backend type name
+			backendType = v
+			alias = v
+		case map[string]interface{}:
+			// Full config object
+			var ok bool
+			backendType, ok = v["type"].(string)
+			if !ok {
+				panic("backends: each backend config must have a 'type' field")
+			}
+			alias = backendType
+			if a, ok := v["alias"].(string); ok {
+				alias = a
+			}
+			if c, ok := v["container"].(string); ok {
+				container = c
+			}
+			if c, ok := v["color"].(string); ok {
+				color = c
+			}
+			if c, ok := v["connection"].(string); ok {
+				conn = c
+			}
+		default:
+			panic("backends: each backend must be a string or object")
+		}
+
+		// Validate backend type
+		backendCfg, ok := backends.GetConfig(backendType)
 		if !ok {
-			continue
+			panic(fmt.Sprintf("backends: unknown backend type '%s'. Valid types: %v",
+				backendType, backends.RegisteredBackends()))
 		}
 
-		driver, err := backends.NewDriver(name, conn)
+		// Apply defaults
+		if conn == "" {
+			conn = defaults[backendType]
+		}
+		if container == "" {
+			if alias != backendType {
+				container = alias // default container to alias if alias is set
+			} else {
+				container = defaultContainers[backendType]
+			}
+		}
+
+		// Check for duplicate alias
+		if _, exists := b.clients[alias]; exists {
+			panic(fmt.Sprintf("backends: duplicate alias '%s'", alias))
+		}
+
+		driver, err := backends.NewDriver(backendType, conn)
 		if err != nil {
-			continue
+			panic(fmt.Sprintf("backends: failed to create '%s': %v", alias, err))
 		}
 
-		// Register backend options once at init time
-		metrics.RegisterBackendOptions(name, &metrics.BackendOptions{
+		// Register backend options
+		metrics.RegisterBackendOptions(alias, &metrics.BackendOptions{
 			Container: container,
 			Alias:     alias,
 			Color:     color,
 		})
 
-		client := backends.NewK6Client(m.vu, driver, name)
+		client := backends.NewK6Client(m.vu, driver, alias)
+		b.clients[alias] = client
 		enabledContainers = append(enabledContainers, container)
-		driver.CaptureConfig(ctx, name)
 
-		// Capture pre/post scripts from dataset directory
-		metrics.CapturePrePostScripts(name, datasetPath, backendCfg.FileType)
-
-		// Assign to named fields for JS API compatibility
-		switch name {
-		case "paradedb":
-			b.ParadeDB = client
-		case "postgres-fts":
-			b.PostgresFts = client
-		case "":
-			b. = client
-		case "elasticsearch":
-			b.Elasticsearch = client
-		case "opensearch":
-			b.OpenSearch = client
-		case "clickhouse":
-			b.Clickhouse = client
-		case "mongodb":
-			b.MongoDB = client
-		}
+		driver.CaptureConfig(ctx, alias)
+		metrics.CapturePrePostScripts(alias, backendType, datasetPath, backendCfg.FileType)
 	}
 
 	// Auto-create metrics collector for enabled containers
@@ -105,64 +139,6 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	return b
 }
 
-// parseConn extracts connection string from config.
-func parseConn(cfg interface{}, defaultConn string) string {
-	switch v := cfg.(type) {
-	case bool:
-		if v {
-			return defaultConn
-		}
-		return ""
-	case string:
-		return v
-	case map[string]interface{}:
-		if c, ok := v["connection"].(string); ok {
-			return c
-		}
-		if c, ok := v["address"].(string); ok {
-			return c
-		}
-		return defaultConn
-	default:
-		return defaultConn
-	}
-}
-
-// parseContainer extracts container name from config, or returns default.
-// If alias is provided and container is not, container defaults to alias.
-func parseContainer(cfg interface{}, defaultContainer string, alias string) string {
-	if m, ok := cfg.(map[string]interface{}); ok {
-		if c, ok := m["container"].(string); ok {
-			return c
-		}
-	}
-	// Default container to alias if alias is set
-	if alias != "" {
-		return alias
-	}
-	return defaultContainer
-}
-
-// parseAlias extracts alias name from config.
-func parseAlias(cfg interface{}) string {
-	if m, ok := cfg.(map[string]interface{}); ok {
-		if a, ok := m["alias"].(string); ok {
-			return a
-		}
-	}
-	return ""
-}
-
-// parseColor extracts color from config.
-func parseColor(cfg interface{}) string {
-	if m, ok := cfg.(map[string]interface{}); ok {
-		if c, ok := m["color"].(string); ok {
-			return c
-		}
-	}
-	return ""
-}
-
 // Collect collects metrics from all enabled containers.
 func (b *Backends) Collect() map[string]interface{} {
 	if b.Metrics != nil {
@@ -172,7 +148,6 @@ func (b *Backends) Collect() map[string]interface{} {
 }
 
 // parseDatasetPath extracts dataset path from config.
-// The dataset path is the directory containing schema.yaml and backend subdirectories.
 func parseDatasetPath(config map[string]interface{}) string {
 	if dp, ok := config["datasetPath"].(string); ok {
 		return dp

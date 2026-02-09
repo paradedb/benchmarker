@@ -5,11 +5,14 @@ import exec from "k6/execution";
 
 // Configure backends - uses sensible defaults, override as needed
 const backends = search.backends({
-  paradedb: true,
-  elasticsearch: true,
-  "": true,
-  clickhouse: true,
-  mongodb: true,
+  datasetPath: "../",
+  backends: [
+    "paradedb",
+    "elasticsearch",
+    "",
+    "clickhouse",
+    "mongodb",
+  ],
 });
 
 const loader = search.loader();
@@ -145,7 +148,7 @@ export function collectMetrics() {
 // ==================== ParadeDB ====================
 export function pgSimpleQuery() {
   const term = getTerm();
-  backends.paradedb.search(
+  backends.get("paradedb").search(
     `
     SELECT id, title
     FROM documents
@@ -159,13 +162,13 @@ export function pgSimpleQuery() {
 
 export function pgIngest() {
   const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
-  backends.paradedb.insertBatch("documents", batch);
+  backends.get("paradedb").insertBatch("documents", batch);
 }
 
 // ==================== Elasticsearch ====================
 export function esSimpleQuery() {
   const term = getTerm();
-  backends.elasticsearch.search("documents", {
+  backends.get("elasticsearch").search("documents", {
     query: {
       match: { content: term },
     },
@@ -176,13 +179,13 @@ export function esSimpleQuery() {
 
 export function esIngest() {
   const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
-  backends.elasticsearch.insertBatch("documents", batch);
+  backends.get("elasticsearch").insertBatch("documents", batch);
 }
 
 // ====================  ====================
 export function Simple() {
   const term = getTerm();
-  backends..search(`
+  backends.get("").search(`
     SELECT id, title
     FROM documents
     ORDER BY content <@> '${term}'
@@ -192,13 +195,13 @@ export function Simple() {
 
 export function Ingest() {
   const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
-  backends..insertBatch("documents", batch);
+  backends.get("").insertBatch("documents", batch);
 }
 
 // ==================== ClickHouse ====================
 export function clickhouseSimple() {
   const term = getTerm();
-  backends.clickhouse.search(
+  backends.get("clickhouse").search(
     `
     SELECT id, title
     FROM documents
@@ -211,18 +214,18 @@ export function clickhouseSimple() {
 
 export function clickhouseIngest() {
   const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
-  backends.clickhouse.insertBatch("documents", batch);
+  backends.get("clickhouse").insertBatch("documents", batch);
 }
 
 // ==================== MongoDB ====================
 export function mongodbSimple() {
   const term = getTerm();
-  backends.mongodb.searchText("documents", "content", term);
+  backends.get("mongodb").searchText("documents", "content", term);
 }
 
 export function mongodbIngest() {
   const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
-  backends.mongodb.insertBatch("documents", batch);
+  backends.get("mongodb").insertBatch("documents", batch);
 }
 
 export function teardown() {
