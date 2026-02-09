@@ -56,7 +56,7 @@ benchmarker/
 ├── backends.go            # Backend config for k6
 ├── backends/
 │   ├── driver.go          # Driver interface
-│   ├── postgres/          # PostgreSQL (paradedb, postgres-fts, )
+│   ├── postgres/          # PostgreSQL (paradedb, postgresfts, )
 │   ├── elasticsearch/     # Elasticsearch
 │   ├── opensearch/        # OpenSearch
 │   ├── clickhouse/        # ClickHouse

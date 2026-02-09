@@ -20,12 +20,8 @@ import (
 
 // Schema defines the dataset schema from schema.yaml
 type Schema struct {
-	Columns    map[string]string `yaml:"columns"`
-	PrimaryKey string            `yaml:"primaryKey"`
-	Table      string            `yaml:"table"`
-	Index      string            `yaml:"index"`
-	Collection string            `yaml:"collection"`
-	Database   string            `yaml:"database"`
+	Table   string            `yaml:"table"`
+	Columns map[string]string `yaml:"columns"`
 }
 
 // BackendConfig holds all configuration for a backend.
@@ -407,14 +403,7 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, csvPath string, ba
 		}
 	}
 
-	// Get target (table/index/collection)
 	target := schema.Table
-	if target == "" {
-		target = schema.Index
-	}
-	if target == "" {
-		target = schema.Collection
-	}
 
 	total := 0
 	batch := make([][]any, 0, batchSize)

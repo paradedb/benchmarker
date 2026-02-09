@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/paradedb/benchmarks/backends"
 	"github.com/paradedb/benchmarks/metrics"
@@ -140,9 +141,12 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 }
 
 // Collect collects metrics from all enabled containers.
+// Includes a 500ms sleep to avoid polling too frequently.
 func (b *Backends) Collect() map[string]interface{} {
 	if b.Metrics != nil {
-		return b.Metrics.Collect()
+		result := b.Metrics.Collect()
+		time.Sleep(500 * time.Millisecond)
+		return result
 	}
 	return nil
 }

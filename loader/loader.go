@@ -357,7 +357,7 @@ func (l *Loader) LoadParadeDB(connectionString string, config map[string]interfa
 
 // LoadPostgresFTS loads JSONL data into vanilla PostgreSQL with tsquery/tsvector.
 func (l *Loader) LoadPostgresFTS(connectionString string, config map[string]interface{}) map[string]interface{} {
-	return l.Load("postgres-fts", connectionString, config)
+	return l.Load("postgresfts", connectionString, config)
 }
 
 // Load loads JSONL data into PostgreSQL with  extension.

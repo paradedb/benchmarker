@@ -1,6 +1,5 @@
 import search from "k6/x/search";
 import { SharedArray } from "k6/data";
-import { sleep } from "k6";
 import exec from "k6/execution";
 
 // Configure backends - uses sensible defaults, override as needed
@@ -41,7 +40,6 @@ export const options = {
 
 export function collectMetrics() {
   backends.collect();
-  sleep(0.5);
 }
 
 // ParadeDB simple query
