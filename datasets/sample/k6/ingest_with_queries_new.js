@@ -1,7 +1,7 @@
-import search from 'k6/x/search';
-import { SharedArray } from 'k6/data';
-import { sleep } from 'k6';
-import exec from 'k6/execution';
+import search from "k6/x/search";
+import { SharedArray } from "k6/data";
+import { sleep } from "k6";
+import exec from "k6/execution";
 
 // Configure backends - uses sensible defaults, override as needed
 const backends = search.backends({
@@ -15,12 +15,14 @@ const backends = search.backends({
 const loader = search.loader();
 
 // Load search terms once, shared across all VUs
-const terms = new SharedArray('search_terms', function() {
-  return JSON.parse(open('./search_terms.json'));
+const terms = new SharedArray("search_terms", function () {
+  return JSON.parse(open("./search_terms.json"));
 });
 
 // Load documents once on Go side - shared across all VUs
-const DATA_FILE = __ENV.DATA_FILE || '/Users/jamesblackwood-sewell/ParadeDB-vs-ElasticSearch/data/documents_small.json';
+const DATA_FILE =
+  __ENV.DATA_FILE ||
+  "/Users/jamesblackwood-sewell/ParadeDB-vs-ElasticSearch/data/documents_small.json";
 const docs = loader.openDocuments(DATA_FILE);
 
 // Ingest batch size
@@ -35,98 +37,98 @@ export const options = {
   scenarios: {
     // Metrics collection - covers all phases
     metrics_collector: {
-      executor: 'constant-vus',
+      executor: "constant-vus",
       vus: 1,
-      duration: '3m',
-      exec: 'collectMetrics',
+      duration: "3m",
+      exec: "collectMetrics",
     },
 
     // ==================== ParadeDB ====================
     // ParadeDB query: 0s - 30s
     pdb_query: {
-      executor: 'constant-vus',
+      executor: "constant-vus",
       vus: 5,
-      duration: '30s',
-      exec: 'pgSimpleQuery',
+      duration: "30s",
+      exec: "pgSimpleQuery",
     },
     // ParadeDB ingest: 0s - 30s (parallel with query)
     pdb_ingest: {
-      executor: 'constant-vus',
+      executor: "constant-vus",
       vus: 2,
-      duration: '30s',
-      exec: 'pgIngest',
+      duration: "30s",
+      exec: "pgIngest",
     },
 
     // ==================== Elasticsearch ====================
     // Elasticsearch query: 35s - 65s
     es_query: {
-      executor: 'constant-vus',
+      executor: "constant-vus",
       vus: 5,
-      duration: '30s',
-      startTime: '35s',
-      exec: 'esSimpleQuery',
+      duration: "30s",
+      startTime: "35s",
+      exec: "esSimpleQuery",
     },
     // Elasticsearch ingest: 35s - 65s (parallel with query)
     es_ingest: {
-      executor: 'constant-vus',
+      executor: "constant-vus",
       vus: 2,
-      duration: '30s',
-      startTime: '35s',
-      exec: 'esIngest',
+      duration: "30s",
+      startTime: "35s",
+      exec: "esIngest",
     },
 
     // ==================== pg_textsearch ====================
     // pg_textsearch query: 70s - 100s
     textsearch_query: {
-      executor: 'constant-vus',
+      executor: "constant-vus",
       vus: 5,
-      duration: '30s',
-      startTime: '70s',
-      exec: 'textsearchSimple',
+      duration: "30s",
+      startTime: "70s",
+      exec: "textsearchSimple",
     },
     // pg_textsearch ingest: 70s - 100s (parallel with query)
     textsearch_ingest: {
-      executor: 'constant-vus',
+      executor: "constant-vus",
       vus: 2,
-      duration: '30s',
-      startTime: '70s',
-      exec: 'textsearchIngest',
+      duration: "30s",
+      startTime: "70s",
+      exec: "textsearchIngest",
     },
 
     // ==================== ClickHouse ====================
     // ClickHouse query: 105s - 135s
     clickhouse_query: {
-      executor: 'constant-vus',
+      executor: "constant-vus",
       vus: 5,
-      duration: '30s',
-      startTime: '105s',
-      exec: 'clickhouseSimple',
+      duration: "30s",
+      startTime: "105s",
+      exec: "clickhouseSimple",
     },
     // ClickHouse ingest: 105s - 135s (parallel with query)
     clickhouse_ingest: {
-      executor: 'constant-vus',
+      executor: "constant-vus",
       vus: 2,
-      duration: '30s',
-      startTime: '105s',
-      exec: 'clickhouseIngest',
+      duration: "30s",
+      startTime: "105s",
+      exec: "clickhouseIngest",
     },
 
     // ==================== MongoDB ====================
     // MongoDB query: 140s - 170s
     mongodb_query: {
-      executor: 'constant-vus',
+      executor: "constant-vus",
       vus: 5,
-      duration: '30s',
-      startTime: '140s',
-      exec: 'mongodbSimple',
+      duration: "30s",
+      startTime: "140s",
+      exec: "mongodbSimple",
     },
     // MongoDB ingest: 140s - 170s (parallel with query)
     mongodb_ingest: {
-      executor: 'constant-vus',
+      executor: "constant-vus",
       vus: 2,
-      duration: '30s',
-      startTime: '140s',
-      exec: 'mongodbIngest',
+      duration: "30s",
+      startTime: "140s",
+      exec: "mongodbIngest",
     },
   },
 };
@@ -143,35 +145,38 @@ export function collectMetrics() {
 // ==================== ParadeDB ====================
 export function pgSimpleQuery() {
   const term = getTerm();
-  backends.paradedb.search(`
+  backends.paradedb.search(
+    `
     SELECT id, title
     FROM documents
     WHERE content ||| $1
     ORDER BY pdb.score(id) DESC
     LIMIT 10
-  `, term);
+  `,
+    term,
+  );
 }
 
 export function pgIngest() {
   const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
-  backends.paradedb.insertBatch('documents', batch);
+  backends.paradedb.insertBatch("documents", batch);
 }
 
 // ==================== Elasticsearch ====================
 export function esSimpleQuery() {
   const term = getTerm();
-  backends.elasticsearch.search('documents', {
+  backends.elasticsearch.search("documents", {
     query: {
       match: { content: term },
     },
-    _source: ['id', 'title'],
+    _source: ["id", "title"],
     size: 10,
   });
 }
 
 export function esIngest() {
   const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
-  backends.elasticsearch.insertBatch('documents', batch);
+  backends.elasticsearch.insertBatch("documents", batch);
 }
 
 // ==================== pg_textsearch ====================
@@ -187,34 +192,37 @@ export function textsearchSimple() {
 
 export function textsearchIngest() {
   const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
-  backends.textsearch.insertBatch('documents', batch);
+  backends.textsearch.insertBatch("documents", batch);
 }
 
 // ==================== ClickHouse ====================
 export function clickhouseSimple() {
   const term = getTerm();
-  backends.clickhouse.search(`
+  backends.clickhouse.search(
+    `
     SELECT id, title
     FROM documents
     WHERE hasToken(content, ?)
     LIMIT 10
-  `, term);
+  `,
+    term,
+  );
 }
 
 export function clickhouseIngest() {
   const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
-  backends.clickhouse.insertBatch('documents', batch);
+  backends.clickhouse.insertBatch("documents", batch);
 }
 
 // ==================== MongoDB ====================
 export function mongodbSimple() {
   const term = getTerm();
-  backends.mongodb.searchText('documents', 'content', term);
+  backends.mongodb.searchText("documents", "content", term);
 }
 
 export function mongodbIngest() {
   const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
-  backends.mongodb.insertBatch('documents', batch);
+  backends.mongodb.insertBatch("documents", batch);
 }
 
 export function teardown() {
