@@ -17,15 +17,15 @@ import (
 
 // Backends holds all configured backend clients.
 type Backends struct {
-	vu         modules.VU
-	Paradedb   *backends.K6Client `js:"paradedb"`
-	PgFTS      *backends.K6Client `js:"postgresFts"`
-	 *backends.K6Client `js:""`
-	Elastic    *backends.K6Client `js:"elasticsearch"`
-	OpenSearch *backends.K6Client `js:"opensearch"`
-	Click      *backends.K6Client `js:"clickhouse"`
-	Mongo      *backends.K6Client `js:"mongodb"`
-	Metrics    *metrics.Collector `js:"metrics"`
+	vu            modules.VU
+	ParadeDB      *backends.K6Client `js:"paradedb"`
+	PostgresFts   *backends.K6Client `js:"postgresfts"`
+	  *backends.K6Client `js:""`
+	Elasticsearch *backends.K6Client `js:"elasticsearch"`
+	OpenSearch    *backends.K6Client `js:"opensearch"`
+	Clickhouse    *backends.K6Client `js:"clickhouse"`
+	MongoDB       *backends.K6Client `js:"mongodb"`
+	Metrics       *metrics.Collector `js:"metrics"`
 }
 
 // newBackends creates a new backends registry with the specified configuration.
@@ -40,7 +40,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	for name, cfg := range config {
 		alias := parseAlias(cfg)
 		container := parseContainer(cfg, containers[name], alias)
-		opts := backends.K6ClientOptions{Container: container, Alias: alias}
+		color := parseColor(cfg)
 		conn := parseConn(cfg, defaults[name])
 
 		driver, err := backends.NewDriver(name, conn)
@@ -48,26 +48,33 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 			continue
 		}
 
-		client := backends.NewK6Client(m.vu, driver, name, opts)
+		// Register backend options once at init time
+		metrics.RegisterBackendOptions(name, &metrics.BackendOptions{
+			Container: container,
+			Alias:     alias,
+			Color:     color,
+		})
+
+		client := backends.NewK6Client(m.vu, driver, name)
 		enabledContainers = append(enabledContainers, container)
 		driver.CaptureConfig(ctx, name)
 
 		// Assign to named fields for JS API compatibility
 		switch name {
 		case "paradedb":
-			b.Paradedb = client
+			b.ParadeDB = client
 		case "postgres-fts":
-			b.PgFTS = client
+			b.PostgresFts = client
 		case "":
 			b. = client
 		case "elasticsearch":
-			b.Elastic = client
+			b.Elasticsearch = client
 		case "opensearch":
 			b.OpenSearch = client
 		case "clickhouse":
-			b.Click = client
+			b.Clickhouse = client
 		case "mongodb":
-			b.Mongo = client
+			b.MongoDB = client
 		}
 	}
 
@@ -128,6 +135,16 @@ func parseAlias(cfg interface{}) string {
 	if m, ok := cfg.(map[string]interface{}); ok {
 		if a, ok := m["alias"].(string); ok {
 			return a
+		}
+	}
+	return ""
+}
+
+// parseColor extracts color from config.
+func parseColor(cfg interface{}) string {
+	if m, ok := cfg.(map[string]interface{}); ok {
+		if c, ok := m["color"].(string); ok {
+			return c
 		}
 	}
 	return ""

@@ -26,10 +26,21 @@ var (
 	containerLimitsMu sync.Mutex
 	limitsCapture     = make(map[string]bool)
 
-	// Backend configs (registered by each backend)
+	// Backend configs (registered by each backend - database settings etc)
 	backendConfigs   = make(map[string]map[string]interface{})
 	backendConfigsMu sync.RWMutex
+
+	// Backend options (registered once at init - container, alias, color)
+	backendOptions   = make(map[string]*BackendOptions)
+	backendOptionsMu sync.RWMutex
 )
+
+// BackendOptions holds user-specified options for a backend.
+type BackendOptions struct {
+	Container string
+	Alias     string
+	Color     string
+}
 
 // RegisterBackendConfig stores a backend's configuration for dashboard display.
 // Called by backends when they capture their database config.
@@ -44,6 +55,33 @@ func GetBackendConfig(backend string) map[string]interface{} {
 	backendConfigsMu.RLock()
 	defer backendConfigsMu.RUnlock()
 	return backendConfigs[backend]
+}
+
+// RegisterBackendOptions stores user-specified options for a backend.
+// Called once at init time from backends.go.
+func RegisterBackendOptions(backend string, opts *BackendOptions) {
+	backendOptionsMu.Lock()
+	defer backendOptionsMu.Unlock()
+	backendOptions[backend] = opts
+}
+
+// GetBackendOptions returns the registered options for a backend.
+func GetBackendOptions(backend string) *BackendOptions {
+	backendOptionsMu.RLock()
+	defer backendOptionsMu.RUnlock()
+	return backendOptions[backend]
+}
+
+// GetAllBackendOptions returns all registered backend options.
+func GetAllBackendOptions() map[string]*BackendOptions {
+	backendOptionsMu.RLock()
+	defer backendOptionsMu.RUnlock()
+	// Return a copy to avoid race conditions
+	result := make(map[string]*BackendOptions)
+	for k, v := range backendOptions {
+		result[k] = v
+	}
+	return result
 }
 
 // Collector collects container metrics via Docker API.
