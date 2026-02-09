@@ -127,7 +127,7 @@ services:
   pg-textsearch:
     profiles: [pg-textsearch, all]
     build:
-      context: ./docker/pg_textsearch
+      context: ./backends/docker/pg_textsearch
       dockerfile: Dockerfile
     container_name: pg-textsearch
     environment:

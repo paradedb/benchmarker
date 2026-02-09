@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"go.k6.io/k6/js/modules"
+	"go.k6.io/k6/lib"
+	"go.k6.io/k6/lib/executor"
 	"go.k6.io/k6/metrics"
 )
 
@@ -20,7 +22,17 @@ var (
 	// Query patterns per scenario (captured on first call)
 	QueryPatterns   = make(map[string]string)
 	queryPatternsMu sync.RWMutex
+
+	// Scenario info per scenario (captured on first call)
+	ScenarioInfos   = make(map[string]*ScenarioInfo)
+	scenarioInfosMu sync.RWMutex
 )
+
+// ScenarioInfo holds executor and VU information for a scenario.
+type ScenarioInfo struct {
+	Executor string
+	VUs      int64
+}
 
 // RegisterMetrics registers the unified metrics once during init phase.
 // Call this from any backend's NewClient during init.
@@ -62,6 +74,86 @@ func CaptureQueryPattern(vu modules.VU, query string) {
 	}
 }
 
+// CaptureScenarioInfo stores executor and VU info for each scenario.
+func CaptureScenarioInfo(vu modules.VU) {
+	state := vu.State()
+	if state == nil {
+		return
+	}
+
+	tags := state.Tags.GetCurrentValues()
+	scenario, ok := tags.Tags.Get("scenario")
+	if !ok {
+		return
+	}
+
+	scenarioInfosMu.RLock()
+	_, exists := ScenarioInfos[scenario]
+	scenarioInfosMu.RUnlock()
+
+	if exists {
+		return
+	}
+
+	// Look up scenario config from options
+	scenarioConfig, ok := state.Options.Scenarios[scenario]
+	if !ok {
+		return
+	}
+
+	info := &ScenarioInfo{
+		Executor: scenarioConfig.GetType(),
+	}
+
+	// Extract VUs based on executor type
+	info.VUs = getExecutorVUs(scenarioConfig)
+
+	scenarioInfosMu.Lock()
+	if _, exists := ScenarioInfos[scenario]; !exists {
+		ScenarioInfos[scenario] = info
+	}
+	scenarioInfosMu.Unlock()
+}
+
+// getExecutorVUs extracts VU count from various executor config types.
+func getExecutorVUs(cfg lib.ExecutorConfig) int64 {
+	switch c := cfg.(type) {
+	case executor.ConstantVUsConfig:
+		return c.VUs.Int64
+	case *executor.ConstantVUsConfig:
+		return c.VUs.Int64
+	case executor.RampingVUsConfig:
+		var maxVUs int64
+		for _, stage := range c.Stages {
+			if stage.Target.Int64 > maxVUs {
+				maxVUs = stage.Target.Int64
+			}
+		}
+		return maxVUs
+	case *executor.RampingVUsConfig:
+		var maxVUs int64
+		for _, stage := range c.Stages {
+			if stage.Target.Int64 > maxVUs {
+				maxVUs = stage.Target.Int64
+			}
+		}
+		return maxVUs
+	case executor.SharedIterationsConfig:
+		return c.VUs.Int64
+	case *executor.SharedIterationsConfig:
+		return c.VUs.Int64
+	case executor.PerVUIterationsConfig:
+		return c.VUs.Int64
+	case *executor.PerVUIterationsConfig:
+		return c.VUs.Int64
+	case *executor.ConstantArrivalRateConfig:
+		return c.PreAllocatedVUs.Int64
+	case *executor.RampingArrivalRateConfig:
+		return c.PreAllocatedVUs.Int64
+	}
+	return 0
+}
+
 // SearchResult represents the result of a search operation.
 type SearchResult struct {
 	Hits      int64
@@ -69,14 +161,8 @@ type SearchResult struct {
 	Error     string
 }
 
-// EmitOptions contains optional tags for metric emission.
-type EmitOptions struct {
-	Container string
-	Alias     string
-}
-
 // Emit pushes search metrics to k6 with the backend tag.
-func (r *SearchResult) Emit(ctx context.Context, vu modules.VU, backend string, opts ...EmitOptions) {
+func (r *SearchResult) Emit(ctx context.Context, vu modules.VU, backend string) {
 	if r.Error != "" {
 		return // Don't emit metrics on error
 	}
@@ -90,16 +176,6 @@ func (r *SearchResult) Emit(ctx context.Context, vu modules.VU, backend string, 
 	tags := state.Tags.GetCurrentValues().Tags
 	if backend != "" {
 		tags = tags.With("backend", backend)
-	}
-
-	// Add container and alias tags if provided
-	if len(opts) > 0 {
-		if opts[0].Container != "" {
-			tags = tags.With("container", opts[0].Container)
-		}
-		if opts[0].Alias != "" {
-			tags = tags.With("alias", opts[0].Alias)
-		}
 	}
 
 	metrics.PushIfNotDone(ctx, state.Samples, metrics.Sample{
@@ -134,7 +210,7 @@ type IngestResult struct {
 }
 
 // Emit pushes ingest metrics to k6 with the backend tag.
-func (r *IngestResult) Emit(ctx context.Context, vu modules.VU, backend string, opts ...EmitOptions) {
+func (r *IngestResult) Emit(ctx context.Context, vu modules.VU, backend string) {
 	if r.Error != "" {
 		return // Don't emit metrics on error
 	}
@@ -148,16 +224,6 @@ func (r *IngestResult) Emit(ctx context.Context, vu modules.VU, backend string, 
 	tags := state.Tags.GetCurrentValues().Tags
 	if backend != "" {
 		tags = tags.With("backend", backend)
-	}
-
-	// Add container and alias tags if provided
-	if len(opts) > 0 {
-		if opts[0].Container != "" {
-			tags = tags.With("container", opts[0].Container)
-		}
-		if opts[0].Alias != "" {
-			tags = tags.With("alias", opts[0].Alias)
-		}
 	}
 
 	metrics.PushIfNotDone(ctx, state.Samples, metrics.Sample{

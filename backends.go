@@ -40,7 +40,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	for name, cfg := range config {
 		alias := parseAlias(cfg)
 		container := parseContainer(cfg, containers[name], alias)
-		opts := backends.K6ClientOptions{Container: container, Alias: alias}
+		color := parseColor(cfg)
 		conn := parseConn(cfg, defaults[name])
 
 		driver, err := backends.NewDriver(name, conn)
@@ -48,7 +48,14 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 			continue
 		}
 
-		client := backends.NewK6Client(m.vu, driver, name, opts)
+		// Register backend options once at init time
+		metrics.RegisterBackendOptions(name, &metrics.BackendOptions{
+			Container: container,
+			Alias:     alias,
+			Color:     color,
+		})
+
+		client := backends.NewK6Client(m.vu, driver, name)
 		enabledContainers = append(enabledContainers, container)
 		driver.CaptureConfig(ctx, name)
 
@@ -128,6 +135,16 @@ func parseAlias(cfg interface{}) string {
 	if m, ok := cfg.(map[string]interface{}); ok {
 		if a, ok := m["alias"].(string); ok {
 			return a
+		}
+	}
+	return ""
+}
+
+// parseColor extracts color from config.
+func parseColor(cfg interface{}) string {
+	if m, ok := cfg.(map[string]interface{}); ok {
+		if c, ok := m["color"].(string); ok {
+			return c
 		}
 	}
 	return ""

@@ -53,6 +53,8 @@ type RunMetrics struct {
 	Backend        string                   `json:"backend"`   // Backend type: paradedb, elasticsearch, clickhouse, mongodb, etc.
 	Container      string                   `json:"container"` // Docker container name for resource metrics
 	Alias          string                   `json:"alias"`     // User-defined alias for this backend instance
+	Color          string                   `json:"color"`     // Custom color for this backend
+	Chart          string                   `json:"chart"`     // Chart group for separating graphs
 	Latencies      []float64                `json:"latencies"`
 	Timeline       []TimelinePoint          `json:"timeline"`
 	CPU            []TimeValue              `json:"cpu"`
@@ -70,7 +72,10 @@ type RunMetrics struct {
 // QueryMetrics holds metrics for a specific query type within a run.
 type QueryMetrics struct {
 	Name      string          `json:"name"`
+	VUs       int             `json:"vus"`
+	Executor  string          `json:"executor"`
 	Latencies []float64       `json:"latencies"`
+	HitCounts []int64         `json:"-"` // Raw hit counts for timeline calculation
 	Timeline  []TimelinePoint `json:"timeline"`
 }
 
@@ -82,6 +87,7 @@ type TimelinePoint struct {
 	P95   float64 `json:"p95"`
 	P99   float64 `json:"p99"`
 	Count int     `json:"count"`
+	Hits  float64 `json:"hits"` // Average hits per query in this interval
 }
 
 // TimeValue is a timestamped value.
@@ -197,42 +203,49 @@ func (o *Output) flush() {
 
 			switch {
 			case name == "search_duration":
-				// Get run identifier: prefer alias, then backend, then run, then scenario
-				run := tags["alias"]
-				if run == "" {
-					run = tags["backend"]
+				// Get backend name from tag
+				backend := tags["backend"]
+				if backend == "" {
+					backend = tags["run"]
 				}
-				if run == "" {
-					run = tags["run"]
+				if backend == "" {
+					backend = tags["scenario"]
 				}
-				if run == "" {
-					run = tags["scenario"]
-				}
-				if run == "" {
+				if backend == "" {
 					continue
+				}
+
+				// Look up backend options (registered at init time)
+				opts := metrics.GetBackendOptions(backend)
+
+				// Determine run identifier: prefer alias, then backend
+				run := backend
+				if opts != nil && opts.Alias != "" {
+					run = opts.Alias
+				}
+
+				// If chart tag is set, append it to run identifier to separate chart groups
+				if chart := tags["chart"]; chart != "" {
+					run = run + " (" + chart + ")"
 				}
 
 				// Get or create run metrics
 				if o.data.Runs[run] == nil {
-					o.data.Runs[run] = &RunMetrics{
-						Name:      run,
-						Backend:   tags["backend"],
-						Container: tags["container"],
-						Alias:     tags["alias"],
-						Queries:   make(map[string]*QueryMetrics),
+					rm := &RunMetrics{
+						Name:    run,
+						Backend: backend,
+						Chart:   tags["chart"],
+						Queries: make(map[string]*QueryMetrics),
 					}
+					// Apply backend options if available
+					if opts != nil {
+						rm.Container = opts.Container
+						rm.Alias = opts.Alias
+						rm.Color = opts.Color
+					}
+					o.data.Runs[run] = rm
 				}
-				// Update backend/container/alias if provided and not yet set
 				rm := o.data.Runs[run]
-				if rm.Backend == "" && tags["backend"] != "" {
-					rm.Backend = tags["backend"]
-				}
-				if rm.Container == "" && tags["container"] != "" {
-					rm.Container = tags["container"]
-				}
-				if rm.Alias == "" && tags["alias"] != "" {
-					rm.Alias = tags["alias"]
-				}
 				rm.Latencies = append(rm.Latencies, value)
 				if rm.StartTime == 0 {
 					rm.StartTime = now
@@ -251,7 +264,56 @@ func (o *Output) flush() {
 					if rm.Queries[queryName] == nil {
 						rm.Queries[queryName] = &QueryMetrics{Name: queryName}
 					}
-					rm.Queries[queryName].Latencies = append(rm.Queries[queryName].Latencies, value)
+					qm := rm.Queries[queryName]
+					qm.Latencies = append(qm.Latencies, value)
+					// Get VUs and executor from captured scenario info
+					if qm.VUs == 0 || qm.Executor == "" {
+						if info := metrics.ScenarioInfos[queryName]; info != nil {
+							if qm.VUs == 0 {
+								qm.VUs = int(info.VUs)
+							}
+							if qm.Executor == "" {
+								qm.Executor = info.Executor
+							}
+						}
+					}
+				}
+
+			case name == "search_hits":
+				// Get backend and run identifier (same logic as search_duration)
+				backend := tags["backend"]
+				if backend == "" {
+					backend = tags["run"]
+				}
+				if backend == "" {
+					backend = tags["scenario"]
+				}
+				if backend == "" {
+					continue
+				}
+
+				opts := metrics.GetBackendOptions(backend)
+				run := backend
+				if opts != nil && opts.Alias != "" {
+					run = opts.Alias
+				}
+				if chart := tags["chart"]; chart != "" {
+					run = run + " (" + chart + ")"
+				}
+
+				rm := o.data.Runs[run]
+				if rm == nil {
+					continue // Run should already exist from search_duration
+				}
+
+				queryName := tags["query"]
+				if queryName == "" {
+					queryName = tags["scenario"]
+				}
+				if queryName != "" && rm.Queries != nil {
+					if qm := rm.Queries[queryName]; qm != nil {
+						qm.HitCounts = append(qm.HitCounts, int64(value))
+					}
 				}
 
 			case name == "container_cpu_percent":
@@ -267,40 +329,48 @@ func (o *Output) flush() {
 				}
 
 			case name == "ingest_docs":
-				// Get run identifier: prefer alias, then backend, then run, then scenario
-				run := tags["alias"]
-				if run == "" {
-					run = tags["backend"]
+				// Get backend name from tag
+				backend := tags["backend"]
+				if backend == "" {
+					backend = tags["run"]
 				}
-				if run == "" {
-					run = tags["run"]
+				if backend == "" {
+					backend = tags["scenario"]
 				}
-				if run == "" {
-					run = tags["scenario"]
-				}
-				if run == "" {
+				if backend == "" {
 					continue
 				}
 
+				// Look up backend options (registered at init time)
+				opts := metrics.GetBackendOptions(backend)
+
+				// Determine run identifier: prefer alias, then backend
+				run := backend
+				if opts != nil && opts.Alias != "" {
+					run = opts.Alias
+				}
+
+				// If chart tag is set, append it to run identifier to separate chart groups
+				if chart := tags["chart"]; chart != "" {
+					run = run + " (" + chart + ")"
+				}
+
 				if o.data.Runs[run] == nil {
-					o.data.Runs[run] = &RunMetrics{
-						Name:      run,
-						Backend:   tags["backend"],
-						Container: tags["container"],
-						Alias:     tags["alias"],
-						Queries:   make(map[string]*QueryMetrics),
+					rm := &RunMetrics{
+						Name:    run,
+						Backend: backend,
+						Chart:   tags["chart"],
+						Queries: make(map[string]*QueryMetrics),
 					}
+					// Apply backend options if available
+					if opts != nil {
+						rm.Container = opts.Container
+						rm.Alias = opts.Alias
+						rm.Color = opts.Color
+					}
+					o.data.Runs[run] = rm
 				}
 				rm := o.data.Runs[run]
-				if rm.Backend == "" && tags["backend"] != "" {
-					rm.Backend = tags["backend"]
-				}
-				if rm.Container == "" && tags["container"] != "" {
-					rm.Container = tags["container"]
-				}
-				if rm.Alias == "" && tags["alias"] != "" {
-					rm.Alias = tags["alias"]
-				}
 				rm.TotalIngested += int64(value)
 				if rm.StartTime == 0 {
 					rm.StartTime = now
@@ -344,6 +414,19 @@ func (o *Output) updateQueryTimeline(qm *QueryMetrics, runStartTime int64, now i
 		return
 	}
 
+	// Calculate average hits for this interval
+	var avgHits float64
+	if len(qm.HitCounts) > lastIdx {
+		recentHits := qm.HitCounts[lastIdx:]
+		if len(recentHits) > 0 {
+			var sum int64
+			for _, h := range recentHits {
+				sum += h
+			}
+			avgHits = float64(sum) / float64(len(recentHits))
+		}
+	}
+
 	qm.Timeline = append(qm.Timeline, TimelinePoint{
 		Time:  now,
 		P50:   percentile(recent, 50),
@@ -351,6 +434,7 @@ func (o *Output) updateQueryTimeline(qm *QueryMetrics, runStartTime int64, now i
 		P95:   percentile(recent, 95),
 		P99:   percentile(recent, 99),
 		Count: len(recent),
+		Hits:  avgHits,
 	})
 }
 
@@ -567,6 +651,8 @@ func (o *Output) getSummary() map[string]interface{} {
 
 			queries[qName] = map[string]interface{}{
 				"name":     qm.Name,
+				"vus":      qm.VUs,
+				"executor": qm.Executor,
 				"count":    len(qm.Latencies),
 				"qps":      queryQPS,
 				"min":      minVal(qm.Latencies),
@@ -587,6 +673,8 @@ func (o *Output) getSummary() map[string]interface{} {
 			"backend":         rm.Backend,
 			"container":       rm.Container,
 			"alias":           rm.Alias,
+			"color":           rm.Color,
+			"chart":           rm.Chart,
 			"cpu":             rm.CPU,
 			"memory":          rm.Memory,
 			"ingestRate":      rm.IngestRate,
@@ -776,7 +864,7 @@ func ServeFile(filename string) error {
 	}
 
 	fmt.Printf("\n📊 Viewing: %s\n", filename)
-	fmt.Printf("   Dashboard: http://localhost:5665/static/\n")
+	fmt.Printf("   Chart: http://localhost:5665/static/\n")
 	fmt.Printf("   Press Ctrl+C to exit\n\n")
 
 	return server.ListenAndServe()
