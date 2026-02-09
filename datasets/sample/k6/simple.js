@@ -5,7 +5,8 @@ import exec from "k6/execution";
 
 // Configure backends - uses sensible defaults, override as needed
 const backends = search.backends({
-  paradedb: true,
+  datasetPath: "../",
+  backends: ["paradedb"],
 });
 
 // Load search terms once, shared across all VUs
@@ -46,7 +47,7 @@ export function collectMetrics() {
 // ParadeDB simple query
 export function pgSimpleQuery() {
   const term = getTerm();
-  backends.paradedb.search(
+  backends.get("paradedb").search(
     `
     SELECT id, title
     FROM documents

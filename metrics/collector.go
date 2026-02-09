@@ -60,8 +60,9 @@ func GetBackendConfig(backend string) map[string]interface{} {
 }
 
 // CapturePrePostScripts reads pre/post scripts from the dataset directory
-// and adds them to the backend's config. The fileType should be "sql" or "json".
-func CapturePrePostScripts(backend, datasetPath, fileType string) {
+// and adds them to the backend's config. The alias is used as the config key,
+// while backendType is used for the directory name. The fileType should be "sql" or "json".
+func CapturePrePostScripts(alias, backendType, datasetPath, fileType string) {
 	if datasetPath == "" {
 		return
 	}
@@ -69,18 +70,18 @@ func CapturePrePostScripts(backend, datasetPath, fileType string) {
 	backendConfigsMu.Lock()
 	defer backendConfigsMu.Unlock()
 
-	config := backendConfigs[backend]
+	config := backendConfigs[alias]
 	if config == nil {
 		config = make(map[string]interface{})
-		backendConfigs[backend] = config
+		backendConfigs[alias] = config
 	}
 
-	preFile := filepath.Join(datasetPath, backend, "pre."+fileType)
+	preFile := filepath.Join(datasetPath, backendType, "pre."+fileType)
 	if data, err := os.ReadFile(preFile); err == nil {
 		config["pre_script"] = string(data)
 	}
 
-	postFile := filepath.Join(datasetPath, backend, "post."+fileType)
+	postFile := filepath.Join(datasetPath, backendType, "post."+fileType)
 	if data, err := os.ReadFile(postFile); err == nil {
 		config["post_script"] = string(data)
 	}
