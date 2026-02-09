@@ -411,6 +411,8 @@ columns:
 
 ### Pre/Post Scripts
 
+Pre and post scripts are defined per dataset in the dataset directory (e.g., `datasets/sample/paradedb/pre.sql`). They run during data loading to set up and optimize each backend.
+
 #### SQL Backends (ParadeDB, PostgreSQL, ClickHouse)
 
 Pre and post scripts are standard SQL executed directly:
