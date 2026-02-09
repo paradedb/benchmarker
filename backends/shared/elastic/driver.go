@@ -1,5 +1,6 @@
-// Package opensearch provides the OpenSearch driver implementation.
-package opensearch
+// Package elastic provides the shared Elasticsearch/OpenSearch driver implementation.
+// Individual backends (elasticsearch, opensearch) import this package and register themselves.
+package elastic
 
 import (
 	"bytes"
@@ -16,39 +17,44 @@ import (
 	"github.com/paradedb/benchmarks/metrics"
 )
 
-func init() {
-	backends.Register("opensearch", backends.BackendConfig{
-		Factory:     New,
-		FileType:    "json",
-		EnvVar:      "OPENSEARCH_URL",
-		DefaultConn: "http://localhost:9201",
-		Container:   "opensearch",
-	})
+// DriverConfig holds backend-specific configuration.
+type DriverConfig struct {
+	SkipTLSVerify    bool   // OpenSearch often uses self-signed certs
+	VersionInfoField string // "build_flavor" for ES, "distribution" for OS
 }
 
-// Driver implements the backends.Driver interface for OpenSearch.
+// Driver implements the backends.Driver interface for Elasticsearch/OpenSearch.
 type Driver struct {
 	address string
 	client  *http.Client
+	config  DriverConfig
 }
 
-// New creates a new OpenSearch driver.
-func New(address string) (backends.Driver, error) {
-	// OpenSearch often uses self-signed certs in dev
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+// New creates a new Elasticsearch/OpenSearch driver.
+func New(address string, config DriverConfig) (backends.Driver, error) {
+	transport := &http.Transport{}
+	if config.SkipTLSVerify {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 	return &Driver{
 		address: strings.TrimSuffix(address, "/"),
 		client:  &http.Client{Timeout: 5 * time.Minute, Transport: transport},
+		config:  config,
 	}, nil
 }
 
-// Close is a no-op for OpenSearch.
+// Close is a no-op.
 func (d *Driver) Close() error { return nil }
 
 // Exec executes JSON configuration (create index, update settings, etc).
 func (d *Driver) Exec(ctx context.Context, statements string) error {
+	// Try parsing as array first (post.json format)
+	var operations []map[string]interface{}
+	if err := json.Unmarshal([]byte(statements), &operations); err == nil {
+		return d.execOperations(ctx, operations)
+	}
+
+	// Parse as single object (pre.json format)
 	var config map[string]interface{}
 	if err := json.Unmarshal([]byte(statements), &config); err != nil {
 		return err
@@ -59,15 +65,6 @@ func (d *Driver) Exec(ctx context.Context, statements string) error {
 		index = idx
 	}
 
-	// Check if this is pre (has mappings/settings) or post (has refresh/forcemerge)
-	if _, hasMappings := config["mappings"]; hasMappings {
-		return d.createIndex(ctx, index, config)
-	}
-	if _, hasSettings := config["settings"]; hasSettings && config["mappings"] == nil {
-		return d.postLoad(ctx, index, config)
-	}
-
-	// Default: try to create index
 	return d.createIndex(ctx, index, config)
 }
 
@@ -97,17 +94,53 @@ func (d *Driver) createIndex(ctx context.Context, index string, config map[strin
 	return nil
 }
 
-func (d *Driver) postLoad(ctx context.Context, index string, config map[string]interface{}) error {
-	// Refresh
-	req, _ := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/%s/_refresh", d.address, index), nil)
-	d.client.Do(req)
+func (d *Driver) execOperations(ctx context.Context, operations []map[string]interface{}) error {
+	index := "documents"
 
-	// Force merge if requested
-	if segments, ok := config["max_num_segments"].(float64); ok {
-		req, _ = http.NewRequestWithContext(ctx, "POST",
-			fmt.Sprintf("%s/%s/_forcemerge?max_num_segments=%d", d.address, index, int(segments)), nil)
-		d.client.Do(req)
+	for _, op := range operations {
+		// Get index override if specified
+		if idx, ok := op["index"].(string); ok {
+			index = idx
+		}
+
+		endpoint, ok := op["endpoint"].(string)
+		if !ok {
+			continue
+		}
+
+		// Build URL with query params
+		url := fmt.Sprintf("%s/%s/%s", d.address, index, endpoint)
+		if params, ok := op["params"].(map[string]interface{}); ok {
+			var queryParts []string
+			for k, v := range params {
+				queryParts = append(queryParts, fmt.Sprintf("%s=%v", k, v))
+			}
+			if len(queryParts) > 0 {
+				url += "?" + strings.Join(queryParts, "&")
+			}
+		}
+
+		// Determine method and body
+		method := "POST"
+		var bodyReader io.Reader
+		if body, ok := op["body"].(map[string]interface{}); ok {
+			method = "PUT"
+			bodyBytes, _ := json.Marshal(body)
+			bodyReader = bytes.NewReader(bodyBytes)
+		}
+
+		req, _ := http.NewRequestWithContext(ctx, method, url, bodyReader)
+		if bodyReader != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+
+		resp, err := d.client.Do(req)
+		if err != nil {
+			return err
+		}
+		resp.Body.Close()
 	}
+
 	return nil
 }
 
@@ -228,7 +261,9 @@ func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 			}
 			if version, ok := info["version"].(map[string]interface{}); ok {
 				config["version"] = version["number"]
-				config["distribution"] = version["distribution"]
+				if d.config.VersionInfoField != "" {
+					config[d.config.VersionInfoField] = version[d.config.VersionInfoField]
+				}
 				config["build_type"] = version["build_type"]
 				config["lucene_version"] = version["lucene_version"]
 			}
