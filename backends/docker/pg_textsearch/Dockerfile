@@ -1,4 +1,4 @@
-FROM postgres:17
+FROM postgres:18
 
 # Install dependencies for downloading and extracting
 RUN apt-get update && apt-get install -y \

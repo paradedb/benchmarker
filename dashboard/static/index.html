@@ -190,6 +190,7 @@
     .modal-backdrop.visible { display: block; }
     .query-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
     .query-name { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .query-info { font-size: 9px; font-weight: 400; color: var(--text-dim); margin-left: 12px; text-transform: none; letter-spacing: normal; }
     .query-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
     .query-stat-value { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
     .query-stat-label { font-size: 8px; color: var(--text-dim); text-transform: uppercase; }
@@ -291,26 +292,7 @@
     </div>
   </div>
 
-  <div class="main-row">
-    <div class="chart-container">
-      <div class="chart-header">
-        <h2>Latency <select id="metric-select" onchange="updateMetricSelection()">
-          <option value="p50">P50</option>
-          <option value="p90">P90</option>
-          <option value="p95" selected>P95</option>
-          <option value="p99">P99</option>
-        </select> (ms)</h2>
-        <div class="chart-controls">
-          <button class="reset-zoom" id="reset-latency" onclick="resetZoom()" title="Double-click chart to reset">Reset Zoom</button>
-          <div class="legend" id="latency-legend"></div>
-        </div>
-      </div>
-      <div class="chart-wrapper">
-        <canvas id="latencyChart"></canvas>
-      </div>
-    </div>
-    <div class="stats-column" id="stats-container"></div>
-  </div>
+  <div id="chart-groups-container"></div>
 
   <div class="main-row" id="ingest-container" style="display: none;">
     <div class="chart-container">
@@ -361,11 +343,23 @@
 
   <script>
     const COLORS = ['#7C3AED', '#F97316', '#10B981', '#EC4899', '#3B82F6', '#EAB308', '#06B6D4'];
+    // Hardcoded brand colors per backend type
+    const BACKEND_COLORS = {
+      'paradedb': '#7C3AED',      // Purple (ParadeDB brand)
+      'postgres-fts': '#3B82F6',  // Blue
+      'pg-textsearch': '#F97316', // Orange
+      'elasticsearch': '#10B981', // Green (Elastic brand)
+      'opensearch': '#EF4444',    // Red (OpenSearch brand)
+      'clickhouse': '#FACC15',    // Yellow (ClickHouse brand)
+      'mongodb': '#00ED64',       // MongoDB Green (their actual brand green)
+    };
     let isDark = false;
     let runColors = {};
     let runStartTimes = {};
     let selectedMetric = 'p95';
     let lastMetric = 'p95';
+    let chartType = 'latency'; // 'latency' or 'hits'
+    let lastChartType = 'latency';
     let colorIndex = 0;
     let lastElapsed = 0;
     let chartDuration = 30; // Will be updated from server
@@ -374,6 +368,8 @@
     let lastData = null; // Store last data for filter updates
     let queryTexts = {}; // Store query text per query name
     let runConfigs = {}; // Store config per run name
+    let chartInstances = {}; // Chart instances per dashboard group
+    let chartLegendKeys = {}; // Legend keys per dashboard group
 
     function resetState() {
       runColors = {};
@@ -387,14 +383,18 @@
       queryTexts = {};
       runConfigs = {};
       isZoomed = false;
+      chartType = 'latency';
+      lastChartType = 'latency';
       document.querySelectorAll('.reset-zoom').forEach(btn => btn.classList.remove('visible'));
-      document.getElementById('stats-container').innerHTML = '';
-      document.getElementById('latency-legend').innerHTML = '';
+      document.getElementById('chart-groups-container').innerHTML = '';
       document.getElementById('ingest-legend').innerHTML = '';
-      lastLegendKey = '';
+      chartLegendKeys = {};
       document.getElementById('ingest-stats-container').innerHTML = '';
       document.getElementById('ingest-container').style.display = 'none';
-      [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+      // Destroy existing dashboard charts
+      Object.values(chartInstances).forEach(chart => chart.destroy());
+      chartInstances = {};
+      [cpuChart, memoryChart, ingestChart].forEach(chart => {
         chart.data.datasets = [];
         chart.options.scales.x.min = 0;
         chart.options.scales.x.max = chartDuration;
@@ -403,12 +403,31 @@
       });
     }
 
-    function getRunColor(run) {
-      if (!runColors[run]) {
-        runColors[run] = COLORS[colorIndex % COLORS.length];
-        colorIndex++;
+    // Get base name without chart suffix (e.g., "paradedb-prod (chart)" -> "paradedb-prod")
+    function getBaseName(run) {
+      const match = run.match(/^(.+?) \(.+\)$/);
+      return match ? match[1] : run;
+    }
+
+    function getRunColor(name, runData) {
+      // Use base name for color so same backend has same color across charts
+      const baseName = getBaseName(name);
+      if (!runColors[baseName]) {
+        // Check for custom color from backend options first
+        if (runData?.color) {
+          runColors[baseName] = runData.color;
+        }
+        // Then check for backend-specific color
+        else if (runData?.backend && BACKEND_COLORS[runData.backend]) {
+          runColors[baseName] = BACKEND_COLORS[runData.backend];
+        }
+        // Fall back to cycling colors
+        else {
+          runColors[baseName] = COLORS[colorIndex % COLORS.length];
+          colorIndex++;
+        }
       }
-      return runColors[run];
+      return runColors[baseName];
     }
 
     function shadeColor(color, percent) {
@@ -431,7 +450,7 @@
     function getTickColor() { return '#737373'; }
 
     function updateChartColors() {
-      [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+      [...Object.values(chartInstances), cpuChart, memoryChart, ingestChart].forEach(chart => {
         chart.options.scales.x.grid.color = getGridColor();
         chart.options.scales.y.grid.color = getGridColor();
         chart.update('none');
@@ -535,6 +554,10 @@
       return { min: Math.max(0, yMin - padding), max: yMax + padding };
     }
 
+    function getAllCharts() {
+      return [...Object.values(chartInstances), cpuChart, memoryChart, ingestChart];
+    }
+
     function syncZoom(sourceChart) {
       const xMin = sourceChart.scales.x.min;
       const xMax = sourceChart.scales.x.max;
@@ -551,7 +574,7 @@
       document.querySelectorAll('.reset-zoom').forEach(btn => btn.classList.add('visible'));
 
       // Sync X axis to all charts first
-      [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+      getAllCharts().forEach(chart => {
         if (chart !== sourceChart) {
           chart.options.scales.x.min = xMin;
           chart.options.scales.x.max = xMax;
@@ -560,7 +583,7 @@
 
       // Defer Y axis recalculation to ensure zoom plugin has finished
       setTimeout(() => {
-        [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+        getAllCharts().forEach(chart => {
           const yRange = getVisibleYRange(chart, xMin, xMax);
           if (yRange) {
             chart.options.scales.y.min = yRange.min;
@@ -573,7 +596,7 @@
 
     function resetZoom() {
       isZoomed = false;
-      [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+      getAllCharts().forEach(chart => {
         // Don't use chart.resetZoom() as it can be unreliable
         // Instead, explicitly reset all scale options
         chart.options.scales.x.min = 0;
@@ -587,11 +610,89 @@
       document.querySelectorAll('.reset-zoom').forEach(btn => btn.classList.remove('visible'));
     }
 
-    const latencyChart = new Chart(document.getElementById('latencyChart'), {
-      type: 'line',
-      data: { datasets: [] },
-      options: createChartOptions('ms', 'latency')
-    });
+    // Create or get dashboard group section
+    function getOrCreateChartGroup(chartName) {
+      const groupId = chartName || 'default';
+      const safeId = groupId.replace(/[^a-zA-Z0-9]/g, '_');
+
+      if (chartInstances[groupId]) {
+        return chartInstances[groupId];
+      }
+
+      const container = document.getElementById('chart-groups-container');
+      const section = document.createElement('div');
+      section.id = `chart-group-${safeId}`;
+      section.className = 'main-row';
+      section.innerHTML = `
+        <div class="chart-container">
+          <div class="chart-header">
+            <h2><select class="chart-type-select" data-chart="${groupId}" onchange="updateChartTypeForGroup('${groupId}')">
+              <option value="latency" selected>Latency</option>
+              <option value="hits">Hits</option>
+            </select> <span class="metric-wrapper"><select class="metric-select" data-chart="${groupId}" onchange="updateMetricSelectionForGroup('${groupId}')">
+              <option value="p50">P50</option>
+              <option value="p90">P90</option>
+              <option value="p95" selected>P95</option>
+              <option value="p99">P99</option>
+            </select> (ms)</span><span class="hits-unit" style="display:none;">(avg)</span></h2>
+            <div class="chart-controls">
+              <button class="reset-zoom" onclick="resetZoom()" title="Double-click chart to reset">Reset Zoom</button>
+              <div class="legend" id="legend-${safeId}"></div>
+            </div>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="chart-${safeId}"></canvas>
+          </div>
+        </div>
+        <div class="stats-column" id="stats-${safeId}"></div>
+      `;
+      container.appendChild(section);
+
+      // Create chart instance
+      const canvas = document.getElementById(`chart-${safeId}`);
+      const chart = new Chart(canvas, {
+        type: 'line',
+        data: { datasets: [] },
+        options: createChartOptions('ms', groupId)
+      });
+
+      // Add double-click to reset zoom
+      canvas.addEventListener('dblclick', resetZoom);
+
+      chartInstances[groupId] = chart;
+      chartLegendKeys[groupId] = '';
+
+      return chart;
+    }
+
+    function updateMetricSelectionForGroup(groupId) {
+      const select = document.querySelector(`.metric-select[data-chart="${groupId}"]`);
+      if (select) {
+        selectedMetric = select.value;
+        if (lastData) update(lastData);
+      }
+    }
+
+    function updateChartTypeForGroup(groupId) {
+      const select = document.querySelector(`.chart-type-select[data-chart="${groupId}"]`);
+      if (select) {
+        chartType = select.value;
+        // Show/hide metric selector based on chart type
+        const section = document.getElementById(`chart-group-${(groupId || 'default').replace(/[^a-zA-Z0-9]/g, '_')}`);
+        if (section) {
+          const metricWrapper = section.querySelector('.metric-wrapper');
+          const hitsUnit = section.querySelector('.hits-unit');
+          if (chartType === 'hits') {
+            if (metricWrapper) metricWrapper.style.display = 'none';
+            if (hitsUnit) hitsUnit.style.display = 'inline';
+          } else {
+            if (metricWrapper) metricWrapper.style.display = 'inline';
+            if (hitsUnit) hitsUnit.style.display = 'none';
+          }
+        }
+        if (lastData) update(lastData);
+      }
+    }
 
     const cpuChart = new Chart(document.getElementById('cpuChart'), {
       type: 'line',
@@ -661,7 +762,7 @@
     });
 
     // Add double-click to reset zoom on all charts
-    ['latencyChart', 'cpuChart', 'memoryChart', 'ingestChart'].forEach(id => {
+    ['cpuChart', 'memoryChart', 'ingestChart'].forEach(id => {
       document.getElementById(id).addEventListener('dblclick', resetZoom);
     });
 
@@ -747,130 +848,170 @@
     }
 
     function updateStats(runs) {
-      const container = document.getElementById('stats-container');
-      // Only show runs with query data
-      const runNames = Object.keys(runs).filter(name => hasQueryTimelines(runs[name])).sort();
-
-      runNames.forEach((name, idx) => {
+      // Group runs by chart
+      const runsByChart = {};
+      Object.keys(runs).filter(name => hasQueryTimelines(runs[name])).sort().forEach(name => {
         const run = runs[name];
-        const color = getRunColor(name);
-
-        // Store config if available
-        if (run.config && Object.keys(run.config).length > 0) {
-          runConfigs[name] = run.config;
+        const chartGroup = run.chart || 'default';
+        if (!runsByChart[chartGroup]) {
+          runsByChart[chartGroup] = [];
         }
+        runsByChart[chartGroup].push(name);
+      });
 
-        let el = document.getElementById(`stat-${name}`);
+      // Update stats for each chart group
+      Object.keys(runsByChart).sort().forEach(chartGroup => {
+        const safeId = (chartGroup || 'default').replace(/[^a-zA-Z0-9]/g, '_');
+        // Ensure chart group exists
+        getOrCreateChartGroup(chartGroup === 'default' ? '' : chartGroup);
+        const container = document.getElementById(`stats-${safeId}`);
+        if (!container) return;
 
-        if (!el) {
-          el = document.createElement('div');
-          el.id = `stat-${name}`;
-          el.className = 'stat-group expanded';
-          el.style.borderLeftColor = color;
-          const hasConfig = run.config && Object.keys(run.config).length > 0;
-          const clickStyle = hasConfig ? 'cursor: pointer; text-decoration: underline; text-decoration-style: dotted;' : '';
-          const clickHandler = hasConfig ? `onclick="showConfigModal('${name}')"` : '';
+        runsByChart[chartGroup].forEach((name, idx) => {
+          const run = runs[name];
+          const color = getRunColor(name, run);
 
-          // Build limits string
-          let limitsStr = '';
-          if (run.containerLimits) {
-            const parts = [];
-            if (run.containerLimits.cpu_limit) parts.push(run.containerLimits.cpu_limit);
-            if (run.containerLimits.memory_limit) parts.push(run.containerLimits.memory_limit);
-            if (parts.length > 0) limitsStr = `<span style="color: var(--text-dim); font-size: 9px; margin-left: 8px;">${parts.join(' / ')}</span>`;
+          // Store config if available
+          if (run.config && Object.keys(run.config).length > 0) {
+            runConfigs[name] = run.config;
           }
 
-          el.innerHTML = `
-            <div class="stat-group-header">
-              <div class="stat-group-label" style="color: ${color}; ${clickStyle}" ${clickHandler}>${name}</div>${limitsStr}
-            </div>
-            <div class="query-details" id="${name}-queries"></div>
-          `;
-          container.appendChild(el);
-        }
+          let el = document.getElementById(`stat-${name}`);
 
-        // Update query details - only create if not exists, then just update values
-        const queriesEl = document.getElementById(`${name}-queries`);
-        const queries = run.queries || {};
-        const queryNames = Object.keys(queries).sort();
+          if (!el) {
+            el = document.createElement('div');
+            el.id = `stat-${name}`;
+            el.className = 'stat-group expanded';
+            el.style.borderLeftColor = color;
+            const hasConfig = run.config && Object.keys(run.config).length > 0;
+            const clickStyle = hasConfig ? 'cursor: pointer; text-decoration: underline; text-decoration-style: dotted;' : '';
+            const clickHandler = hasConfig ? `onclick="showConfigModal('${name}')"` : '';
 
-        queryNames.forEach(qName => {
-          const q = queries[qName];
-          const queryId = `${name}-${qName}`.replace(/[^a-zA-Z0-9]/g, '_');
-          let queryEl = document.getElementById(queryId);
+            // Build limits string
+            let limitsStr = '';
+            if (run.containerLimits) {
+              const parts = [];
+              if (run.containerLimits.cpu_limit) parts.push(run.containerLimits.cpu_limit);
+              if (run.containerLimits.memory_limit) parts.push(run.containerLimits.memory_limit);
+              if (parts.length > 0) limitsStr = `<span style="color: var(--text-dim); font-size: 9px; margin-left: 8px;">${parts.join(' / ')}</span>`;
+            }
 
-          // Store query text if available
-          if (q.query) {
-            queryTexts[qName] = q.query;
-          }
-
-          if (!queryEl) {
-            // Create new query item
-            queryEl = document.createElement('div');
-            queryEl.id = queryId;
-            queryEl.className = 'query-item';
-            queryEl.dataset.query = qName;
-            queryEl.innerHTML = `
-              <div class="query-header">
-                <div class="query-name">${qName}</div>
+            el.innerHTML = `
+              <div class="stat-group-header">
+                <div class="stat-group-label" style="color: ${color}; ${clickStyle}" ${clickHandler}>${getBaseName(name)}</div>${limitsStr}
               </div>
-              <div class="query-stats">
-                <div><div class="query-stat-value" id="${queryId}-qps">0</div><div class="query-stat-label">QPS</div></div>
-                <div><div class="query-stat-value" id="${queryId}-min">0</div><div class="query-stat-label">Min</div></div>
-                <div><div class="query-stat-value" id="${queryId}-p50">0</div><div class="query-stat-label">P50</div></div>
-                <div><div class="query-stat-value" id="${queryId}-p95">0</div><div class="query-stat-label">P95</div></div>
-                <div><div class="query-stat-value" id="${queryId}-p99">0</div><div class="query-stat-label">P99</div></div>
-                <div><div class="query-stat-value" id="${queryId}-max">0</div><div class="query-stat-label">Max</div></div>
-              </div>
+              <div class="query-details" id="${name}-queries"></div>
             `;
-            queryEl.addEventListener('mouseenter', () => showQueryTooltip(qName));
-            queryEl.addEventListener('mouseleave', hideQueryTooltip);
-            queriesEl.appendChild(queryEl);
+            container.appendChild(el);
           }
 
-          // Update values only
-          document.getElementById(`${queryId}-qps`).textContent = Math.floor(q.qps || 0);
-          document.getElementById(`${queryId}-min`).textContent = q.min.toFixed(1);
-          document.getElementById(`${queryId}-p50`).textContent = q.p50.toFixed(1);
-          document.getElementById(`${queryId}-p95`).textContent = q.p95.toFixed(1);
-          document.getElementById(`${queryId}-p99`).textContent = q.p99.toFixed(1);
-          document.getElementById(`${queryId}-max`).textContent = q.max.toFixed(1);
+          // Update query details - only create if not exists, then just update values
+          const queriesEl = document.getElementById(`${name}-queries`);
+          const queries = run.queries || {};
+          const queryNames = Object.keys(queries).sort();
+
+          queryNames.forEach(qName => {
+            const q = queries[qName];
+            const queryId = `${name}-${qName}`.replace(/[^a-zA-Z0-9]/g, '_');
+            let queryEl = document.getElementById(queryId);
+
+            // Store query text if available
+            if (q.query) {
+              queryTexts[qName] = q.query;
+            }
+
+            if (!queryEl) {
+              // Create new query item
+              queryEl = document.createElement('div');
+              queryEl.id = queryId;
+              queryEl.className = 'query-item';
+              queryEl.dataset.query = qName;
+
+              // Build info string with VUs and executor if available
+              const infoParts = [];
+              if (q.vus) infoParts.push(`${q.vus} VUs`);
+              if (q.executor) infoParts.push(q.executor);
+              const infoStr = infoParts.length > 0 ? `<span class="query-info">${infoParts.join(' · ')}</span>` : '';
+
+              queryEl.innerHTML = `
+                <div class="query-header">
+                  <div class="query-name">${qName}${infoStr}</div>
+                </div>
+                <div class="query-stats">
+                  <div><div class="query-stat-value" id="${queryId}-qps">0</div><div class="query-stat-label">QPS</div></div>
+                  <div><div class="query-stat-value" id="${queryId}-min">0</div><div class="query-stat-label">Min</div></div>
+                  <div><div class="query-stat-value" id="${queryId}-p50">0</div><div class="query-stat-label">P50</div></div>
+                  <div><div class="query-stat-value" id="${queryId}-p95">0</div><div class="query-stat-label">P95</div></div>
+                  <div><div class="query-stat-value" id="${queryId}-p99">0</div><div class="query-stat-label">P99</div></div>
+                  <div><div class="query-stat-value" id="${queryId}-max">0</div><div class="query-stat-label">Max</div></div>
+                </div>
+              `;
+              queryEl.addEventListener('mouseenter', () => showQueryTooltip(qName));
+              queryEl.addEventListener('mouseleave', hideQueryTooltip);
+              queriesEl.appendChild(queryEl);
+            }
+
+            // Update values only
+            document.getElementById(`${queryId}-qps`).textContent = Math.floor(q.qps || 0);
+            document.getElementById(`${queryId}-min`).textContent = q.min.toFixed(1);
+            document.getElementById(`${queryId}-p50`).textContent = q.p50.toFixed(1);
+            document.getElementById(`${queryId}-p95`).textContent = q.p95.toFixed(1);
+            document.getElementById(`${queryId}-p99`).textContent = q.p99.toFixed(1);
+            document.getElementById(`${queryId}-max`).textContent = q.max.toFixed(1);
+          });
         });
       });
     }
 
     let lastLegendKey = '';
     function updateLegend(runs) {
-      const legend = document.getElementById('latency-legend');
-      const runNames = Object.keys(runs).filter(name => hasQueryTimelines(runs[name])).sort();
-
-      // Build a key to detect if legend structure changed
-      const queryList = [];
-      runNames.forEach(name => {
-        const queries = runs[name].queries || {};
-        Object.keys(queries).sort().forEach(qName => queryList.push(qName));
-      });
-      const legendKey = queryList.join(',') + '|' + Array.from(selectedQueries).sort().join(',');
-
-      // Only rebuild if structure changed
-      if (legendKey === lastLegendKey) return;
-      lastLegendKey = legendKey;
-
-      const items = [];
-      runNames.forEach(name => {
+      // Group runs by chart
+      const runsByChart = {};
+      Object.keys(runs).filter(name => hasQueryTimelines(runs[name])).sort().forEach(name => {
         const run = runs[name];
-        const baseColor = getRunColor(name);
-        const queries = run.queries || {};
-        const queryNames = Object.keys(queries).sort();
-
-        queryNames.forEach((qName, idx) => {
-          const color = idx === 0 ? baseColor : shadeColor(baseColor, idx * 15);
-          const isEnabled = selectedQueries.has(qName);
-          const disabledClass = isEnabled ? '' : ' disabled';
-          items.push(`<div class="legend-item${disabledClass}" data-query="${qName}" onclick="toggleQueryFilter('${qName}', event)" title="Click to toggle, Shift+click to isolate"><div class="legend-color" style="background: ${color}"></div> ${qName}</div>`);
-        });
+        const chartGroup = run.chart || 'default';
+        if (!runsByChart[chartGroup]) {
+          runsByChart[chartGroup] = [];
+        }
+        runsByChart[chartGroup].push(name);
       });
-      legend.innerHTML = items.join('');
+
+      // Update legend for each chart group
+      Object.keys(runsByChart).sort().forEach(chartGroup => {
+        const safeId = (chartGroup || 'default').replace(/[^a-zA-Z0-9]/g, '_');
+        const legend = document.getElementById(`legend-${safeId}`);
+        if (!legend) return;
+
+        const runNames = runsByChart[chartGroup];
+
+        // Build a key to detect if legend structure changed
+        const queryList = [];
+        runNames.forEach(name => {
+          const queries = runs[name].queries || {};
+          Object.keys(queries).sort().forEach(qName => queryList.push(qName));
+        });
+        const legendKey = queryList.join(',') + '|' + Array.from(selectedQueries).sort().join(',');
+
+        // Only rebuild if structure changed
+        if (legendKey === chartLegendKeys[chartGroup]) return;
+        chartLegendKeys[chartGroup] = legendKey;
+
+        const items = [];
+        runNames.forEach(name => {
+          const run = runs[name];
+          const baseColor = getRunColor(name, run);
+          const queries = run.queries || {};
+          const queryNames = Object.keys(queries).sort();
+
+          queryNames.forEach((qName, idx) => {
+            const color = idx === 0 ? baseColor : shadeColor(baseColor, idx * 15);
+            const isEnabled = selectedQueries.has(qName);
+            const disabledClass = isEnabled ? '' : ' disabled';
+            items.push(`<div class="legend-item${disabledClass}" data-query="${qName}" onclick="toggleQueryFilter('${qName}', event)" title="Click to toggle, Shift+click to isolate"><div class="legend-color" style="background: ${color}"></div> ${qName}</div>`);
+          });
+        });
+        legend.innerHTML = items.join('');
+      });
     }
 
     function updateQueryFilters(runs) {
@@ -1052,7 +1193,7 @@
       // Recalculate Y axis if zoomed
       if (isZoomed) {
         setTimeout(() => {
-          [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+          getAllCharts().forEach(chart => {
             const xMin = chart.options.scales.x.min;
             const xMax = chart.options.scales.x.max;
             const yRange = getVisibleYRange(chart, xMin, xMax);
@@ -1118,7 +1259,7 @@
         chartDuration = data.chartDuration;
         // Only auto-scroll when not zoomed
         if (!isZoomed) {
-          [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+          getAllCharts().forEach(chart => {
             chart.options.scales.x.min = 0;
             chart.options.scales.x.max = chartDuration;
           });
@@ -1135,54 +1276,84 @@
       updateStats(runs);
       updateLegend(runs);
 
-      // Update latency chart - show separate line per query
-      const datasets = [];
+      // Group runs by chart
+      const runsByChart = {};
       runNames.forEach(name => {
         const run = runs[name];
-        const baseColor = getRunColor(name);
-        const queries = run.queries || {};
-        const queryNames = Object.keys(queries).filter(qn => selectedQueries.has(qn));
+        const chartGroup = run.chart || 'default';
+        if (!runsByChart[chartGroup]) {
+          runsByChart[chartGroup] = [];
+        }
+        runsByChart[chartGroup].push(name);
+      });
 
-        // Set start time from first query timeline if not set
-        if (!runStartTimes[name]) {
-          for (const qName of Object.keys(queries)) {
-            if (queries[qName].timeline?.length > 0) {
-              runStartTimes[name] = queries[qName].timeline[0].time;
-              break;
+      // Update latency/hits chart for each dashboard group
+      const metricChanged = selectedMetric !== lastMetric;
+      const chartTypeChanged = chartType !== lastChartType;
+      lastMetric = selectedMetric;
+      lastChartType = chartType;
+
+      Object.keys(runsByChart).sort().forEach(chartGroup => {
+        const chart = getOrCreateChartGroup(chartGroup === 'default' ? '' : chartGroup);
+        const groupRunNames = runsByChart[chartGroup];
+
+        const datasets = [];
+        groupRunNames.forEach(name => {
+          const run = runs[name];
+          const baseColor = getRunColor(name, run);
+          const queries = run.queries || {};
+          const queryNames = Object.keys(queries).filter(qn => selectedQueries.has(qn));
+
+          // Set start time from first query timeline if not set
+          if (!runStartTimes[name]) {
+            for (const qName of Object.keys(queries)) {
+              if (queries[qName].timeline?.length > 0) {
+                runStartTimes[name] = queries[qName].timeline[0].time;
+                break;
+              }
             }
           }
-        }
-        const startTime = runStartTimes[name] || 0;
+          const startTime = runStartTimes[name] || 0;
 
-        if (queryNames.length === 0 && Object.keys(queries).length === 0) {
-          // No query breakdown available, skip this run
-        } else {
-          // Show each selected query as separate line
-          queryNames.forEach((qName, idx) => {
-            const q = queries[qName];
-            // Slightly vary color for multiple queries in same run
-            const color = idx === 0 ? baseColor : shadeColor(baseColor, idx * 15);
-            datasets.push({
-              label: qName,
-              borderColor: color,
-              data: (q.timeline || []).map(p => ({
-                x: (p.time - startTime) / 1000,
-                y: p[selectedMetric]
-              }))
+          if (queryNames.length === 0 && Object.keys(queries).length === 0) {
+            // No query breakdown available, skip this run
+          } else {
+            // Show each selected query as separate line
+            queryNames.forEach((qName, idx) => {
+              const q = queries[qName];
+              // Slightly vary color for multiple queries in same run
+              const color = idx === 0 ? baseColor : shadeColor(baseColor, idx * 15);
+              datasets.push({
+                label: qName,
+                borderColor: color,
+                data: (q.timeline || []).map(p => ({
+                  x: (p.time - startTime) / 1000,
+                  y: chartType === 'hits' ? (p.hits || 0) : p[selectedMetric]
+                }))
+              });
             });
-          });
+          }
+        });
+
+        updateChartDatasets(chart, datasets, metricChanged || chartTypeChanged);
+        updateChartYAxis(chart);
+
+        // Update y-axis unit based on chart type
+        if (chartType === 'hits') {
+          chart.options.scales.y.ticks.callback = v => formatNumber(Math.round(v));
+          chart.options.plugins.tooltip.callbacks.label = ctx => `${ctx.dataset.label}: ${formatNumber(ctx.parsed.y)}`;
+        } else {
+          chart.options.scales.y.ticks.callback = v => Math.round(v) + 'ms';
+          chart.options.plugins.tooltip.callbacks.label = ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}ms`;
         }
+
+        chart.update('none');
       });
-      const metricChanged = selectedMetric !== lastMetric;
-      lastMetric = selectedMetric;
-      updateChartDatasets(latencyChart, datasets, metricChanged);
-      updateChartYAxis(latencyChart);
-      latencyChart.update('none');
 
       // Update CPU chart
       const cpuDatasets = runNames.map(name => {
         const run = runs[name];
-        const color = getRunColor(name);
+        const color = getRunColor(name, run);
         const startTime = runStartTimes[name] || 0;
         return {
           label: name,
@@ -1202,7 +1373,7 @@
       // Update memory chart
       const memoryDatasets = runNames.map(name => {
         const run = runs[name];
-        const color = getRunColor(name);
+        const color = getRunColor(name, run);
         const startTime = runStartTimes[name] || 0;
         return {
           label: name,
@@ -1224,7 +1395,7 @@
       if (runsWithIngest.length > 0) {
         document.getElementById('ingest-container').style.display = 'grid';
         document.getElementById('ingest-legend').innerHTML = runsWithIngest.map(name => {
-          const color = getRunColor(name);
+          const color = getRunColor(name, runs[name]);
           return `<div class="legend-item"><div class="legend-color" style="background: ${color}"></div> ${name}</div>`;
         }).join('');
 
@@ -1232,7 +1403,7 @@
         const ingestStatsContainer = document.getElementById('ingest-stats-container');
         runsWithIngest.forEach(name => {
           const run = runs[name];
-          const color = getRunColor(name);
+          const color = getRunColor(name, run);
           let el = document.getElementById(`ingest-stat-${name}`);
           if (!el) {
             el = document.createElement('div');
@@ -1241,7 +1412,7 @@
             el.style.borderLeftColor = color;
             el.innerHTML = `
               <div class="stat-group-header">
-                <div class="stat-group-label" style="color: ${color}">${name}</div>
+                <div class="stat-group-label" style="color: ${color}">${getBaseName(name)}</div>
               </div>
               <div class="stats" style="grid-template-columns: 1fr 1fr;">
                 <div class="stat"><div class="stat-value" id="ingest-${name}-total">0</div><div class="stat-label">Total</div></div>
@@ -1256,7 +1427,7 @@
 
         const ingestDatasets = runsWithIngest.map(name => {
           const run = runs[name];
-          const color = getRunColor(name);
+          const color = getRunColor(name, run);
           const startTime = runStartTimes[name] || (run.ingestRate?.[0]?.time || 0);
           if (!runStartTimes[name] && run.ingestRate?.length > 0) {
             runStartTimes[name] = run.ingestRate[0].time;
@@ -1286,7 +1457,7 @@
     window.addEventListener('resize', () => {
       clearTimeout(resizeTimeout);
       resizeTimeout = setTimeout(() => {
-        [latencyChart, cpuChart, memoryChart, ingestChart].forEach(chart => {
+        getAllCharts().forEach(chart => {
           chart.resize();
         });
       }, 100);
