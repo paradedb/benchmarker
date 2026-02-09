@@ -1420,7 +1420,7 @@
       }
 
       function escapeHtml(text) {
-        const div = document.createElement('div');
+        const div = document.createElement("div");
         div.textContent = text;
         return div.innerHTML;
       }
@@ -1463,8 +1463,7 @@
           '<div id="tab-config" class="config-tab-content active">';
         for (const [section, value] of Object.entries(config)) {
           // Skip sections that have their own tabs
-          if (["pre_script", "post_script"].includes(section))
-            continue;
+          if (["pre_script", "post_script"].includes(section)) continue;
 
           if (
             typeof value === "object" &&

@@ -17,3 +17,6 @@ bin/
 
 # OS
 .DS_Store
+
+#AI
+.claude/
