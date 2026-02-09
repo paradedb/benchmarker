@@ -30,8 +30,8 @@ func New(connString string) (backends.Driver, error) {
 		return nil, err
 	}
 
-	config.MaxConns = 20
-	config.MinConns = 5
+	config.MaxConns = 1
+	config.MinConns = 1
 	config.MaxConnLifetime = 30 * time.Minute
 	config.MaxConnIdleTime = 5 * time.Minute
 
