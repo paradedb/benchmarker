@@ -40,7 +40,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	var enabledContainers []string
 	ctx := context.Background()
 
-	datasetPath := parseDatasetPath(config)
+	datasetPath := parseDatasetPath(config, m.vu)
 	defaults := backends.DefaultConnections()
 	defaultContainers := backends.DefaultContainers()
 
@@ -152,9 +152,19 @@ func (b *Backends) Collect() map[string]interface{} {
 }
 
 // parseDatasetPath extracts dataset path from config.
-func parseDatasetPath(config map[string]interface{}) string {
+// Defaults to "../" (parent of k6 script directory) and resolves relative to script location.
+func parseDatasetPath(config map[string]interface{}, vu modules.VU) string {
+	datasetPath := "../"
 	if dp, ok := config["datasetPath"].(string); ok {
-		return dp
+		datasetPath = dp
 	}
-	return ""
+
+	// Resolve relative to script location
+	if vu != nil {
+		if initEnv := vu.InitEnv(); initEnv != nil {
+			datasetPath = initEnv.GetAbsFilePath(datasetPath)
+		}
+	}
+
+	return datasetPath
 }
