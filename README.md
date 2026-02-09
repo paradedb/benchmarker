@@ -1,4 +1,4 @@
-# k6-search
+# benchmarks
 
 A k6 extension for benchmarking full-text search backends with a unified API, real-time dashboard, and comprehensive data loading tools.
 
@@ -505,7 +505,7 @@ docker compose --profile all down
 ## Project Structure
 
 ```
-k6-search/
+benchmarks/
 ├── module.go                    # k6 module registration
 ├── backends.go                  # Backend configuration for k6
 ├── backends/
