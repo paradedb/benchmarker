@@ -38,7 +38,7 @@ func New(address string, config DriverConfig) (backends.Driver, error) {
 	}
 	return &Driver{
 		address: strings.TrimSuffix(address, "/"),
-		client:  &http.Client{Timeout: 5 * time.Minute, Transport: transport},
+		client:  &http.Client{Timeout: 15 * time.Minute, Transport: transport},
 		config:  config,
 	}, nil
 }
@@ -149,32 +149,37 @@ func (d *Driver) execOperations(ctx context.Context, operations []map[string]int
 //   - Query(ctx, jsonQueryString) - query is a JSON string
 //   - Query(ctx, indexName, queryObject) - index name + query map (from JS)
 func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, error) {
-	var body map[string]interface{}
+	var jsonBody []byte
 	index := "documents"
 
-	// Try to parse query as JSON first
-	if err := json.Unmarshal([]byte(query), &body); err != nil {
+	// Try to parse query as JSON first (avoid unmarshal/re-marshal cycle)
+	if json.Valid([]byte(query)) {
+		// Valid JSON - use directly
+		jsonBody = []byte(query)
+		// Check if index provided in args
+		if len(args) > 0 {
+			if idx, ok := args[0].(string); ok {
+				index = idx
+			}
+		}
+	} else {
 		// Not valid JSON - treat query as index name, args[0] as query object
 		index = query
 		if len(args) > 0 {
 			if queryMap, ok := args[0].(map[string]interface{}); ok {
-				body = queryMap
+				var err error
+				jsonBody, err = json.Marshal(queryMap)
+				if err != nil {
+					return 0, fmt.Errorf("failed to marshal query: %w", err)
+				}
 			} else {
 				return 0, fmt.Errorf("expected query object as second argument")
 			}
 		} else {
 			return 0, fmt.Errorf("missing query object")
 		}
-	} else {
-		// Valid JSON - check if index provided in args
-		if len(args) > 0 {
-			if idx, ok := args[0].(string); ok {
-				index = idx
-			}
-		}
 	}
 
-	jsonBody, _ := json.Marshal(body)
 	req, _ := http.NewRequestWithContext(ctx, "POST",
 		fmt.Sprintf("%s/%s/_search?request_cache=false", d.address, index), bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
