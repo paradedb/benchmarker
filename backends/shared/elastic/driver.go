@@ -242,9 +242,28 @@ func (d *Driver) Insert(ctx context.Context, index string, cols []string, rows [
 	}
 
 	var result struct {
-		Items []interface{} `json:"items"`
+		Errors bool `json:"errors"`
+		Items  []struct {
+			Index struct {
+				Error struct {
+					Type   string `json:"type"`
+					Reason string `json:"reason"`
+				} `json:"error"`
+			} `json:"index"`
+		} `json:"items"`
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("failed to decode bulk response: %w", err)
+	}
+
+	if result.Errors {
+		// Find first error
+		for _, item := range result.Items {
+			if item.Index.Error.Type != "" {
+				return 0, fmt.Errorf("bulk insert error: %s - %s", item.Index.Error.Type, item.Index.Error.Reason)
+			}
+		}
+	}
 
 	return len(result.Items), nil
 }
