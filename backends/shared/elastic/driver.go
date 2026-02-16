@@ -197,6 +197,9 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 
 	var result struct {
 		Hits struct {
+			Total struct {
+				Value int `json:"value"`
+			} `json:"total"`
 			Hits []interface{} `json:"hits"`
 		} `json:"hits"`
 	}
@@ -204,7 +207,11 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 		return 0, err
 	}
 
-	return len(result.Hits.Hits), nil
+	// Return hits array length if documents returned, otherwise total (for size:0 aggregations)
+	if len(result.Hits.Hits) > 0 {
+		return len(result.Hits.Hits), nil
+	}
+	return result.Hits.Total.Value, nil
 }
 
 // Insert bulk inserts documents.
