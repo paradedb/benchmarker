@@ -151,6 +151,22 @@ func (b *Backends) Collect() map[string]interface{} {
 	return nil
 }
 
+// Close closes all backend connections.
+// Use this at the end of a test or between groups to clean up connections.
+func (b *Backends) Close() {
+	for _, client := range b.clients {
+		client.Close()
+	}
+}
+
+// SetTimeout sets the query timeout for all backends in seconds.
+// Use 0 to disable timeout (default).
+func (b *Backends) SetTimeout(seconds int) {
+	for _, client := range b.clients {
+		client.SetTimeout(seconds)
+	}
+}
+
 // parseDatasetPath extracts dataset path from config.
 // Defaults to "../" (parent of k6 script directory) and resolves relative to script location.
 func parseDatasetPath(config map[string]interface{}, vu modules.VU) string {

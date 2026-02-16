@@ -1197,6 +1197,14 @@
         return Math.floor(n).toString();
       }
 
+      function formatLatency(ms) {
+        if (ms >= 10000) return (ms / 1000).toFixed(1) + "s";
+        if (ms >= 1000) return (ms / 1000).toFixed(2) + "s";
+        if (ms >= 100) return Math.round(ms) + "ms";
+        if (ms >= 10) return ms.toFixed(0) + "ms";
+        return ms.toFixed(1) + "ms";
+      }
+
       function hasQueryTimelines(run) {
         return Object.values(run.queries || {}).some(
           (q) => q.timeline?.length > 0,
@@ -1340,15 +1348,15 @@
                 document.getElementById(`${queryId}-qps`).textContent =
                   Math.floor(q.qps || 0);
                 document.getElementById(`${queryId}-min`).textContent =
-                  q.min.toFixed(1);
+                  formatLatency(q.min);
                 document.getElementById(`${queryId}-p50`).textContent =
-                  q.p50.toFixed(1);
+                  formatLatency(q.p50);
                 document.getElementById(`${queryId}-p95`).textContent =
-                  q.p95.toFixed(1);
+                  formatLatency(q.p95);
                 document.getElementById(`${queryId}-p99`).textContent =
-                  q.p99.toFixed(1);
+                  formatLatency(q.p99);
                 document.getElementById(`${queryId}-max`).textContent =
-                  q.max.toFixed(1);
+                  formatLatency(q.max);
               });
             });
           });

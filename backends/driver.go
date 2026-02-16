@@ -150,17 +150,29 @@ type K6Client struct {
 	driver  Driver
 	vu      modules.VU
 	backend string
+	timeout time.Duration
 }
 
 // NewK6Client creates a k6 client that wraps a driver.
 func NewK6Client(vu modules.VU, driver Driver, backend string) *K6Client {
 	metrics.RegisterMetrics(vu)
-	return &K6Client{driver: driver, vu: vu, backend: backend}
+	return &K6Client{driver: driver, vu: vu, backend: backend, timeout: 0}
+}
+
+// SetTimeout sets the query timeout duration.
+// Use 0 to disable timeout (default).
+func (c *K6Client) SetTimeout(seconds int) {
+	c.timeout = time.Duration(seconds) * time.Second
 }
 
 // Search executes a query and emits metrics.
 func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
 	ctx := context.Background()
+	var cancel context.CancelFunc
+	if c.timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
 
 	// Capture query pattern - for ES/OS style queries (index, queryObj), serialize the query object
 	queryPattern := strings.TrimSpace(query)
