@@ -820,7 +820,8 @@ func getBackendConfig(backend, container string) (map[string]interface{}, map[st
 }
 
 // ServeFile starts a server to view a saved dashboard JSON file.
-func ServeFile(filename string) error {
+// Optional notes parameter adds a notes section below the title.
+func ServeFile(filename string, notes ...string) error {
 	// Read the JSON file
 	data, err := os.ReadFile(filename)
 	if err != nil {
@@ -832,6 +833,12 @@ func ServeFile(filename string) error {
 	if err := json.Unmarshal(data, &jsonData); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
+
+	// Add notes if provided
+	if len(notes) > 0 && notes[0] != "" {
+		jsonData["notes"] = notes[0]
+	}
+
 	compactData, _ := json.Marshal(jsonData)
 
 	mux := http.NewServeMux()
