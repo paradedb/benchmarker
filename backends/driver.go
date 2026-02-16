@@ -309,6 +309,14 @@ func convertValue(rawValue, schemaType string) any {
 		}
 		return nil // Unparseable timestamp
 
+	case "jsonb", "json":
+		// Parse JSON into a map for ES/OS compatibility
+		var obj map[string]interface{}
+		if err := json.Unmarshal([]byte(rawValue), &obj); err != nil {
+			return rawValue // Fall back to string if not valid JSON
+		}
+		return obj
+
 	default:
 		// text, varchar, etc - return as-is
 		return rawValue

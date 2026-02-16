@@ -871,3 +871,48 @@ func ServeFile(filename string) error {
 
 	return server.ListenAndServe()
 }
+
+// ExportStandalone creates a standalone HTML file with embedded JSON data.
+func ExportStandalone(jsonFile, outputFile string) error {
+	// Read the JSON data
+	jsonData, err := os.ReadFile(jsonFile)
+	if err != nil {
+		return fmt.Errorf("failed to read JSON file: %w", err)
+	}
+
+	// Validate and compact JSON
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(jsonData, &parsed); err != nil {
+		return fmt.Errorf("invalid JSON: %w", err)
+	}
+	compactJSON, _ := json.Marshal(parsed)
+
+	// Read the embedded HTML template
+	htmlData, err := staticFiles.ReadFile("static/index.html")
+	if err != nil {
+		return fmt.Errorf("failed to read HTML template: %w", err)
+	}
+
+	// Replace the EventSource code with inline data
+	oldCode := `const events = new EventSource("/events");
+      events.onmessage = (e) => {
+        try {
+          update(JSON.parse(e.data));
+        } catch (err) {
+          console.error(err);
+        }
+      };`
+
+	newCode := fmt.Sprintf(`// Standalone mode - embedded data
+      const embeddedData = %s;
+      update(embeddedData);`, string(compactJSON))
+
+	html := strings.Replace(string(htmlData), oldCode, newCode, 1)
+
+	// Write the output file
+	if err := os.WriteFile(outputFile, []byte(html), 0644); err != nil {
+		return fmt.Errorf("failed to write output file: %w", err)
+	}
+
+	return nil
+}
