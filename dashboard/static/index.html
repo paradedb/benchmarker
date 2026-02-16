@@ -959,6 +959,22 @@
       `;
         container.appendChild(section);
 
+        // Sync select elements with current state
+        const metricSelect = section.querySelector('.metric-select');
+        if (metricSelect) metricSelect.value = selectedMetric;
+        const chartTypeSelect = section.querySelector('.chart-type-select');
+        if (chartTypeSelect) chartTypeSelect.value = chartType;
+        // Sync metric wrapper visibility based on chart type
+        const metricWrapper = section.querySelector('.metric-wrapper');
+        const hitsUnit = section.querySelector('.hits-unit');
+        if (chartType === 'hits') {
+          if (metricWrapper) metricWrapper.style.display = 'none';
+          if (hitsUnit) hitsUnit.style.display = 'inline';
+        } else {
+          if (metricWrapper) metricWrapper.style.display = 'inline';
+          if (hitsUnit) hitsUnit.style.display = 'none';
+        }
+
         // Create chart instance
         const canvas = document.getElementById(`chart-${safeId}`);
         const chart = new Chart(canvas, {
