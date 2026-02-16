@@ -552,6 +552,8 @@
       </div>
     </div>
 
+    <div id="notes-container" style="display: none; padding: 12px 16px; margin-bottom: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim); font-size: 13px;"></div>
+
     <div id="chart-groups-container"></div>
 
     <div class="main-row" id="ingest-container" style="display: none">
@@ -652,6 +654,7 @@
       let runConfigs = {}; // Store config per run name
       let chartInstances = {}; // Chart instances per dashboard group
       let chartLegendKeys = {}; // Legend keys per dashboard group
+      let chartGroupOrder = []; // Track order of chart groups by first emission
 
       function resetState() {
         runColors = {};
@@ -678,6 +681,7 @@
         // Destroy existing dashboard charts
         Object.values(chartInstances).forEach((chart) => chart.destroy());
         chartInstances = {};
+        chartGroupOrder = [];
         [cpuChart, memoryChart, ingestChart].forEach((chart) => {
           chart.data.datasets = [];
           chart.options.scales.x.min = 0;
@@ -930,14 +934,20 @@
           return chartInstances[groupId];
         }
 
+        // Track order of chart groups by first emission
+        if (!chartGroupOrder.includes(groupId)) {
+          chartGroupOrder.push(groupId);
+        }
+
         const container = document.getElementById("chart-groups-container");
         const section = document.createElement("div");
         section.id = `chart-group-${safeId}`;
         section.className = "main-row";
+        const chartTitle = chartName ? `<span style="color: var(--text); margin-right: 8px;">${chartName}</span>` : '';
         section.innerHTML = `
         <div class="chart-container">
           <div class="chart-header">
-            <h2><select class="chart-type-select" data-chart="${groupId}" onchange="updateChartTypeForGroup('${groupId}')">
+            <h2>${chartTitle}<select class="chart-type-select" data-chart="${groupId}" onchange="updateChartTypeForGroup('${groupId}')">
               <option value="latency" selected>Latency</option>
               <option value="hits">Hits</option>
             </select> <span class="metric-wrapper"><select class="metric-select" data-chart="${groupId}" onchange="updateMetricSelectionForGroup('${groupId}')">
@@ -1208,10 +1218,16 @@
             runsByChart[chartGroup].push(name);
           });
 
-        // Update stats for each chart group
-        Object.keys(runsByChart)
-          .sort()
-          .forEach((chartGroup) => {
+        // Update stats for each chart group (in emission order)
+        const sortedChartGroups = Object.keys(runsByChart).sort((a, b) => {
+          const aIdx = chartGroupOrder.indexOf(a);
+          const bIdx = chartGroupOrder.indexOf(b);
+          if (aIdx === -1 && bIdx === -1) return a.localeCompare(b);
+          if (aIdx === -1) return 1;
+          if (bIdx === -1) return -1;
+          return aIdx - bIdx;
+        });
+        sortedChartGroups.forEach((chartGroup) => {
             const safeId = (chartGroup || "default").replace(
               /[^a-zA-Z0-9]/g,
               "_",
@@ -1354,10 +1370,16 @@
             runsByChart[chartGroup].push(name);
           });
 
-        // Update legend for each chart group
-        Object.keys(runsByChart)
-          .sort()
-          .forEach((chartGroup) => {
+        // Update legend for each chart group (in emission order)
+        const sortedChartGroups = Object.keys(runsByChart).sort((a, b) => {
+          const aIdx = chartGroupOrder.indexOf(a);
+          const bIdx = chartGroupOrder.indexOf(b);
+          if (aIdx === -1 && bIdx === -1) return a.localeCompare(b);
+          if (aIdx === -1) return 1;
+          if (bIdx === -1) return -1;
+          return aIdx - bIdx;
+        });
+        sortedChartGroups.forEach((chartGroup) => {
             const safeId = (chartGroup || "default").replace(
               /[^a-zA-Z0-9]/g,
               "_",
@@ -1663,6 +1685,13 @@
           data.elapsed,
         );
 
+        // Display notes if present
+        const notesContainer = document.getElementById("notes-container");
+        if (data.notes) {
+          notesContainer.textContent = data.notes;
+          notesContainer.style.display = "block";
+        }
+
         const runs = data.runs || {};
         // Only show runs with query timeline data
         const runNames = Object.keys(runs)
@@ -1690,9 +1719,16 @@
         lastMetric = selectedMetric;
         lastChartType = chartType;
 
-        Object.keys(runsByChart)
-          .sort()
-          .forEach((chartGroup) => {
+        // Sort chart groups by emission order
+        const chartGroupsSorted = Object.keys(runsByChart).sort((a, b) => {
+          const aIdx = chartGroupOrder.indexOf(a);
+          const bIdx = chartGroupOrder.indexOf(b);
+          if (aIdx === -1 && bIdx === -1) return a.localeCompare(b);
+          if (aIdx === -1) return 1;
+          if (bIdx === -1) return -1;
+          return aIdx - bIdx;
+        });
+        chartGroupsSorted.forEach((chartGroup) => {
             const chart = getOrCreateChartGroup(
               chartGroup === "default" ? "" : chartGroup,
             );

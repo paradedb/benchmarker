@@ -873,7 +873,8 @@ func ServeFile(filename string) error {
 }
 
 // ExportStandalone creates a standalone HTML file with embedded JSON data.
-func ExportStandalone(jsonFile, outputFile string) error {
+// Optional notes parameter adds a notes section below the title.
+func ExportStandalone(jsonFile, outputFile string, notes ...string) error {
 	// Read the JSON data
 	jsonData, err := os.ReadFile(jsonFile)
 	if err != nil {
@@ -885,6 +886,12 @@ func ExportStandalone(jsonFile, outputFile string) error {
 	if err := json.Unmarshal(jsonData, &parsed); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
+
+	// Add notes if provided
+	if len(notes) > 0 && notes[0] != "" {
+		parsed["notes"] = notes[0]
+	}
+
 	compactJSON, _ := json.Marshal(parsed)
 
 	// Read the embedded HTML template
