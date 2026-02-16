@@ -574,7 +574,7 @@
       <div class="stats-column" id="ingest-stats-container"></div>
     </div>
 
-    <div class="two-charts">
+    <div class="two-charts" id="metrics-container" style="display: none">
       <div class="chart-container">
         <div class="chart-header">
           <h2>CPU %</h2>
@@ -1801,45 +1801,51 @@
             chart.update("none");
           });
 
-        // Update CPU chart
-        const cpuDatasets = runNames.map((name) => {
-          const run = runs[name];
-          const color = getRunColor(name, run);
-          const startTime = runStartTimes[name] || 0;
-          return {
-            label: name,
-            borderColor: color,
-            data: (run.cpu || [])
-              .filter((p) => p.time >= startTime)
-              .map((p) => ({
-                x: (p.time - startTime) / 1000,
-                y: p.value,
-              })),
-          };
-        });
-        updateChartDatasets(cpuChart, cpuDatasets);
-        updateChartYAxis(cpuChart);
-        cpuChart.update("none");
+        // Update CPU/Memory charts (only show if any run has metrics data)
+        const runsWithMetrics = runNames.filter(
+          (name) => (runs[name].cpu?.length > 0) || (runs[name].memory?.length > 0)
+        );
+        if (runsWithMetrics.length > 0) {
+          document.getElementById("metrics-container").style.display = "grid";
 
-        // Update memory chart
-        const memoryDatasets = runNames.map((name) => {
-          const run = runs[name];
-          const color = getRunColor(name, run);
-          const startTime = runStartTimes[name] || 0;
-          return {
-            label: name,
-            borderColor: color,
-            data: (run.memory || [])
-              .filter((p) => p.time >= startTime)
-              .map((p) => ({
-                x: (p.time - startTime) / 1000,
-                y: p.value,
-              })),
-          };
-        });
-        updateChartDatasets(memoryChart, memoryDatasets);
-        updateChartYAxis(memoryChart);
-        memoryChart.update("none");
+          const cpuDatasets = runNames.map((name) => {
+            const run = runs[name];
+            const color = getRunColor(name, run);
+            const startTime = runStartTimes[name] || 0;
+            return {
+              label: name,
+              borderColor: color,
+              data: (run.cpu || [])
+                .filter((p) => p.time >= startTime)
+                .map((p) => ({
+                  x: (p.time - startTime) / 1000,
+                  y: p.value,
+                })),
+            };
+          });
+          updateChartDatasets(cpuChart, cpuDatasets);
+          updateChartYAxis(cpuChart);
+          cpuChart.update("none");
+
+          const memoryDatasets = runNames.map((name) => {
+            const run = runs[name];
+            const color = getRunColor(name, run);
+            const startTime = runStartTimes[name] || 0;
+            return {
+              label: name,
+              borderColor: color,
+              data: (run.memory || [])
+                .filter((p) => p.time >= startTime)
+                .map((p) => ({
+                  x: (p.time - startTime) / 1000,
+                  y: p.value,
+                })),
+            };
+          });
+          updateChartDatasets(memoryChart, memoryDatasets);
+          updateChartYAxis(memoryChart);
+          memoryChart.update("none");
+        }
 
         // Update ingest chart (only if any run has ingest data)
         const runsWithIngest = runNames.filter(
