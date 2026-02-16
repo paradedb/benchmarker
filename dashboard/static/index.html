@@ -1008,6 +1008,10 @@
         );
         if (select) {
           selectedMetric = select.value;
+          // Sync all metric selects to the same value
+          document.querySelectorAll('.metric-select').forEach(s => {
+            s.value = selectedMetric;
+          });
           if (lastData) update(lastData);
         }
       }
@@ -1018,21 +1022,17 @@
         );
         if (select) {
           chartType = select.value;
-          // Show/hide metric selector based on chart type
-          const section = document.getElementById(
-            `chart-group-${(groupId || "default").replace(/[^a-zA-Z0-9]/g, "_")}`,
-          );
-          if (section) {
-            const metricWrapper = section.querySelector(".metric-wrapper");
-            const hitsUnit = section.querySelector(".hits-unit");
-            if (chartType === "hits") {
-              if (metricWrapper) metricWrapper.style.display = "none";
-              if (hitsUnit) hitsUnit.style.display = "inline";
-            } else {
-              if (metricWrapper) metricWrapper.style.display = "inline";
-              if (hitsUnit) hitsUnit.style.display = "none";
-            }
-          }
+          // Sync all chart type selects and visibility
+          document.querySelectorAll('.chart-type-select').forEach(s => {
+            s.value = chartType;
+          });
+          // Update metric wrapper visibility for all charts
+          document.querySelectorAll('.metric-wrapper').forEach(mw => {
+            mw.style.display = chartType === "hits" ? "none" : "inline";
+          });
+          document.querySelectorAll('.hits-unit').forEach(hu => {
+            hu.style.display = chartType === "hits" ? "inline" : "none";
+          });
           if (lastData) update(lastData);
         }
       }

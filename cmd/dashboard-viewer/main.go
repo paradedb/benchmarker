@@ -18,7 +18,7 @@ func main() {
 		fmt.Println("Usage: dashboard-viewer <dashboard.json> [--export <output.html>] [--notes \"Description\"]")
 		fmt.Println("\nViews a saved k6-search dashboard JSON file in your browser.")
 		fmt.Println("Use --export to create a standalone HTML file.")
-		fmt.Println("Use --notes to add a description below the title in exported HTML.")
+		fmt.Println("Use --notes to add a description below the title.")
 		os.Exit(1)
 	}
 
@@ -57,7 +57,8 @@ func main() {
 		return
 	}
 
-	if err := dashboard.ServeFile(filename); err != nil {
+	// View mode (with optional notes)
+	if err := dashboard.ServeFile(filename, notes); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
