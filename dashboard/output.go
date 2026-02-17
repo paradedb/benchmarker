@@ -202,6 +202,38 @@ func (o *Output) flush() {
 			tags := sample.Tags.Map()
 
 			switch {
+			case name == "backend_init":
+				// Backend initialization signal - create run entry immediately
+				backend := tags["backend"]
+				if backend == "" {
+					continue
+				}
+
+				opts := metrics.GetBackendOptions(backend)
+				run := backend
+				if opts != nil && opts.Alias != "" {
+					run = opts.Alias
+				}
+
+				// Create run if it doesn't exist (no chart suffix yet - will be added when queries come in)
+				if o.data.Runs[run] == nil {
+					rm := &RunMetrics{
+						Name:    run,
+						Backend: backend,
+						Queries: make(map[string]*QueryMetrics),
+					}
+					if opts != nil {
+						rm.Container = opts.Container
+						rm.Alias = opts.Alias
+						rm.Color = opts.Color
+					}
+					o.data.Runs[run] = rm
+				}
+				rm := o.data.Runs[run]
+				if rm.StartTime == 0 {
+					rm.StartTime = now
+				}
+
 			case name == "search_duration":
 				// Get backend name from tag
 				backend := tags["backend"]

@@ -147,10 +147,11 @@ type DriverFactory func(connString string) (Driver, error)
 
 // K6Client wraps a Driver with k6 metrics emission.
 type K6Client struct {
-	driver  Driver
-	vu      modules.VU
-	backend string
-	timeout time.Duration
+	driver      Driver
+	vu          modules.VU
+	backend     string
+	timeout     time.Duration
+	initialized bool // Track if backend_init has been emitted
 }
 
 // NewK6Client creates a k6 client that wraps a driver.
@@ -167,6 +168,12 @@ func (c *K6Client) SetTimeout(seconds int) {
 
 // Search executes a query and emits metrics.
 func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
+	// Emit backend_init on first call to signal dashboard
+	if !c.initialized {
+		c.initialized = true
+		metrics.EmitBackendInit(c.vu, c.backend)
+	}
+
 	ctx := context.Background()
 	var cancel context.CancelFunc
 	if c.timeout > 0 {
@@ -206,6 +213,12 @@ func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
 
 // InsertBatch inserts documents and emits metrics.
 func (c *K6Client) InsertBatch(table string, docs []map[string]interface{}) map[string]interface{} {
+	// Emit backend_init on first call to signal dashboard
+	if !c.initialized {
+		c.initialized = true
+		metrics.EmitBackendInit(c.vu, c.backend)
+	}
+
 	if len(docs) == 0 {
 		return map[string]interface{}{"rows": 0, "latencyMs": 0.0}
 	}

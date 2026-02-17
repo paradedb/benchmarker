@@ -1357,7 +1357,7 @@
                   <div class="query-name">${qName}${infoStr}</div>
                 </div>
                 <div class="query-stats">
-                  <div><div class="query-stat-value" id="${queryId}-qps">0</div><div class="query-stat-label">QPS</div></div>
+                  <div><div class="query-stat-value" id="${queryId}-iters">0</div><div class="query-stat-label">Iters</div></div>
                   <div><div class="query-stat-value" id="${queryId}-min">0</div><div class="query-stat-label">Min</div></div>
                   <div><div class="query-stat-value" id="${queryId}-p50">0</div><div class="query-stat-label">P50</div></div>
                   <div><div class="query-stat-value" id="${queryId}-p95">0</div><div class="query-stat-label">P95</div></div>
@@ -1372,8 +1372,8 @@
                 }
 
                 // Update values only
-                document.getElementById(`${queryId}-qps`).textContent =
-                  Math.floor(q.qps || 0);
+                document.getElementById(`${queryId}-iters`).textContent =
+                  formatNumber(q.count || 0);
                 document.getElementById(`${queryId}-min`).textContent =
                   formatLatency(q.min);
                 document.getElementById(`${queryId}-p50`).textContent =

@@ -17,6 +17,7 @@ var (
 	searchHits     *metrics.Metric
 	ingestDuration *metrics.Metric
 	ingestDocs     *metrics.Metric
+	backendInit    *metrics.Metric
 	metricsRegOnce sync.Once
 
 	// Query patterns per scenario (captured on first call)
@@ -44,7 +45,34 @@ func RegisterMetrics(vu modules.VU) {
 			searchHits, _ = registry.NewMetric("search_hits", metrics.Gauge)
 			ingestDuration, _ = registry.NewMetric("ingest_duration", metrics.Trend, metrics.Time)
 			ingestDocs, _ = registry.NewMetric("ingest_docs", metrics.Counter)
+			backendInit, _ = registry.NewMetric("backend_init", metrics.Gauge)
 		}
+	})
+}
+
+// EmitBackendInit emits a backend_init metric to signal the dashboard that a backend is configured.
+// This allows container metrics to attach immediately, before any queries complete.
+func EmitBackendInit(vu modules.VU, backend string) {
+	state := vu.State()
+	if state == nil || backendInit == nil {
+		return
+	}
+
+	now := time.Now()
+	ctxPtr := vu.Context()
+	if ctxPtr == nil {
+		return
+	}
+
+	tags := state.Tags.GetCurrentValues().Tags
+	if backend != "" {
+		tags = tags.With("backend", backend)
+	}
+
+	metrics.PushIfNotDone(ctxPtr, state.Samples, metrics.Sample{
+		TimeSeries: metrics.TimeSeries{Metric: backendInit, Tags: tags},
+		Time:       now,
+		Value:      1,
 	})
 }
 
