@@ -1223,7 +1223,7 @@
       }
 
       function formatLatency(ms) {
-        if (!ms && ms !== 0) return "-";
+        if (!ms) return "-";
         if (ms >= 10000) return (ms / 1000).toFixed(1) + "s";
         if (ms >= 1000) return (ms / 1000).toFixed(2) + "s";
         if (ms >= 100) return Math.round(ms) + "ms";
