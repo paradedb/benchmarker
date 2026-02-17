@@ -11,6 +11,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sql-formatter@15.4.2/dist/sql-formatter.min.js"></script>
     <style>
       :root {
         --c1: #7c3aed;
@@ -1489,13 +1490,38 @@
         allQueryTypes = queryNames;
       }
 
+      function formatQueryText(queryText) {
+        const trimmed = queryText.trim();
+        // Try JSON first
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            return JSON.stringify(parsed, null, 2);
+          } catch (e) {
+            // Not valid JSON, continue
+          }
+        }
+        // Try SQL formatting
+        try {
+          return sqlFormatter.format(trimmed, {
+            language: 'postgresql',
+            tabWidth: 2,
+            keywordCase: 'upper',
+          });
+        } catch (e) {
+          // Fallback to original
+          return queryText;
+        }
+      }
+
       function showQueryModal(qName) {
         const queryText = queryTexts[qName];
         if (!queryText) return;
 
+        const formatted = formatQueryText(queryText);
         document.getElementById("config-modal-title").textContent = qName;
         document.getElementById("config-modal-content").innerHTML = `
-          <pre style="white-space: pre-wrap; word-break: break-word; font-size: 11px; margin: 0;">${escapeHtml(queryText)}</pre>
+          <pre style="white-space: pre-wrap; word-break: break-word; font-size: 11px; margin: 0; background: var(--bg); padding: 12px; border-radius: 4px;">${escapeHtml(formatted)}</pre>
         `;
         document.getElementById("modal-backdrop").classList.add("visible");
         document.getElementById("config-modal").classList.add("visible");
