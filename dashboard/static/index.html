@@ -1216,12 +1216,14 @@
       }
 
       function formatNumber(n) {
+        if (!n && n !== 0) return "-";
         if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
         if (n >= 1000) return (n / 1000).toFixed(1) + "K";
         return Math.floor(n).toString();
       }
 
       function formatLatency(ms) {
+        if (!ms && ms !== 0) return "-";
         if (ms >= 10000) return (ms / 1000).toFixed(1) + "s";
         if (ms >= 1000) return (ms / 1000).toFixed(2) + "s";
         if (ms >= 100) return Math.round(ms) + "ms";
@@ -1867,13 +1869,15 @@
                   // Slightly vary color for multiple queries in same run
                   const color =
                     idx === 0 ? baseColor : shadeColor(baseColor, idx * 15);
+                  const timelineData = (q.timeline || []).map((p) => ({
+                    x: (p.time - startTime) / 1000,
+                    y: chartType === "hits" ? p.hits || 0 : p[selectedMetric],
+                  }));
                   datasets.push({
                     label: qName,
                     borderColor: color,
-                    data: (q.timeline || []).map((p) => ({
-                      x: (p.time - startTime) / 1000,
-                      y: chartType === "hits" ? p.hits || 0 : p[selectedMetric],
-                    })),
+                    data: timelineData,
+                    pointRadius: timelineData.length === 1 ? 4 : 0,
                   });
                 });
               }
@@ -1914,13 +1918,15 @@
           const cpuDatasets = containerNames.map((name) => {
             const container = containers[name];
             const color = getContainerColor(name, container);
+            const cpuData = (container.cpu || []).map((p) => ({
+              x: (p.time - baselineTime) / 1000,
+              y: p.value,
+            }));
             return {
               label: name,
               borderColor: color,
-              data: (container.cpu || []).map((p) => ({
-                x: (p.time - baselineTime) / 1000,
-                y: p.value,
-              })),
+              data: cpuData,
+              pointRadius: cpuData.length === 1 ? 4 : 0,
             };
           });
           updateChartDatasets(cpuChart, cpuDatasets);
