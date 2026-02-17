@@ -253,11 +253,17 @@ func (o *Output) flush() {
 
 			switch {
 			case name == "backend_init":
-				// Backend initialization signal - register container for metrics
+				// Backend initialization signal - create run and register container
 				backend := tags["backend"]
 				if backend == "" {
 					continue
 				}
+
+				// Create run entry immediately so stats panel appears
+				runName := getRunName(backend, tags)
+				_ = o.getOrCreateRun(runName, backend, tags)
+
+				// Register container for metrics
 				opts := metrics.GetBackendOptions(backend)
 				if opts != nil && opts.Container != "" {
 					if o.data.Containers[opts.Container] == nil {
@@ -266,6 +272,10 @@ func (o *Output) flush() {
 							Backend: backend,
 							Color:   opts.Color,
 						}
+					} else {
+						// Update backend/color info if container already exists
+						o.data.Containers[opts.Container].Backend = backend
+						o.data.Containers[opts.Container].Color = opts.Color
 					}
 				}
 

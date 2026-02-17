@@ -724,20 +724,20 @@
       let containerColorIndex = 0;
 
       function getContainerColor(name, container) {
+        // Check for custom color first
+        if (container?.color) {
+          containerColors[name] = container.color;
+          return container.color;
+        }
+        // Check for backend-specific color
+        if (container?.backend && BACKEND_COLORS[container.backend]) {
+          containerColors[name] = BACKEND_COLORS[container.backend];
+          return BACKEND_COLORS[container.backend];
+        }
+        // Fall back to cycling colors (only cache if no backend info yet)
         if (!containerColors[name]) {
-          // Check for custom color first
-          if (container?.color) {
-            containerColors[name] = container.color;
-          }
-          // Check for backend-specific color
-          else if (container?.backend && BACKEND_COLORS[container.backend]) {
-            containerColors[name] = BACKEND_COLORS[container.backend];
-          }
-          // Fall back to cycling colors
-          else {
-            containerColors[name] = COLORS[containerColorIndex % COLORS.length];
-            containerColorIndex++;
-          }
+          containerColors[name] = COLORS[containerColorIndex % COLORS.length];
+          containerColorIndex++;
         }
         return containerColors[name];
       }
@@ -1191,6 +1191,8 @@
               });
             }
             ds.borderColor = newDs.borderColor;
+            ds.backgroundColor = newDs.backgroundColor;
+            ds.pointRadius = newDs.pointRadius;
           }
         });
 
@@ -1232,8 +1234,8 @@
       }
 
       function hasQueries(run) {
-        // Show run if it has any queries (even without timeline data yet)
-        return Object.keys(run.queries || {}).length > 0;
+        // Show run if it exists (from backend_init) - even without queries yet
+        return true;
       }
 
       function hasQueryTimelines(run) {
@@ -1837,9 +1839,6 @@
             );
             const groupRunNames = runsByChart[chartGroup];
 
-            // Use chart group's earliest start time as common baseline for all runs
-            const chartBaseline = chartStartTimes[chartGroup] !== Infinity ? chartStartTimes[chartGroup] : 0;
-
             const datasets = [];
             groupRunNames.forEach((name) => {
               const run = runs[name];
@@ -1849,8 +1848,8 @@
                 selectedQueries.has(qn),
               );
 
-              // Use chart group's baseline for consistent x-axis across all runs
-              const startTime = chartBaseline;
+              // Use each run's own start time so scenarios starting later still begin at x=0
+              const startTime = run.startTime || 0;
 
               if (
                 queryNames.length === 0 &&
@@ -1904,21 +1903,39 @@
 
         // Update CPU/Memory charts from containers data (independent of runs)
         const containers = data.containers || {};
-        const containerNames = Object.keys(containers).sort();
-        if (containerNames.length > 0) {
+
+        // Find the run associated with each container
+        const getContainerRun = (container) => {
+          return Object.values(runs).find(r =>
+            r.backend === container.backend || r.container === container.name
+          );
+        };
+
+        // Only show containers whose associated run has started (has a startTime)
+        const activeContainerNames = Object.keys(containers).filter(name => {
+          const container = containers[name];
+          const matchingRun = getContainerRun(container);
+          return matchingRun?.startTime > 0;
+        }).sort();
+
+        if (activeContainerNames.length > 0) {
           document.getElementById("metrics-container").style.display = "grid";
 
-          // Use test start time as common baseline for all container metrics
-          const baselineTime = data.startTime || Date.now();
+          // Find start time for each container based on its associated run
+          const getContainerBaseline = (container) => {
+            const matchingRun = getContainerRun(container);
+            return matchingRun?.startTime || data.startTime || Date.now();
+          };
 
-          const cpuDatasets = containerNames.map((name) => {
+          const cpuDatasets = activeContainerNames.map((name) => {
             const container = containers[name];
             const color = getContainerColor(name, container);
+            const baseline = getContainerBaseline(container);
             return {
               label: name,
               borderColor: color,
               data: (container.cpu || []).map((p) => ({
-                x: (p.time - baselineTime) / 1000,
+                x: (p.time - baseline) / 1000,
                 y: p.value,
               })),
             };
@@ -1927,14 +1944,15 @@
           updateChartYAxis(cpuChart);
           cpuChart.update("none");
 
-          const memoryDatasets = containerNames.map((name) => {
+          const memoryDatasets = activeContainerNames.map((name) => {
             const container = containers[name];
             const color = getContainerColor(name, container);
+            const baseline = getContainerBaseline(container);
             return {
               label: name,
               borderColor: color,
               data: (container.memory || []).map((p) => ({
-                x: (p.time - baselineTime) / 1000,
+                x: (p.time - baseline) / 1000,
                 y: p.value,
               })),
             };
