@@ -207,6 +207,13 @@ func (c *Collector) Stop() map[string]interface{} {
 	return map[string]interface{}{"status": "stopped"}
 }
 
+// containerResult holds the result of fetching stats for a single container.
+type containerResult struct {
+	container string
+	stats     *ContainerStats
+	err       error
+}
+
 // Collect fetches current stats and pushes them to k6 metrics.
 // Call this from JavaScript in a loop with sleep.
 func (c *Collector) Collect() map[string]interface{} {
@@ -224,40 +231,60 @@ func (c *Collector) Collect() map[string]interface{} {
 	baseTags := state.Tags.GetCurrentValues()
 	results := make(map[string]interface{})
 
+	// Capture container limits once (in parallel)
+	var limitsWg sync.WaitGroup
 	for _, container := range c.containers {
-		// Capture container limits once per container
 		containerLimitsMu.Lock()
-		if !limitsCapture[container] {
+		needsCapture := !limitsCapture[container]
+		if needsCapture {
 			limitsCapture[container] = true
-			containerLimitsMu.Unlock()
-			c.captureContainerLimits(container)
-		} else {
-			containerLimitsMu.Unlock()
 		}
+		containerLimitsMu.Unlock()
 
-		stats, err := c.fetchAndCalculateStats(container)
-		if err != nil {
-			results[container] = map[string]interface{}{"error": err.Error()}
+		if needsCapture {
+			limitsWg.Add(1)
+			go func(cont string) {
+				defer limitsWg.Done()
+				c.captureContainerLimits(cont)
+			}(container)
+		}
+	}
+	limitsWg.Wait()
+
+	// Fetch stats for all containers in parallel
+	resultChan := make(chan containerResult, len(c.containers))
+	for _, container := range c.containers {
+		go func(cont string) {
+			stats, err := c.fetchAndCalculateStats(cont)
+			resultChan <- containerResult{container: cont, stats: stats, err: err}
+		}(container)
+	}
+
+	// Collect results
+	for range c.containers {
+		res := <-resultChan
+		if res.err != nil {
+			results[res.container] = map[string]interface{}{"error": res.err.Error()}
 			continue
 		}
 
 		// Push to k6 metrics
-		tags := baseTags.Tags.With("container", container)
+		tags := baseTags.Tags.With("container", res.container)
 
 		metrics.PushIfNotDone(ctx, state.Samples, metrics.Sample{
 			TimeSeries: metrics.TimeSeries{Metric: containerCPU, Tags: tags},
 			Time:       now,
-			Value:      stats.CPUPercent,
+			Value:      res.stats.CPUPercent,
 		})
 		metrics.PushIfNotDone(ctx, state.Samples, metrics.Sample{
 			TimeSeries: metrics.TimeSeries{Metric: containerMemory, Tags: tags},
 			Time:       now,
-			Value:      stats.MemoryBytes,
+			Value:      res.stats.MemoryBytes,
 		})
 
-		results[container] = map[string]interface{}{
-			"cpu":    stats.CPUPercent,
-			"memory": stats.MemoryBytes,
+		results[res.container] = map[string]interface{}{
+			"cpu":    res.stats.CPUPercent,
+			"memory": res.stats.MemoryBytes,
 		}
 	}
 

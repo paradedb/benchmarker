@@ -1908,7 +1908,7 @@
         if (containerNames.length > 0) {
           document.getElementById("metrics-container").style.display = "grid";
 
-          // Use test start time as baseline so container charts align with query charts
+          // Use test start time as common baseline for all container metrics
           const baselineTime = data.startTime || Date.now();
 
           const cpuDatasets = containerNames.map((name) => {

@@ -647,6 +647,7 @@ func (o *Output) getSummary() map[string]interface{} {
 		"chartDuration": chartDuration,
 		"runs":          runs,
 		"containers":    containers,
+		"startTime":     o.data.StartTime.UnixMilli(),
 	}
 }
 
