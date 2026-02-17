@@ -1255,7 +1255,22 @@
             const container = document.getElementById(`stats-${safeId}`);
             if (!container) return;
 
-            runsByChart[chartGroup].slice().sort().forEach((name, idx) => {
+            // Sort backends by selected metric (fastest first)
+            const sortedBackends = runsByChart[chartGroup].slice().sort((a, b) => {
+              const runA = runs[a];
+              const runB = runs[b];
+              // Get average metric across all queries for each backend
+              const getAvgMetric = (run) => {
+                const queries = run.queries || {};
+                const values = Object.values(queries)
+                  .map(q => q[selectedMetric])
+                  .filter(v => v != null && v > 0);
+                return values.length > 0 ? values.reduce((s, v) => s + v, 0) / values.length : Infinity;
+              };
+              return getAvgMetric(runA) - getAvgMetric(runB);
+            });
+
+            sortedBackends.forEach((name, idx) => {
               const run = runs[name];
               const color = getRunColor(name, run);
 
@@ -1298,8 +1313,9 @@
               </div>
               <div class="query-details" id="${name}-queries"></div>
             `;
-                container.appendChild(el);
               }
+              // Always reorder to match sorted order (appendChild moves existing elements)
+              container.appendChild(el);
 
               // Update query details - only create if not exists, then just update values
               const queriesEl = document.getElementById(`${name}-queries`);
