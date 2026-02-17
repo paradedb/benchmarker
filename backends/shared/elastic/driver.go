@@ -202,15 +202,33 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 			} `json:"total"`
 			Hits []interface{} `json:"hits"`
 		} `json:"hits"`
+		Aggregations map[string]struct {
+			Buckets []interface{} `json:"buckets"`
+			Value   *float64      `json:"value"` // for cardinality/single-value aggs
+		} `json:"aggregations"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return 0, err
 	}
 
-	// Return hits array length if documents returned, otherwise total (for size:0 aggregations)
+	// Return hits array length if documents returned
 	if len(result.Hits.Hits) > 0 {
 		return len(result.Hits.Hits), nil
 	}
+
+	// For aggregations, return bucket count or single value
+	if len(result.Aggregations) > 0 {
+		for _, agg := range result.Aggregations {
+			if len(agg.Buckets) > 0 {
+				return len(agg.Buckets), nil
+			}
+			if agg.Value != nil {
+				return int(*agg.Value), nil
+			}
+		}
+	}
+
+	// Fall back to total hits (for count queries with size:0)
 	return result.Hits.Total.Value, nil
 }
 
