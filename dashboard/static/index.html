@@ -719,6 +719,29 @@
         return runColors[baseName];
       }
 
+      // Cache for container colors
+      const containerColors = {};
+      let containerColorIndex = 0;
+
+      function getContainerColor(name, container) {
+        if (!containerColors[name]) {
+          // Check for custom color first
+          if (container?.color) {
+            containerColors[name] = container.color;
+          }
+          // Check for backend-specific color
+          else if (container?.backend && BACKEND_COLORS[container.backend]) {
+            containerColors[name] = BACKEND_COLORS[container.backend];
+          }
+          // Fall back to cycling colors
+          else {
+            containerColors[name] = COLORS[containerColorIndex % COLORS.length];
+            containerColorIndex++;
+          }
+        }
+        return containerColors[name];
+      }
+
       function shadeColor(color, percent) {
         // Lighten or darken a hex color
         const num = parseInt(color.replace("#", ""), 16);
@@ -1206,6 +1229,11 @@
         return ms.toFixed(1) + "ms";
       }
 
+      function hasQueries(run) {
+        // Show run if it has any queries (even without timeline data yet)
+        return Object.keys(run.queries || {}).length > 0;
+      }
+
       function hasQueryTimelines(run) {
         return Object.values(run.queries || {}).some(
           (q) => q.timeline?.length > 0,
@@ -1213,10 +1241,10 @@
       }
 
       function updateStats(runs) {
-        // Group runs by chart
+        // Group runs by chart (show runs with queries even before timeline data)
         const runsByChart = {};
         Object.keys(runs)
-          .filter((name) => hasQueryTimelines(runs[name]))
+          .filter((name) => hasQueries(runs[name]))
           .sort()
           .forEach((name) => {
             const run = runs[name];
@@ -1314,9 +1342,8 @@
               </div>
               <div class="query-details" id="${name}-queries"></div>
             `;
+                container.appendChild(el);
               }
-              // Always reorder to match sorted order (appendChild moves existing elements)
-              container.appendChild(el);
 
               // Update query details - only create if not exists, then just update values
               const queriesEl = document.getElementById(`${name}-queries`);
@@ -1357,7 +1384,7 @@
                   <div class="query-name">${qName}${infoStr}</div>
                 </div>
                 <div class="query-stats">
-                  <div><div class="query-stat-value" id="${queryId}-iters">0</div><div class="query-stat-label">Iters</div></div>
+                  <div><div class="query-stat-value" id="${queryId}-qps">0</div><div class="query-stat-label">QPS</div></div>
                   <div><div class="query-stat-value" id="${queryId}-min">0</div><div class="query-stat-label">Min</div></div>
                   <div><div class="query-stat-value" id="${queryId}-p50">0</div><div class="query-stat-label">P50</div></div>
                   <div><div class="query-stat-value" id="${queryId}-p95">0</div><div class="query-stat-label">P95</div></div>
@@ -1372,8 +1399,8 @@
                 }
 
                 // Update values only
-                document.getElementById(`${queryId}-iters`).textContent =
-                  formatNumber(q.count || 0);
+                document.getElementById(`${queryId}-qps`).textContent =
+                  formatNumber(q.qps || 0);
                 document.getElementById(`${queryId}-min`).textContent =
                   formatLatency(q.min);
                 document.getElementById(`${queryId}-p50`).textContent =
@@ -1391,10 +1418,10 @@
 
       let lastLegendKey = "";
       function updateLegend(runs) {
-        // Group runs by chart
+        // Group runs by chart (show runs with queries even before timeline data)
         const runsByChart = {};
         Object.keys(runs)
-          .filter((name) => hasQueryTimelines(runs[name]))
+          .filter((name) => hasQueries(runs[name]))
           .sort()
           .forEach((name) => {
             const run = runs[name];
@@ -1875,45 +1902,43 @@
             chart.update("none");
           });
 
-        // Update CPU/Memory charts (only show if any run has metrics data)
-        const runsWithMetrics = runNames.filter(
-          (name) => (runs[name].cpu?.length > 0) || (runs[name].memory?.length > 0)
-        );
-        if (runsWithMetrics.length > 0) {
+        // Update CPU/Memory charts from containers data (independent of runs)
+        const containers = data.containers || {};
+        const containerNames = Object.keys(containers).sort();
+        if (containerNames.length > 0) {
           document.getElementById("metrics-container").style.display = "grid";
 
-          const cpuDatasets = runNames.map((name) => {
-            const run = runs[name];
-            const color = getRunColor(name, run);
-            const startTime = runStartTimes[name] || 0;
+          // Use test start time as baseline for container metrics
+          const testStartTime = data.startTime ? new Date(data.startTime).getTime() : Date.now();
+
+          const cpuDatasets = containerNames.map((name) => {
+            const container = containers[name];
+            const color = getContainerColor(name, container);
+            const firstDataTime = container.cpu?.[0]?.time || testStartTime;
             return {
               label: name,
               borderColor: color,
-              data: (run.cpu || [])
-                .filter((p) => p.time >= startTime)
-                .map((p) => ({
-                  x: (p.time - startTime) / 1000,
-                  y: p.value,
-                })),
+              data: (container.cpu || []).map((p) => ({
+                x: (p.time - firstDataTime) / 1000,
+                y: p.value,
+              })),
             };
           });
           updateChartDatasets(cpuChart, cpuDatasets);
           updateChartYAxis(cpuChart);
           cpuChart.update("none");
 
-          const memoryDatasets = runNames.map((name) => {
-            const run = runs[name];
-            const color = getRunColor(name, run);
-            const startTime = runStartTimes[name] || 0;
+          const memoryDatasets = containerNames.map((name) => {
+            const container = containers[name];
+            const color = getContainerColor(name, container);
+            const firstDataTime = container.memory?.[0]?.time || testStartTime;
             return {
               label: name,
               borderColor: color,
-              data: (run.memory || [])
-                .filter((p) => p.time >= startTime)
-                .map((p) => ({
-                  x: (p.time - startTime) / 1000,
-                  y: p.value,
-                })),
+              data: (container.memory || []).map((p) => ({
+                x: (p.time - firstDataTime) / 1000,
+                y: p.value,
+              })),
             };
           });
           updateChartDatasets(memoryChart, memoryDatasets);

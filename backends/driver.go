@@ -166,13 +166,19 @@ func (c *K6Client) SetTimeout(seconds int) {
 	c.timeout = time.Duration(seconds) * time.Second
 }
 
+// emitInitMetrics emits initialization metrics on first call to signal dashboard.
+func (c *K6Client) emitInitMetrics() {
+	if c.initialized {
+		return
+	}
+	c.initialized = true
+	metrics.EmitBackendInit(c.vu, c.backend)
+	metrics.EmitScenarioStarted(c.vu, c.backend)
+}
+
 // Search executes a query and emits metrics.
 func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
-	// Emit backend_init on first call to signal dashboard
-	if !c.initialized {
-		c.initialized = true
-		metrics.EmitBackendInit(c.vu, c.backend)
-	}
+	c.emitInitMetrics()
 
 	ctx := context.Background()
 	var cancel context.CancelFunc
@@ -213,11 +219,7 @@ func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
 
 // InsertBatch inserts documents and emits metrics.
 func (c *K6Client) InsertBatch(table string, docs []map[string]interface{}) map[string]interface{} {
-	// Emit backend_init on first call to signal dashboard
-	if !c.initialized {
-		c.initialized = true
-		metrics.EmitBackendInit(c.vu, c.backend)
-	}
+	c.emitInitMetrics()
 
 	if len(docs) == 0 {
 		return map[string]interface{}{"rows": 0, "latencyMs": 0.0}

@@ -13,12 +13,13 @@ import (
 
 var (
 	// Unified metrics - tagged by backend
-	searchDuration *metrics.Metric
-	searchHits     *metrics.Metric
-	ingestDuration *metrics.Metric
-	ingestDocs     *metrics.Metric
-	backendInit    *metrics.Metric
-	metricsRegOnce sync.Once
+	searchDuration   *metrics.Metric
+	searchHits       *metrics.Metric
+	ingestDuration   *metrics.Metric
+	ingestDocs       *metrics.Metric
+	backendInit      *metrics.Metric
+	scenarioStarted  *metrics.Metric
+	metricsRegOnce   sync.Once
 
 	// Query patterns per scenario (captured on first call)
 	QueryPatterns   = make(map[string]string)
@@ -46,19 +47,18 @@ func RegisterMetrics(vu modules.VU) {
 			ingestDuration, _ = registry.NewMetric("ingest_duration", metrics.Trend, metrics.Time)
 			ingestDocs, _ = registry.NewMetric("ingest_docs", metrics.Counter)
 			backendInit, _ = registry.NewMetric("backend_init", metrics.Gauge)
+			scenarioStarted, _ = registry.NewMetric("scenario_started", metrics.Gauge)
 		}
 	})
 }
 
-// EmitBackendInit emits a backend_init metric to signal the dashboard that a backend is configured.
-// This allows container metrics to attach immediately, before any queries complete.
-func EmitBackendInit(vu modules.VU, backend string) {
+// emitGaugeMetric is a shared helper for emitting gauge metrics with backend tags.
+func emitGaugeMetric(vu modules.VU, metric *metrics.Metric, backend string) {
 	state := vu.State()
-	if state == nil || backendInit == nil {
+	if state == nil || metric == nil {
 		return
 	}
 
-	now := time.Now()
 	ctxPtr := vu.Context()
 	if ctxPtr == nil {
 		return
@@ -70,10 +70,22 @@ func EmitBackendInit(vu modules.VU, backend string) {
 	}
 
 	metrics.PushIfNotDone(ctxPtr, state.Samples, metrics.Sample{
-		TimeSeries: metrics.TimeSeries{Metric: backendInit, Tags: tags},
-		Time:       now,
+		TimeSeries: metrics.TimeSeries{Metric: metric, Tags: tags},
+		Time:       time.Now(),
 		Value:      1,
 	})
+}
+
+// EmitBackendInit emits a backend_init metric to signal the dashboard that a backend is configured.
+// This allows container metrics to attach immediately, before any queries complete.
+func EmitBackendInit(vu modules.VU, backend string) {
+	emitGaugeMetric(vu, backendInit, backend)
+}
+
+// EmitScenarioStarted emits a scenario_started metric to signal the dashboard that a scenario has begun.
+// This creates the run entry in the dashboard before any queries complete.
+func EmitScenarioStarted(vu modules.VU, backend string) {
+	emitGaugeMetric(vu, scenarioStarted, backend)
 }
 
 // CaptureQueryPattern stores the first query pattern seen for each scenario.
@@ -143,6 +155,17 @@ func CaptureScenarioInfo(vu modules.VU) {
 	scenarioInfosMu.Unlock()
 }
 
+// maxRampingVUs returns the maximum target VUs across all stages.
+func maxRampingVUs(stages []executor.Stage) int64 {
+	var maxVUs int64
+	for _, stage := range stages {
+		if stage.Target.Int64 > maxVUs {
+			maxVUs = stage.Target.Int64
+		}
+	}
+	return maxVUs
+}
+
 // getExecutorVUs extracts VU count from various executor config types.
 func getExecutorVUs(cfg lib.ExecutorConfig) int64 {
 	switch c := cfg.(type) {
@@ -151,21 +174,9 @@ func getExecutorVUs(cfg lib.ExecutorConfig) int64 {
 	case *executor.ConstantVUsConfig:
 		return c.VUs.Int64
 	case executor.RampingVUsConfig:
-		var maxVUs int64
-		for _, stage := range c.Stages {
-			if stage.Target.Int64 > maxVUs {
-				maxVUs = stage.Target.Int64
-			}
-		}
-		return maxVUs
+		return maxRampingVUs(c.Stages)
 	case *executor.RampingVUsConfig:
-		var maxVUs int64
-		for _, stage := range c.Stages {
-			if stage.Target.Int64 > maxVUs {
-				maxVUs = stage.Target.Int64
-			}
-		}
-		return maxVUs
+		return maxRampingVUs(c.Stages)
 	case executor.SharedIterationsConfig:
 		return c.VUs.Int64
 	case *executor.SharedIterationsConfig:

@@ -42,9 +42,19 @@ type Output struct {
 
 // DashboardData holds all metrics for the dashboard.
 type DashboardData struct {
-	StartTime     time.Time              `json:"startTime"`
-	TotalDuration float64                `json:"totalDuration"` // Total test duration in seconds
-	Runs          map[string]*RunMetrics `json:"runs"`
+	StartTime     time.Time                     `json:"startTime"`
+	TotalDuration float64                       `json:"totalDuration"` // Total test duration in seconds
+	Runs          map[string]*RunMetrics        `json:"runs"`
+	Containers    map[string]*ContainerMetrics  `json:"-"` // Container metrics by container name (independent of runs)
+}
+
+// ContainerMetrics holds CPU/memory metrics for a container.
+type ContainerMetrics struct {
+	Name    string      `json:"name"`
+	Backend string      `json:"backend"` // Associated backend name
+	Color   string      `json:"color"`
+	CPU     []TimeValue `json:"cpu"`
+	Memory  []TimeValue `json:"memory"`
 }
 
 // RunMetrics holds metrics for a single run/phase.
@@ -57,8 +67,6 @@ type RunMetrics struct {
 	Chart          string                   `json:"chart"`     // Chart group for separating graphs
 	Latencies      []float64                `json:"latencies"`
 	Timeline       []TimelinePoint          `json:"timeline"`
-	CPU            []TimeValue              `json:"cpu"`
-	Memory         []TimeValue              `json:"memory"`
 	IngestRate     []TimeValue              `json:"ingestRate"`     // Docs/sec timeline
 	TotalIngested  int64                    `json:"totalIngested"`  // Total docs ingested
 	LastIngestTime int64                    `json:"-"`              // For rate calculation
@@ -96,6 +104,47 @@ type TimeValue struct {
 	Value float64 `json:"value"`
 }
 
+// Constants for timing thresholds
+const (
+	runEndTimeoutMs   = 2000 // Time without updates before run is considered ended
+	ingestRateIntervalMs = 500  // Minimum interval between ingest rate calculations
+)
+
+// getRunName computes the run identifier from backend, alias, and chart tag.
+func getRunName(backend string, tags map[string]string) string {
+	opts := metrics.GetBackendOptions(backend)
+	run := backend
+	if opts != nil && opts.Alias != "" {
+		run = opts.Alias
+	}
+	if chart := tags["chart"]; chart != "" {
+		run = run + " (" + chart + ")"
+	}
+	return run
+}
+
+// getOrCreateRun gets or creates a RunMetrics entry for the given run name.
+func (o *Output) getOrCreateRun(runName, backend string, tags map[string]string) *RunMetrics {
+	if o.data.Runs[runName] != nil {
+		return o.data.Runs[runName]
+	}
+
+	opts := metrics.GetBackendOptions(backend)
+	rm := &RunMetrics{
+		Name:    runName,
+		Backend: backend,
+		Chart:   tags["chart"],
+		Queries: make(map[string]*QueryMetrics),
+	}
+	if opts != nil {
+		rm.Container = opts.Container
+		rm.Alias = opts.Alias
+		rm.Color = opts.Color
+	}
+	o.data.Runs[runName] = rm
+	return rm
+}
+
 // New creates a new dashboard output.
 func New(params output.Params) (output.Output, error) {
 	return &Output{
@@ -104,8 +153,9 @@ func New(params output.Params) (output.Output, error) {
 		doneCh:  make(chan struct{}),
 		clients: make(map[chan []byte]struct{}),
 		data: &DashboardData{
-			StartTime: time.Now(),
-			Runs:      make(map[string]*RunMetrics),
+			StartTime:  time.Now(),
+			Runs:       make(map[string]*RunMetrics),
+			Containers: make(map[string]*ContainerMetrics),
 		},
 	}, nil
 }
@@ -135,7 +185,7 @@ func (o *Output) Start() error {
 
 	go o.loop()
 
-	fmt.Println("\n📊 Dashboard: http://localhost:5665/static/\n")
+	fmt.Println("\n📊 Dashboard: http://localhost:5665/static/")
 
 	return nil
 }
@@ -203,39 +253,46 @@ func (o *Output) flush() {
 
 			switch {
 			case name == "backend_init":
-				// Backend initialization signal - create run entry immediately
+				// Backend initialization signal - register container for metrics
+				backend := tags["backend"]
+				if backend == "" {
+					continue
+				}
+				opts := metrics.GetBackendOptions(backend)
+				if opts != nil && opts.Container != "" {
+					if o.data.Containers[opts.Container] == nil {
+						o.data.Containers[opts.Container] = &ContainerMetrics{
+							Name:    opts.Container,
+							Backend: backend,
+							Color:   opts.Color,
+						}
+					}
+				}
+
+			case name == "scenario_started":
+				// Scenario started signal - create run and query entry immediately
 				backend := tags["backend"]
 				if backend == "" {
 					continue
 				}
 
-				opts := metrics.GetBackendOptions(backend)
-				run := backend
-				if opts != nil && opts.Alias != "" {
-					run = opts.Alias
-				}
-
-				// Create run if it doesn't exist (no chart suffix yet - will be added when queries come in)
-				if o.data.Runs[run] == nil {
-					rm := &RunMetrics{
-						Name:    run,
-						Backend: backend,
-						Queries: make(map[string]*QueryMetrics),
-					}
-					if opts != nil {
-						rm.Container = opts.Container
-						rm.Alias = opts.Alias
-						rm.Color = opts.Color
-					}
-					o.data.Runs[run] = rm
-				}
-				rm := o.data.Runs[run]
+				runName := getRunName(backend, tags)
+				rm := o.getOrCreateRun(runName, backend, tags)
 				if rm.StartTime == 0 {
 					rm.StartTime = now
 				}
 
+				// Create query entry for the scenario
+				queryName := tags["scenario"]
+				if queryName != "" && rm.Queries[queryName] == nil {
+					rm.Queries[queryName] = &QueryMetrics{Name: queryName}
+					if info := metrics.ScenarioInfos[queryName]; info != nil {
+						rm.Queries[queryName].VUs = int(info.VUs)
+						rm.Queries[queryName].Executor = info.Executor
+					}
+				}
+
 			case name == "search_duration":
-				// Get backend name from tag
 				backend := tags["backend"]
 				if backend == "" {
 					backend = tags["run"]
@@ -247,58 +304,25 @@ func (o *Output) flush() {
 					continue
 				}
 
-				// Look up backend options (registered at init time)
-				opts := metrics.GetBackendOptions(backend)
-
-				// Determine run identifier: prefer alias, then backend
-				run := backend
-				if opts != nil && opts.Alias != "" {
-					run = opts.Alias
-				}
-
-				// If chart tag is set, append it to run identifier to separate chart groups
-				if chart := tags["chart"]; chart != "" {
-					run = run + " (" + chart + ")"
-				}
-
-				// Get or create run metrics
-				if o.data.Runs[run] == nil {
-					rm := &RunMetrics{
-						Name:    run,
-						Backend: backend,
-						Chart:   tags["chart"],
-						Queries: make(map[string]*QueryMetrics),
-					}
-					// Apply backend options if available
-					if opts != nil {
-						rm.Container = opts.Container
-						rm.Alias = opts.Alias
-						rm.Color = opts.Color
-					}
-					o.data.Runs[run] = rm
-				}
-				rm := o.data.Runs[run]
+				runName := getRunName(backend, tags)
+				rm := o.getOrCreateRun(runName, backend, tags)
 				rm.Latencies = append(rm.Latencies, value)
 				if rm.StartTime == 0 {
 					rm.StartTime = now
 				}
 				rm.LastUpdateTime = now
 
-				// Track per-query metrics if query tag exists
+				// Track per-query metrics
 				queryName := tags["query"]
 				if queryName == "" {
-					queryName = tags["scenario"] // Fall back to scenario name
+					queryName = tags["scenario"]
 				}
 				if queryName != "" {
-					if rm.Queries == nil {
-						rm.Queries = make(map[string]*QueryMetrics)
-					}
 					if rm.Queries[queryName] == nil {
 						rm.Queries[queryName] = &QueryMetrics{Name: queryName}
 					}
 					qm := rm.Queries[queryName]
 					qm.Latencies = append(qm.Latencies, value)
-					// Get VUs and executor from captured scenario info
 					if qm.VUs == 0 || qm.Executor == "" {
 						if info := metrics.ScenarioInfos[queryName]; info != nil {
 							if qm.VUs == 0 {
@@ -312,7 +336,6 @@ func (o *Output) flush() {
 				}
 
 			case name == "search_hits":
-				// Get backend and run identifier (same logic as search_duration)
 				backend := tags["backend"]
 				if backend == "" {
 					backend = tags["run"]
@@ -324,16 +347,8 @@ func (o *Output) flush() {
 					continue
 				}
 
-				opts := metrics.GetBackendOptions(backend)
-				run := backend
-				if opts != nil && opts.Alias != "" {
-					run = opts.Alias
-				}
-				if chart := tags["chart"]; chart != "" {
-					run = run + " (" + chart + ")"
-				}
-
-				rm := o.data.Runs[run]
+				runName := getRunName(backend, tags)
+				rm := o.data.Runs[runName]
 				if rm == nil {
 					continue // Run should already exist from search_duration
 				}
@@ -342,7 +357,7 @@ func (o *Output) flush() {
 				if queryName == "" {
 					queryName = tags["scenario"]
 				}
-				if queryName != "" && rm.Queries != nil {
+				if queryName != "" {
 					if qm := rm.Queries[queryName]; qm != nil {
 						qm.HitCounts = append(qm.HitCounts, int64(value))
 					}
@@ -350,18 +365,27 @@ func (o *Output) flush() {
 
 			case name == "container_cpu_percent":
 				container := tags["container"]
-				if rm := o.findActiveRunForContainer(container); rm != nil {
-					rm.CPU = append(rm.CPU, TimeValue{Time: now, Value: value})
+				if container == "" {
+					continue
 				}
+				// Create container entry if it doesn't exist
+				if o.data.Containers[container] == nil {
+					o.data.Containers[container] = &ContainerMetrics{Name: container}
+				}
+				o.data.Containers[container].CPU = append(o.data.Containers[container].CPU, TimeValue{Time: now, Value: value})
 
 			case name == "container_memory_bytes":
 				container := tags["container"]
-				if rm := o.findActiveRunForContainer(container); rm != nil {
-					rm.Memory = append(rm.Memory, TimeValue{Time: now, Value: value})
+				if container == "" {
+					continue
 				}
+				// Create container entry if it doesn't exist
+				if o.data.Containers[container] == nil {
+					o.data.Containers[container] = &ContainerMetrics{Name: container}
+				}
+				o.data.Containers[container].Memory = append(o.data.Containers[container].Memory, TimeValue{Time: now, Value: value})
 
 			case name == "ingest_docs":
-				// Get backend name from tag
 				backend := tags["backend"]
 				if backend == "" {
 					backend = tags["run"]
@@ -373,36 +397,8 @@ func (o *Output) flush() {
 					continue
 				}
 
-				// Look up backend options (registered at init time)
-				opts := metrics.GetBackendOptions(backend)
-
-				// Determine run identifier: prefer alias, then backend
-				run := backend
-				if opts != nil && opts.Alias != "" {
-					run = opts.Alias
-				}
-
-				// If chart tag is set, append it to run identifier to separate chart groups
-				if chart := tags["chart"]; chart != "" {
-					run = run + " (" + chart + ")"
-				}
-
-				if o.data.Runs[run] == nil {
-					rm := &RunMetrics{
-						Name:    run,
-						Backend: backend,
-						Chart:   tags["chart"],
-						Queries: make(map[string]*QueryMetrics),
-					}
-					// Apply backend options if available
-					if opts != nil {
-						rm.Container = opts.Container
-						rm.Alias = opts.Alias
-						rm.Color = opts.Color
-					}
-					o.data.Runs[run] = rm
-				}
-				rm := o.data.Runs[run]
+				runName := getRunName(backend, tags)
+				rm := o.getOrCreateRun(runName, backend, tags)
 				rm.TotalIngested += int64(value)
 				if rm.StartTime == 0 {
 					rm.StartTime = now
@@ -484,9 +480,9 @@ func (o *Output) updateIngestRate(rm *RunMetrics, now int64) {
 		return
 	}
 
-	// Calculate rate every 500ms
+	// Calculate rate at ingestRateIntervalMs intervals
 	elapsed := now - rm.LastIngestTime
-	if elapsed < 500 {
+	if elapsed < ingestRateIntervalMs {
 		return
 	}
 
@@ -496,91 +492,6 @@ func (o *Output) updateIngestRate(rm *RunMetrics, now int64) {
 	rm.IngestRate = append(rm.IngestRate, TimeValue{Time: now, Value: rate})
 	rm.LastIngestTime = now
 	rm.LastIngestDocs = rm.TotalIngested
-}
-
-// findActiveRunForContainer finds a run that matches the container and is actively running.
-func (o *Output) findActiveRunForContainer(container string) *RunMetrics {
-	if container == "" {
-		return nil
-	}
-
-	for _, rm := range o.data.Runs {
-		// Only match runs that have started and haven't ended
-		if rm.StartTime == 0 || rm.EndTime != 0 {
-			continue
-		}
-
-		// First, try exact match on container name (handles custom containers and aliases)
-		if rm.Container == container {
-			return rm
-		}
-
-		// Fall back to matching container name against backend type
-		if rm.Backend != "" && containerMatchesBackend(container, rm.Backend) {
-			if rm.Container == "" {
-				rm.Container = container
-			}
-			return rm
-		}
-	}
-
-	return nil
-}
-
-// containerMatchesBackend checks if a container name matches a backend type.
-func containerMatchesBackend(container, backend string) bool {
-	containerLower := strings.ToLower(container)
-
-	switch strings.ToLower(backend) {
-	case "paradedb":
-		return strings.Contains(containerLower, "paradedb")
-	case "elasticsearch":
-		return strings.Contains(containerLower, "elastic")
-	case "opensearch":
-		return strings.Contains(containerLower, "opensearch")
-	case "postgresfts":
-		return strings.Contains(containerLower, "postgresfts")
-	case "":
-		return strings.Contains(containerLower, "") || strings.Contains(containerLower, "")
-	case "clickhouse":
-		return strings.Contains(containerLower, "clickhouse")
-	case "mongodb":
-		return strings.Contains(containerLower, "mongo")
-	}
-	return false
-}
-
-func (o *Output) updateTimeline(rm *RunMetrics, now int64) {
-	if len(rm.Latencies) == 0 {
-		return
-	}
-
-	lastIdx := 0
-	if len(rm.Timeline) > 0 {
-		lastCount := 0
-		for _, tp := range rm.Timeline {
-			lastCount += tp.Count
-		}
-		lastIdx = lastCount
-	}
-
-	if lastIdx >= len(rm.Latencies) {
-		return
-	}
-
-	recent := rm.Latencies[lastIdx:]
-	if len(recent) == 0 {
-		return
-	}
-
-	rm.Timeline = append(rm.Timeline, TimelinePoint{
-		Time:  now,
-		P50:   percentile(recent, 50),
-		P90:   percentile(recent, 90),
-		P95:   percentile(recent, 95),
-		P99:   percentile(recent, 99),
-		Count: len(recent),
-	})
 }
 
 func (o *Output) broadcast() {
@@ -639,8 +550,8 @@ func (o *Output) getSummary() map[string]interface{} {
 
 	runs := make(map[string]interface{})
 	for name, rm := range o.data.Runs {
-		// Check if run has ended (no updates for 2 seconds)
-		if rm.EndTime == 0 && rm.LastUpdateTime > 0 && (now-rm.LastUpdateTime) > 2000 {
+		// Check if run has ended (no updates for runEndTimeoutMs)
+		if rm.EndTime == 0 && rm.LastUpdateTime > 0 && (now-rm.LastUpdateTime) > runEndTimeoutMs {
 			rm.EndTime = rm.LastUpdateTime
 		}
 
@@ -709,8 +620,6 @@ func (o *Output) getSummary() map[string]interface{} {
 			"alias":           rm.Alias,
 			"color":           rm.Color,
 			"chart":           rm.Chart,
-			"cpu":             rm.CPU,
-			"memory":          rm.Memory,
 			"ingestRate":      rm.IngestRate,
 			"totalIngested":   rm.TotalIngested,
 			"avgIngestRate":   ingestRate,
@@ -721,10 +630,23 @@ func (o *Output) getSummary() map[string]interface{} {
 		}
 	}
 
+	// Build containers data
+	containers := make(map[string]interface{})
+	for name, cm := range o.data.Containers {
+		containers[name] = map[string]interface{}{
+			"name":    cm.Name,
+			"backend": cm.Backend,
+			"color":   cm.Color,
+			"cpu":     cm.CPU,
+			"memory":  cm.Memory,
+		}
+	}
+
 	return map[string]interface{}{
 		"elapsed":       elapsed,
 		"chartDuration": chartDuration,
 		"runs":          runs,
+		"containers":    containers,
 	}
 }
 
@@ -815,17 +737,6 @@ func maxVal(values []float64) float64 {
 		}
 	}
 	return max
-}
-
-func avgVal(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	sum := 0.0
-	for _, v := range values {
-		sum += v
-	}
-	return sum / float64(len(values))
 }
 
 // getQueryPattern looks up a query pattern by scenario name.
