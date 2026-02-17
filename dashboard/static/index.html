@@ -1914,15 +1914,13 @@
           const cpuDatasets = containerNames.map((name) => {
             const container = containers[name];
             const color = getContainerColor(name, container);
-            const cpuData = (container.cpu || []).map((p) => ({
-              x: (p.time - baselineTime) / 1000,
-              y: p.value,
-            }));
             return {
               label: name,
               borderColor: color,
-              data: cpuData,
-              pointRadius: cpuData.length === 1 ? 4 : 0,
+              data: (container.cpu || []).map((p) => ({
+                x: (p.time - baselineTime) / 1000,
+                y: p.value,
+              })),
             };
           });
           updateChartDatasets(cpuChart, cpuDatasets);
