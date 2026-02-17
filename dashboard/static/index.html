@@ -1226,14 +1226,24 @@
             runsByChart[chartGroup].push(name);
           });
 
-        // Update stats for each chart group (in emission order)
+        // Calculate earliest start time per chart group
+        const chartStartTimes = {};
+        Object.keys(runsByChart).forEach((chartGroup) => {
+          chartStartTimes[chartGroup] = Infinity;
+          runsByChart[chartGroup].forEach((name) => {
+            const run = runs[name];
+            if (run.startTime && run.startTime < chartStartTimes[chartGroup]) {
+              chartStartTimes[chartGroup] = run.startTime;
+            }
+          });
+        });
+
+        // Update stats for each chart group (in emission order by start time)
         const sortedChartGroups = Object.keys(runsByChart).sort((a, b) => {
-          const aIdx = chartGroupOrder.indexOf(a);
-          const bIdx = chartGroupOrder.indexOf(b);
-          if (aIdx === -1 && bIdx === -1) return a.localeCompare(b);
-          if (aIdx === -1) return 1;
-          if (bIdx === -1) return -1;
-          return aIdx - bIdx;
+          const aTime = chartStartTimes[a] || Infinity;
+          const bTime = chartStartTimes[b] || Infinity;
+          if (aTime === bTime) return a.localeCompare(b);
+          return aTime - bTime;
         });
         sortedChartGroups.forEach((chartGroup) => {
             const safeId = (chartGroup || "default").replace(
@@ -1245,7 +1255,7 @@
             const container = document.getElementById(`stats-${safeId}`);
             if (!container) return;
 
-            runsByChart[chartGroup].forEach((name, idx) => {
+            runsByChart[chartGroup].slice().sort().forEach((name, idx) => {
               const run = runs[name];
               const color = getRunColor(name, run);
 
@@ -1378,14 +1388,24 @@
             runsByChart[chartGroup].push(name);
           });
 
-        // Update legend for each chart group (in emission order)
+        // Calculate earliest start time per chart group
+        const chartStartTimes = {};
+        Object.keys(runsByChart).forEach((chartGroup) => {
+          chartStartTimes[chartGroup] = Infinity;
+          runsByChart[chartGroup].forEach((name) => {
+            const run = runs[name];
+            if (run.startTime && run.startTime < chartStartTimes[chartGroup]) {
+              chartStartTimes[chartGroup] = run.startTime;
+            }
+          });
+        });
+
+        // Update legend for each chart group (in emission order by start time)
         const sortedChartGroups = Object.keys(runsByChart).sort((a, b) => {
-          const aIdx = chartGroupOrder.indexOf(a);
-          const bIdx = chartGroupOrder.indexOf(b);
-          if (aIdx === -1 && bIdx === -1) return a.localeCompare(b);
-          if (aIdx === -1) return 1;
-          if (bIdx === -1) return -1;
-          return aIdx - bIdx;
+          const aTime = chartStartTimes[a] || Infinity;
+          const bTime = chartStartTimes[b] || Infinity;
+          if (aTime === bTime) return a.localeCompare(b);
+          return aTime - bTime;
         });
         sortedChartGroups.forEach((chartGroup) => {
             const safeId = (chartGroup || "default").replace(
@@ -1395,7 +1415,7 @@
             const legend = document.getElementById(`legend-${safeId}`);
             if (!legend) return;
 
-            const runNames = runsByChart[chartGroup];
+            const runNames = runsByChart[chartGroup].slice().sort();
 
             // Build a key to detect if legend structure changed
             const queryList = [];
@@ -1710,15 +1730,21 @@
         updateStats(runs);
         updateLegend(runs);
 
-        // Group runs by chart
+        // Group runs by chart and track earliest start time per chart
         const runsByChart = {};
+        const chartStartTimes = {};
         runNames.forEach((name) => {
           const run = runs[name];
           const chartGroup = run.chart || "default";
           if (!runsByChart[chartGroup]) {
             runsByChart[chartGroup] = [];
+            chartStartTimes[chartGroup] = Infinity;
           }
           runsByChart[chartGroup].push(name);
+          // Track earliest start time for this chart group
+          if (run.startTime && run.startTime < chartStartTimes[chartGroup]) {
+            chartStartTimes[chartGroup] = run.startTime;
+          }
         });
 
         // Update latency/hits chart for each dashboard group
@@ -1727,14 +1753,12 @@
         lastMetric = selectedMetric;
         lastChartType = chartType;
 
-        // Sort chart groups by emission order
+        // Sort chart groups by earliest start time (emission order)
         const chartGroupsSorted = Object.keys(runsByChart).sort((a, b) => {
-          const aIdx = chartGroupOrder.indexOf(a);
-          const bIdx = chartGroupOrder.indexOf(b);
-          if (aIdx === -1 && bIdx === -1) return a.localeCompare(b);
-          if (aIdx === -1) return 1;
-          if (bIdx === -1) return -1;
-          return aIdx - bIdx;
+          const aTime = chartStartTimes[a] || Infinity;
+          const bTime = chartStartTimes[b] || Infinity;
+          if (aTime === bTime) return a.localeCompare(b);
+          return aTime - bTime;
         });
         chartGroupsSorted.forEach((chartGroup) => {
             const chart = getOrCreateChartGroup(
