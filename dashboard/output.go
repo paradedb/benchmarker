@@ -279,7 +279,7 @@ func (o *Output) flush() {
 				runName := getRunName(backend, tags)
 				rm := o.getOrCreateRun(runName, backend, tags)
 				if rm.StartTime == 0 {
-					rm.StartTime = now
+					rm.StartTime = sample.Time.UnixMilli()
 				}
 
 				// Create query entry for the scenario
@@ -308,7 +308,7 @@ func (o *Output) flush() {
 				rm := o.getOrCreateRun(runName, backend, tags)
 				rm.Latencies = append(rm.Latencies, value)
 				if rm.StartTime == 0 {
-					rm.StartTime = now
+					rm.StartTime = sample.Time.UnixMilli()
 				}
 				rm.LastUpdateTime = now
 
@@ -372,7 +372,7 @@ func (o *Output) flush() {
 				if o.data.Containers[container] == nil {
 					o.data.Containers[container] = &ContainerMetrics{Name: container}
 				}
-				o.data.Containers[container].CPU = append(o.data.Containers[container].CPU, TimeValue{Time: now, Value: value})
+				o.data.Containers[container].CPU = append(o.data.Containers[container].CPU, TimeValue{Time: sample.Time.UnixMilli(), Value: value})
 
 			case name == "container_memory_bytes":
 				container := tags["container"]
@@ -383,7 +383,7 @@ func (o *Output) flush() {
 				if o.data.Containers[container] == nil {
 					o.data.Containers[container] = &ContainerMetrics{Name: container}
 				}
-				o.data.Containers[container].Memory = append(o.data.Containers[container].Memory, TimeValue{Time: now, Value: value})
+				o.data.Containers[container].Memory = append(o.data.Containers[container].Memory, TimeValue{Time: sample.Time.UnixMilli(), Value: value})
 
 			case name == "ingest_docs":
 				backend := tags["backend"]
@@ -401,7 +401,7 @@ func (o *Output) flush() {
 				rm := o.getOrCreateRun(runName, backend, tags)
 				rm.TotalIngested += int64(value)
 				if rm.StartTime == 0 {
-					rm.StartTime = now
+					rm.StartTime = sample.Time.UnixMilli()
 				}
 				rm.LastUpdateTime = now
 			}

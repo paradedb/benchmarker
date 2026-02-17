@@ -1837,6 +1837,9 @@
             );
             const groupRunNames = runsByChart[chartGroup];
 
+            // Use chart group's earliest start time as common baseline for all runs
+            const chartBaseline = chartStartTimes[chartGroup] !== Infinity ? chartStartTimes[chartGroup] : 0;
+
             const datasets = [];
             groupRunNames.forEach((name) => {
               const run = runs[name];
@@ -1846,16 +1849,8 @@
                 selectedQueries.has(qn),
               );
 
-              // Set start time from first query timeline if not set
-              if (!runStartTimes[name]) {
-                for (const qName of Object.keys(queries)) {
-                  if (queries[qName].timeline?.length > 0) {
-                    runStartTimes[name] = queries[qName].timeline[0].time;
-                    break;
-                  }
-                }
-              }
-              const startTime = runStartTimes[name] || 0;
+              // Use chart group's baseline for consistent x-axis across all runs
+              const startTime = chartBaseline;
 
               if (
                 queryNames.length === 0 &&
@@ -1876,8 +1871,9 @@
                   datasets.push({
                     label: qName,
                     borderColor: color,
+                    backgroundColor: color,
                     data: timelineData,
-                    pointRadius: timelineData.length === 1 ? 4 : 0,
+                    pointRadius: timelineData.length === 1 ? 2 : 0,
                   });
                 });
               }
