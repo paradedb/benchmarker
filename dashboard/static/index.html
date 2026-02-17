@@ -1192,7 +1192,8 @@
             }
             ds.borderColor = newDs.borderColor;
             ds.backgroundColor = newDs.backgroundColor;
-            ds.pointRadius = newDs.pointRadius;
+            // Recalculate pointRadius based on actual data length after update
+            ds.pointRadius = ds.data.length === 1 ? 2 : 0;
           }
         });
 
@@ -1234,8 +1235,8 @@
       }
 
       function hasQueries(run) {
-        // Show run if it exists (from backend_init) - even without queries yet
-        return true;
+        // Show run if it has any queries (even without timeline data yet)
+        return Object.keys(run.queries || {}).length > 0;
       }
 
       function hasQueryTimelines(run) {

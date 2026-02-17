@@ -253,15 +253,11 @@ func (o *Output) flush() {
 
 			switch {
 			case name == "backend_init":
-				// Backend initialization signal - create run and register container
+				// Backend initialization signal - register container for metrics
 				backend := tags["backend"]
 				if backend == "" {
 					continue
 				}
-
-				// Create run entry immediately so stats panel appears
-				runName := getRunName(backend, tags)
-				_ = o.getOrCreateRun(runName, backend, tags)
 
 				// Register container for metrics
 				opts := metrics.GetBackendOptions(backend)
