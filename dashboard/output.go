@@ -52,6 +52,7 @@ type DashboardData struct {
 type ContainerMetrics struct {
 	Name    string      `json:"name"`
 	Backend string      `json:"backend"` // Associated backend name
+	Alias   string      `json:"alias"`   // User-defined alias for display
 	Color   string      `json:"color"`
 	CPU     []TimeValue `json:"cpu"`
 	Memory  []TimeValue `json:"memory"`
@@ -266,11 +267,13 @@ func (o *Output) flush() {
 						o.data.Containers[opts.Container] = &ContainerMetrics{
 							Name:    opts.Container,
 							Backend: backend,
+							Alias:   opts.Alias,
 							Color:   opts.Color,
 						}
 					} else {
-						// Update backend/color info if container already exists
+						// Update backend/color/alias info if container already exists
 						o.data.Containers[opts.Container].Backend = backend
+						o.data.Containers[opts.Container].Alias = opts.Alias
 						o.data.Containers[opts.Container].Color = opts.Color
 					}
 				}
@@ -642,6 +645,7 @@ func (o *Output) getSummary() map[string]interface{} {
 		containers[name] = map[string]interface{}{
 			"name":    cm.Name,
 			"backend": cm.Backend,
+			"alias":   cm.Alias,
 			"color":   cm.Color,
 			"cpu":     cm.CPU,
 			"memory":  cm.Memory,

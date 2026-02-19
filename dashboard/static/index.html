@@ -1943,8 +1943,9 @@
             const container = containers[name];
             const color = getContainerColor(name, container);
             const baseline = getContainerBaseline(container);
+            const displayName = container.alias || name;
             return {
-              label: name,
+              label: displayName,
               borderColor: color,
               data: (container.cpu || []).map((p) => ({
                 x: (p.time - baseline) / 1000,
@@ -1960,8 +1961,9 @@
             const container = containers[name];
             const color = getContainerColor(name, container);
             const baseline = getContainerBaseline(container);
+            const displayName = container.alias || name;
             return {
-              label: name,
+              label: displayName,
               borderColor: color,
               data: (container.memory || []).map((p) => ({
                 x: (p.time - baseline) / 1000,
