@@ -729,6 +729,14 @@
           containerColors[name] = container.color;
           return container.color;
         }
+        // Try to match with a run's color for consistency across panels
+        if (lastData?.runs) {
+          for (const [runName, runData] of Object.entries(lastData.runs)) {
+            if (runData.backend === container?.backend || runData.container === name) {
+              return getRunColor(runName, runData);
+            }
+          }
+        }
         // Check for backend-specific color
         if (container?.backend && BACKEND_COLORS[container.backend]) {
           containerColors[name] = BACKEND_COLORS[container.backend];
