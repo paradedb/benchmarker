@@ -1192,8 +1192,10 @@
             }
             ds.borderColor = newDs.borderColor;
             ds.backgroundColor = newDs.backgroundColor;
-            // Recalculate pointRadius based on actual data length after update
-            ds.pointRadius = ds.data.length === 1 ? 2 : 0;
+            // Copy scriptable pointRadius function
+            if (newDs.pointRadius) {
+              ds.pointRadius = newDs.pointRadius;
+            }
           }
         });
 
@@ -1873,7 +1875,8 @@
                     borderColor: color,
                     backgroundColor: color,
                     data: timelineData,
-                    pointRadius: timelineData.length === 1 ? 2 : 0,
+                    // Use scriptable option - checks data length on each render
+                    pointRadius: (ctx) => ctx.dataset.data.length === 1 ? 2 : 0,
                   });
                 });
               }
