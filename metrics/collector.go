@@ -25,7 +25,7 @@ var (
 
 	// Container resource limits (captured once)
 	ContainerLimits   = make(map[string]map[string]interface{})
-	containerLimitsMu sync.Mutex
+	containerLimitsMu sync.RWMutex
 	limitsCapture     = make(map[string]bool)
 
 	// Backend configs (registered by each backend - database settings etc)
@@ -57,6 +57,23 @@ func GetBackendConfig(backend string) map[string]interface{} {
 	backendConfigsMu.RLock()
 	defer backendConfigsMu.RUnlock()
 	return backendConfigs[backend]
+}
+
+// GetContainerLimits returns captured container limits by container name.
+func GetContainerLimits(container string) map[string]interface{} {
+	containerLimitsMu.RLock()
+	defer containerLimitsMu.RUnlock()
+
+	limits := ContainerLimits[container]
+	if limits == nil {
+		return nil
+	}
+
+	result := make(map[string]interface{}, len(limits))
+	for k, v := range limits {
+		result[k] = v
+	}
+	return result
 }
 
 // CapturePrePostScripts reads pre/post scripts from the dataset directory

@@ -150,8 +150,8 @@ export function pgSimpleQuery() {
     `
     SELECT id, title
     FROM documents
-    WHERE content ||| $1
-    ORDER BY pdb.score(id) DESC
+    WHERE content @@@ $1
+    ORDER BY paradedb.score(id) DESC
     LIMIT 10
   `,
     term,
@@ -218,7 +218,12 @@ export function clickhouseIngest() {
 // ==================== MongoDB ====================
 export function mongodbSimple() {
   const term = getTerm();
-  backends.get("mongodb").searchText("documents", "content", term);
+  backends.get("mongodb").search(
+    JSON.stringify({
+      text: { query: term, path: ["title", "content"] },
+    }),
+    "documents",
+  );
 }
 
 export function mongodbIngest() {
