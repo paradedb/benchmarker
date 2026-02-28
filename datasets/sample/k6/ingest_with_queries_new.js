@@ -150,8 +150,8 @@ export function pgSimpleQuery() {
     `
     SELECT id, title
     FROM documents
-    WHERE content @@@ $1
-    ORDER BY paradedb.score(id) DESC
+    WHERE content ||| $1
+    ORDER BY pdb.score(id) DESC
     LIMIT 10
   `,
     term,
