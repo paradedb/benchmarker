@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -114,8 +115,15 @@ func GetAllCLILoaders(getConnString func(name string) string) []*CLILoader {
 	backendConfigsMu.RLock()
 	defer backendConfigsMu.RUnlock()
 
-	var loaders []*CLILoader
-	for name, cfg := range backendConfigs {
+	names := make([]string, 0, len(backendConfigs))
+	for name := range backendConfigs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	loaders := make([]*CLILoader, 0, len(names))
+	for _, name := range names {
+		cfg := backendConfigs[name]
 		loaders = append(loaders, NewCLILoader(name, cfg.FileType, getConnString(name), cfg.Factory))
 	}
 	return loaders
@@ -130,6 +138,7 @@ func RegisteredBackends() []string {
 	for name := range backendConfigs {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 

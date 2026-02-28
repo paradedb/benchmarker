@@ -163,7 +163,7 @@ func New(params output.Params) (output.Output, error) {
 
 // Description returns a human-readable description.
 func (o *Output) Description() string {
-	return "Web Dashboard (http://localhost:5665)"
+	return "Web Dashboard (http://localhost:5665/static/)"
 }
 
 // Start starts the HTTP server.
