@@ -7,6 +7,7 @@ import (
 
 	"github.com/paradedb/benchmarks/backends"
 	"github.com/paradedb/benchmarks/metrics"
+	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 
 	// Import backends to register them via init()
@@ -31,6 +32,17 @@ func (b *Backends) Get(alias string) *backends.K6Client {
 	return b.clients[alias]
 }
 
+func (m *ModuleInstance) configErrorf(format string, args ...interface{}) {
+	err := fmt.Errorf(format, args...)
+	if m.vu != nil {
+		if rt := m.vu.Runtime(); rt != nil {
+			common.Throw(rt, err)
+			return
+		}
+	}
+	panic(err.Error())
+}
+
 // newBackends creates a new backends registry with the specified configuration.
 func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	b := &Backends{
@@ -47,7 +59,8 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	// Parse backends array
 	backendsArray, ok := config["backends"].([]interface{})
 	if !ok {
-		panic("backends: 'backends' array is required")
+		m.configErrorf("backends: 'backends' array is required")
+		return nil
 	}
 
 	for _, item := range backendsArray {
@@ -63,7 +76,8 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 			var ok bool
 			backendType, ok = v["type"].(string)
 			if !ok {
-				panic("backends: each backend config must have a 'type' field")
+				m.configErrorf("backends: each backend config must have a 'type' field")
+				return nil
 			}
 			alias = backendType
 			if a, ok := v["alias"].(string); ok {
@@ -79,14 +93,16 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 				conn = c
 			}
 		default:
-			panic("backends: each backend must be a string or object")
+			m.configErrorf("backends: each backend must be a string or object")
+			return nil
 		}
 
 		// Validate backend type
 		backendCfg, ok := backends.GetConfig(backendType)
 		if !ok {
-			panic(fmt.Sprintf("backends: unknown backend type '%s'. Valid types: %v",
-				backendType, backends.RegisteredBackends()))
+			m.configErrorf("backends: unknown backend type '%s'. Valid types: %v",
+				backendType, backends.RegisteredBackends())
+			return nil
 		}
 
 		// Apply defaults
@@ -103,12 +119,14 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 
 		// Check for duplicate alias
 		if _, exists := b.clients[alias]; exists {
-			panic(fmt.Sprintf("backends: duplicate alias '%s'", alias))
+			m.configErrorf("backends: duplicate alias '%s'", alias)
+			return nil
 		}
 
 		driver, err := backends.NewDriver(backendType, conn)
 		if err != nil {
-			panic(fmt.Sprintf("backends: failed to create '%s': %v", alias, err))
+			m.configErrorf("backends: failed to create '%s': %v", alias, err)
+			return nil
 		}
 
 		// Register backend options
