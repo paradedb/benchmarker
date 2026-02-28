@@ -1,0 +1,108 @@
+# workflows/schema-compat.yml
+#
+# ParadeDB Compatibility Check
+# Validates that benchmarks can load the sample dataset against a newly released
+# ParadeDB image. Triggered automatically on paradedb release notifications
+# (repository_dispatch) or manually (workflow_dispatch).
+
+name: ParadeDB Compatibility Check
+
+on:
+  repository_dispatch:
+    types: [paradedb-release]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "ParadeDB version to check against (for example: 0.21.6 or v0.21.6)"
+        required: true
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  PARADEDB_VERSION: ${{ inputs.version || github.event.client_payload.version }}
+
+jobs:
+  loader-smoke-test:
+    name: Loader Smoke Test
+    if: ${{ env.PARADEDB_VERSION != '' }}
+    runs-on: ubuntu-latest
+
+    services:
+      paradedb:
+        image: paradedb/paradedb:${{ startsWith(env.PARADEDB_VERSION, 'v') && env.PARADEDB_VERSION || format('v{0}', env.PARADEDB_VERSION) }}-pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: benchmark
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d benchmark"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      PARADEDB_URL: postgres://postgres:postgres@localhost:5432/benchmark
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate ParadeDB version input
+        run: |
+          if [ -z "${PARADEDB_VERSION}" ]; then
+            echo "PARADEDB_VERSION is empty. Provide version in workflow_dispatch input or repository_dispatch payload."
+            exit 1
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build loader
+        run: make loader
+
+      - name: Run loader smoke test against ParadeDB
+        run: ./bin/loader load --backend paradedb ./datasets/sample
+
+      - name: Verify loaded row count
+        env:
+          PGPASSWORD: postgres
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          psql -h localhost -U postgres -d benchmark -c "SELECT COUNT(*) AS documents FROM documents;"
+
+      - name: Clean up loaded data
+        run: ./bin/loader drop --backend paradedb ./datasets/sample
+
+  notify:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [loader-smoke-test]
+    if: failure()
+    steps:
+      - name: Create GitHub Issue
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `ParadeDB compatibility failure for ${process.env.PARADEDB_VERSION}`,
+              body: `The ParadeDB compatibility check failed for **${process.env.PARADEDB_VERSION}**.\n\nWorkflow run: ${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}\n\nPlease investigate and update benchmarks as needed.`,
+              labels: ['bug']
+            })
+
+      - name: Notify Slack on Failure
+        if: ${{ secrets.SLACK_GITHUB_CHANNEL_WEBHOOK_URL != '' }}
+        run: |
+          GITHUB_RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          MESSAGE="<!here> paradedb compatibility workflow failed for ${{ env.PARADEDB_VERSION }} in ${{ github.repository }}. Logs: ${GITHUB_RUN_URL}"
+          curl -X POST -H 'Content-type: application/json' -d "{\"text\": \"${MESSAGE}\"}" "${{ secrets.SLACK_GITHUB_CHANNEL_WEBHOOK_URL }}"

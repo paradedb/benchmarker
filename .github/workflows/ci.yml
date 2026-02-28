@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fmt:
+    name: Go Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check gofmt
+        run: |
+          FILES=$(git ls-files '*.go')
+          if [ -z "$FILES" ]; then
+            exit 0
+          fi
+
+          UNFORMATTED=$(gofmt -l $FILES)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "The following files are not gofmt'd:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install golangci-lint
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Run lint
+        run: make lint
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: make test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build Go binaries
+        run: |
+          make loader
+          make viewer
+
+      - name: Build k6 extension binary
+        run: make k6
