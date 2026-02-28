@@ -9,6 +9,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/paradedb/benchmarks/dashboard"
 )
@@ -33,17 +34,32 @@ func main() {
 	// Parse flags
 	var exportFile, notes string
 	for i := 2; i < len(os.Args); i++ {
-		switch os.Args[i] {
+		arg := os.Args[i]
+		switch arg {
 		case "--export":
 			if i+1 < len(os.Args) {
 				exportFile = os.Args[i+1]
 				i++
+			} else {
+				fmt.Println("Error: --export requires a file path")
+				os.Exit(1)
 			}
 		case "--notes":
 			if i+1 < len(os.Args) {
 				notes = os.Args[i+1]
 				i++
+			} else {
+				fmt.Println("Error: --notes requires a value")
+				os.Exit(1)
 			}
+		default:
+			if strings.HasPrefix(arg, "-") {
+				fmt.Printf("Error: unknown flag: %s\n", arg)
+			} else {
+				fmt.Printf("Error: unexpected argument: %s\n", arg)
+			}
+			fmt.Println("Usage: dashboard-viewer <dashboard.json> [--export <output.html>] [--notes \"Description\"]")
+			os.Exit(1)
 		}
 	}
 

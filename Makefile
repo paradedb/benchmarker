@@ -1,4 +1,4 @@
-.PHONY: all build k6 loader clean test fmt lint deps help
+.PHONY: all build k6 loader viewer clean test fmt lint deps help
 
 GOBIN := $(shell go env GOPATH)/bin
 XK6 := $(GOBIN)/xk6
