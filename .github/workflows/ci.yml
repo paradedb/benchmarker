@@ -74,6 +74,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -86,8 +88,25 @@ jobs:
           go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
+      - name: Determine lint base revision
+        id: lint-base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "rev=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          elif git rev-parse HEAD~1 >/dev/null 2>&1; then
+            echo "rev=HEAD~1" >> "$GITHUB_OUTPUT"
+          else
+            echo "rev=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run lint
-        run: make lint
+        run: |
+          REV="${{ steps.lint-base.outputs.rev }}"
+          if [ -n "$REV" ]; then
+            golangci-lint run --new-from-rev "$REV"
+          else
+            golangci-lint run
+          fi
 
   test:
     name: Test
