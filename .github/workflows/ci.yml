@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -30,10 +32,32 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Check gofmt
+      - name: Determine changed Go files
+        id: changed-go-files
         run: |
-          FILES=$(git ls-files '*.go')
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            FILES=$(git diff --name-only --diff-filter=ACMRT "$BASE_SHA" "$HEAD_SHA" -- '*.go')
+          else
+            if git rev-parse HEAD~1 >/dev/null 2>&1; then
+              FILES=$(git diff --name-only --diff-filter=ACMRT HEAD~1 HEAD -- '*.go')
+            else
+              FILES=$(git ls-files '*.go')
+            fi
+          fi
+
+          {
+            echo "files<<EOF"
+            echo "$FILES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check gofmt on changed files
+        run: |
+          FILES="${{ steps.changed-go-files.outputs.files }}"
           if [ -z "$FILES" ]; then
+            echo "No changed Go files to check."
             exit 0
           fi
 
@@ -100,4 +124,6 @@ jobs:
           make viewer
 
       - name: Build k6 extension binary
+        env:
+          GOTOOLCHAIN: auto
         run: make k6
