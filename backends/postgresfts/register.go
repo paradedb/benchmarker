@@ -10,7 +10,7 @@ func init() {
 	backends.Register("postgresfts", backends.BackendConfig{
 		Factory:     postgres.New,
 		FileType:    "sql",
-		EnvVar:      "POSTGRESFTS_URL",
+		EnvVar:      "POSTGRES_FTS_URL",
 		DefaultConn: "postgres://postgres:postgres@localhost:5433/benchmark",
 		Container:   "postgresfts",
 	})
