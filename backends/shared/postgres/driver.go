@@ -5,7 +5,6 @@ package postgres
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -64,24 +63,7 @@ func (d *Driver) SetExtraGUCs(gucs []string) {
 
 // Exec executes SQL statements separated by semicolons.
 func (d *Driver) Exec(ctx context.Context, statements string) error {
-	for _, stmt := range strings.Split(statements, ";") {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
-		}
-		// Skip comment-only statements
-		lines := strings.Split(stmt, "\n")
-		var sqlLines []string
-		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if trimmed != "" && !strings.HasPrefix(trimmed, "--") {
-				sqlLines = append(sqlLines, line)
-			}
-		}
-		stmt = strings.Join(sqlLines, "\n")
-		if stmt == "" {
-			continue
-		}
+	for _, stmt := range backends.SplitSQLStatements(statements) {
 		if _, err := d.pool.Exec(ctx, stmt); err != nil {
 			return err
 		}

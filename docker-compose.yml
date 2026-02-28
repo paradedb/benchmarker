@@ -29,6 +29,9 @@ services:
         reservations:
           cpus: "2"
           memory: 4G
+    # Compose-compatible limits (deploy.resources is ignored outside Swarm)
+    cpus: 4
+    mem_limit: 8g
     command:
       - "postgres"
       - "-c"
@@ -77,7 +80,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - postgres_fts_data:/var/lib/postgresql/18/main
+      - postgres_fts_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -91,6 +94,8 @@ services:
         reservations:
           cpus: "2"
           memory: 4G
+    cpus: 4
+    mem_limit: 8g
     command:
       - "postgres"
       - "-c"
@@ -137,7 +142,7 @@ services:
     ports:
       - "5435:5432"
     volumes:
-      - pg_textsearch_data:/var/lib/postgresql/18/main
+      - pg_textsearch_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -151,6 +156,8 @@ services:
         reservations:
           cpus: "2"
           memory: 4G
+    cpus: 4
+    mem_limit: 8g
     command:
       - "postgres"
       - "-c"
@@ -220,6 +227,8 @@ services:
         reservations:
           cpus: "2"
           memory: 4G
+    cpus: 4
+    mem_limit: 8g
     ulimits:
       memlock:
         soft: -1
@@ -260,6 +269,8 @@ services:
         reservations:
           cpus: "2"
           memory: 4G
+    cpus: 4
+    mem_limit: 8g
     ulimits:
       memlock:
         soft: -1
@@ -295,6 +306,8 @@ services:
         reservations:
           cpus: "2"
           memory: 4G
+    cpus: 4
+    mem_limit: 8g
 
   mongodb:
     profiles: [mongodb, all]
@@ -314,6 +327,8 @@ services:
         reservations:
           cpus: "2"
           memory: 4G
+    cpus: 4
+    mem_limit: 8g
 
 volumes:
   paradedb_data:

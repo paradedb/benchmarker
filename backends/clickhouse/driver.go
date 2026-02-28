@@ -63,7 +63,7 @@ func (d *Driver) Close() error {
 
 // Exec executes SQL statements separated by semicolons.
 func (d *Driver) Exec(ctx context.Context, statements string) error {
-	for _, stmt := range strings.Split(statements, ";") {
+	for _, stmt := range backends.SplitSQLStatements(statements) {
 		stmt = strings.TrimSpace(stmt)
 		if stmt == "" {
 			continue
