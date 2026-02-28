@@ -251,8 +251,8 @@ Then open http://localhost:5665 in your browser.
 # Export dashboard data during run
 DASHBOARD_EXPORT=true ./k6 run --out dashboard benchmark.js
 
-# View saved data later
-./bin/dashboard-viewer ./dashboard-export.json
+# View saved data later (use generated dashboard_<timestamp>.json file)
+./bin/dashboard-viewer ./dashboard_2026-02-28_12-00-00.json
 ```
 
 ## Backend Examples
