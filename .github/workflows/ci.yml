@@ -38,13 +38,7 @@ jobs:
 
       - name: Check gofmt
         run: |
-          FILES=$(git ls-files '*.go')
-          if [ -z "$FILES" ]; then
-            echo "No Go files found to check."
-            exit 0
-          fi
-
-          UNFORMATTED=$(gofmt -l $FILES)
+          UNFORMATTED=$(gofmt -l .)
           if [ -n "$UNFORMATTED" ]; then
             echo "The following files are not gofmt'd:"
             echo "$UNFORMATTED"
