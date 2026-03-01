@@ -10,7 +10,8 @@ on:
     branches:
       - main
     paths:
-      - '**/*.go'
+      - "**/*.go"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 permissions:
@@ -66,7 +67,7 @@ jobs:
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Run lint
-        run: golangci-lint run
+        run: golangci-lint run --timeout=5m
 
   test:
     name: Test

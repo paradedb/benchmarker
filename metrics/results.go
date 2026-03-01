@@ -13,13 +13,13 @@ import (
 
 var (
 	// Unified metrics - tagged by backend
-	searchDuration   *metrics.Metric
-	searchHits       *metrics.Metric
-	ingestDuration   *metrics.Metric
-	ingestDocs       *metrics.Metric
-	backendInit      *metrics.Metric
-	scenarioStarted  *metrics.Metric
-	metricsRegOnce   sync.Once
+	searchDuration  *metrics.Metric
+	searchHits      *metrics.Metric
+	ingestDuration  *metrics.Metric
+	ingestDocs      *metrics.Metric
+	backendInit     *metrics.Metric
+	scenarioStarted *metrics.Metric
+	metricsRegOnce  sync.Once
 
 	// Query patterns per scenario (captured on first call)
 	QueryPatterns   = make(map[string]string)
