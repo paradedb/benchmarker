@@ -28,10 +28,10 @@ func init() {
 type Output struct {
 	output.SampleBuffer
 
-	params   output.Params
-	server   *http.Server
-	stopCh   chan struct{}
-	doneCh   chan struct{}
+	params output.Params
+	server *http.Server
+	stopCh chan struct{}
+	doneCh chan struct{}
 
 	mu      sync.RWMutex
 	clients map[chan []byte]struct{}
@@ -42,10 +42,10 @@ type Output struct {
 
 // DashboardData holds all metrics for the dashboard.
 type DashboardData struct {
-	StartTime     time.Time                     `json:"startTime"`
-	TotalDuration float64                       `json:"totalDuration"` // Total test duration in seconds
-	Runs          map[string]*RunMetrics        `json:"runs"`
-	Containers    map[string]*ContainerMetrics  `json:"-"` // Container metrics by container name (independent of runs)
+	StartTime     time.Time                    `json:"startTime"`
+	TotalDuration float64                      `json:"totalDuration"` // Total test duration in seconds
+	Runs          map[string]*RunMetrics       `json:"runs"`
+	Containers    map[string]*ContainerMetrics `json:"-"` // Container metrics by container name (independent of runs)
 }
 
 // ContainerMetrics holds CPU/memory metrics for a container.
@@ -68,11 +68,11 @@ type RunMetrics struct {
 	Chart          string                   `json:"chart"`     // Chart group for separating graphs
 	Latencies      []float64                `json:"latencies"`
 	Timeline       []TimelinePoint          `json:"timeline"`
-	IngestRate     []TimeValue              `json:"ingestRate"`     // Docs/sec timeline
-	TotalIngested  int64                    `json:"totalIngested"`  // Total docs ingested
-	LastIngestTime int64                    `json:"-"`              // For rate calculation
-	LastIngestDocs int64                    `json:"-"`              // For rate calculation
-	Queries        map[string]*QueryMetrics `json:"-"`              // Per-query breakdown
+	IngestRate     []TimeValue              `json:"ingestRate"`    // Docs/sec timeline
+	TotalIngested  int64                    `json:"totalIngested"` // Total docs ingested
+	LastIngestTime int64                    `json:"-"`             // For rate calculation
+	LastIngestDocs int64                    `json:"-"`             // For rate calculation
+	Queries        map[string]*QueryMetrics `json:"-"`             // Per-query breakdown
 	StartTime      int64                    `json:"startTime"`
 	EndTime        int64                    `json:"endTime"`
 	LastUpdateTime int64                    `json:"-"` // Track last update for end detection
@@ -107,7 +107,7 @@ type TimeValue struct {
 
 // Constants for timing thresholds
 const (
-	runEndTimeoutMs   = 2000 // Time without updates before run is considered ended
+	runEndTimeoutMs      = 2000 // Time without updates before run is considered ended
 	ingestRateIntervalMs = 500  // Minimum interval between ingest rate calculations
 )
 
