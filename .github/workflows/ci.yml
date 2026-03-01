@@ -4,9 +4,13 @@ on:
   push:
     branches:
       - main
+    paths:
+      - '**/*.go'
   pull_request:
     branches:
       - main
+    paths:
+      - '**/*.go'
   workflow_dispatch:
 
 permissions:
@@ -32,32 +36,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Determine changed Go files
-        id: changed-go-files
+      - name: Check gofmt
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-            FILES=$(git diff --name-only --diff-filter=ACMRT "$BASE_SHA" "$HEAD_SHA" -- '*.go')
-          else
-            if git rev-parse HEAD~1 >/dev/null 2>&1; then
-              FILES=$(git diff --name-only --diff-filter=ACMRT HEAD~1 HEAD -- '*.go')
-            else
-              FILES=$(git ls-files '*.go')
-            fi
-          fi
-
-          {
-            echo "files<<EOF"
-            echo "$FILES"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Check gofmt on changed files
-        run: |
-          FILES="${{ steps.changed-go-files.outputs.files }}"
+          FILES=$(git ls-files '*.go')
           if [ -z "$FILES" ]; then
-            echo "No changed Go files to check."
+            echo "No Go files found to check."
             exit 0
           fi
 
@@ -88,25 +71,8 @@ jobs:
           go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
-      - name: Determine lint base revision
-        id: lint-base
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "rev=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
-          elif git rev-parse HEAD~1 >/dev/null 2>&1; then
-            echo "rev=HEAD~1" >> "$GITHUB_OUTPUT"
-          else
-            echo "rev=" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Run lint
-        run: |
-          REV="${{ steps.lint-base.outputs.rev }}"
-          if [ -n "$REV" ]; then
-            golangci-lint run --new-from-rev "$REV"
-          else
-            golangci-lint run
-          fi
+        run: golangci-lint run
 
   test:
     name: Test
