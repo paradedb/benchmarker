@@ -36,6 +36,25 @@ type ScenarioInfo struct {
 	VUs      int64
 }
 
+// GetQueryPattern returns a query pattern by scenario name.
+func GetQueryPattern(scenario string) string {
+	queryPatternsMu.RLock()
+	defer queryPatternsMu.RUnlock()
+	return QueryPatterns[scenario]
+}
+
+// GetScenarioInfo returns scenario metadata by name.
+func GetScenarioInfo(scenario string) *ScenarioInfo {
+	scenarioInfosMu.RLock()
+	defer scenarioInfosMu.RUnlock()
+	info := ScenarioInfos[scenario]
+	if info == nil {
+		return nil
+	}
+	copy := *info
+	return &copy
+}
+
 // RegisterMetrics registers the unified metrics once during init phase.
 // Call this from any backend's NewClient during init.
 func RegisterMetrics(vu modules.VU) {

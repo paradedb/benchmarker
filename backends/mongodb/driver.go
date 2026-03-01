@@ -4,6 +4,7 @@ package mongodb
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -53,7 +54,9 @@ func New(connString string) (backends.Driver, error) {
 	}
 
 	if err := client.Ping(ctx, nil); err != nil {
-		client.Disconnect(ctx)
+		if disconnectErr := client.Disconnect(ctx); disconnectErr != nil {
+			return nil, fmt.Errorf("ping failed: %w (disconnect failed: %v)", err, disconnectErr)
+		}
 		return nil, err
 	}
 
@@ -89,7 +92,9 @@ func (d *Driver) Exec(ctx context.Context, statements string) error {
 
 	// Handle drop
 	if drop, ok := config["drop"].(bool); ok && drop {
-		coll.Drop(ctx)
+		if err := coll.Drop(ctx); err != nil && !strings.Contains(err.Error(), "ns not found") && !strings.Contains(err.Error(), "NamespaceNotFound") {
+			return err
+		}
 	}
 
 	// Handle search index creation
@@ -131,7 +136,12 @@ func (d *Driver) waitForSearchIndex(ctx context.Context, coll *mongo.Collection,
 		}
 
 		var indexes []bson.M
-		cursor.All(ctx, &indexes)
+		if err := cursor.All(ctx, &indexes); err != nil {
+			_ = cursor.Close(ctx)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		_ = cursor.Close(ctx)
 
 		for _, idx := range indexes {
 			if idx["name"] == indexName && idx["status"] == "READY" {

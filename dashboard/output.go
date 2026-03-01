@@ -214,7 +214,9 @@ func (o *Output) Stop() error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	o.server.Shutdown(ctx)
+	if err := o.server.Shutdown(ctx); err != nil && err != http.ErrServerClosed {
+		return err
+	}
 
 	return nil
 }
@@ -295,7 +297,7 @@ func (o *Output) flush() {
 				queryName := tags["scenario"]
 				if queryName != "" && rm.Queries[queryName] == nil {
 					rm.Queries[queryName] = &QueryMetrics{Name: queryName}
-					if info := metrics.ScenarioInfos[queryName]; info != nil {
+					if info := metrics.GetScenarioInfo(queryName); info != nil {
 						rm.Queries[queryName].VUs = int(info.VUs)
 						rm.Queries[queryName].Executor = info.Executor
 					}
@@ -333,7 +335,7 @@ func (o *Output) flush() {
 					qm := rm.Queries[queryName]
 					qm.Latencies = append(qm.Latencies, value)
 					if qm.VUs == 0 || qm.Executor == "" {
-						if info := metrics.ScenarioInfos[queryName]; info != nil {
+						if info := metrics.GetScenarioInfo(queryName); info != nil {
 							if qm.VUs == 0 {
 								qm.VUs = int(info.VUs)
 							}
@@ -710,7 +712,9 @@ func (o *Output) handleData(w http.ResponseWriter, r *http.Request) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	json.NewEncoder(w).Encode(o.getSummary())
+	if err := json.NewEncoder(w).Encode(o.getSummary()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func percentile(values []float64, p float64) float64 {
@@ -752,10 +756,7 @@ func maxVal(values []float64) float64 {
 
 // getQueryPattern looks up a query pattern by scenario name.
 func getQueryPattern(qName string) string {
-	if p, ok := metrics.QueryPatterns[qName]; ok {
-		return p
-	}
-	return ""
+	return metrics.GetQueryPattern(qName)
 }
 
 // getBackendConfig returns the database config and container limits for a backend type.
@@ -765,10 +766,10 @@ func getBackendConfig(backend, container string) (map[string]interface{}, map[st
 		return nil, nil
 	}
 	// Look up limits by container name (which may be alias or custom container name)
-	limits := metrics.ContainerLimits[container]
+	limits := metrics.GetContainerLimits(container)
 	if limits == nil && container != backend {
 		// Fall back to backend name for backwards compatibility
-		limits = metrics.ContainerLimits[backend]
+		limits = metrics.GetContainerLimits(backend)
 	}
 	return metrics.GetBackendConfig(backend), limits
 }
@@ -818,7 +819,9 @@ func ServeFile(filename string, notes ...string) error {
 	mux.HandleFunc("/data", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Write(compactData)
+		if _, err := w.Write(compactData); err != nil {
+			return
+		}
 	})
 
 	server := &http.Server{
