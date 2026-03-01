@@ -74,7 +74,7 @@ func (d *Driver) createIndex(ctx context.Context, index string, config map[strin
 	req, _ := http.NewRequestWithContext(ctx, "DELETE", fmt.Sprintf("%s/%s", d.address, index), nil)
 	resp, err := d.client.Do(req)
 	if err == nil && resp != nil {
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode >= 400 && resp.StatusCode != http.StatusNotFound {
 			return fmt.Errorf("delete index failed with status %d", resp.StatusCode)
@@ -164,7 +164,7 @@ func (d *Driver) execOperations(ctx context.Context, operations []map[string]int
 			resp.Body.Close()
 			return fmt.Errorf("operation %s %s failed: %s", method, opURL, string(respBody))
 		}
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
 
