@@ -72,18 +72,27 @@ jobs:
       - name: Run ShellCheck
         shell: python {0}
         run: |
-          import argparse
           import glob
           import subprocess
           import sys
 
-          sh_files = set(glob.glob("**/*.sh", recursive=True))
+          sh_files = sorted(set(glob.glob("**/*.sh", recursive=True)))
+          if not sh_files:
+            print("[Shellcheck skipped] no .sh files found")
+            sys.exit(0)
+
           for file in sh_files:
             p = subprocess.run(
-                f"shellcheck -x {file}", shell=True, capture_output=True, check=False
+                ["shellcheck", "-x", file],
+                capture_output=True,
+                text=True,
+                check=False,
             )
-            print(p.stdout.decode())
+            if p.stdout:
+              print(p.stdout, end="")
             if p.returncode != 0:
+                if p.stderr:
+                    print(p.stderr, end="")
                 print(f"[Shellcheck did not pass] {file}")
                 sys.exit(1)
-          print(f"[Shellcheck passed] {file}")
+          print(f"[Shellcheck passed] {len(sh_files)} files")
