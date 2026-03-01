@@ -99,7 +99,7 @@ func (d *Driver) Exec(ctx context.Context, statements string) error {
 
 	// Handle drop
 	if drop, ok := config["drop"].(bool); ok && drop {
-		if err := coll.Drop(ctx); err != nil && !strings.Contains(err.Error(), "NamespaceNotFound") {
+		if err := coll.Drop(ctx); err != nil && !strings.Contains(err.Error(), "ns not found") && !strings.Contains(err.Error(), "NamespaceNotFound") {
 			return err
 		}
 	}
@@ -148,6 +148,7 @@ func (d *Driver) waitForSearchIndex(ctx context.Context, coll *mongo.Collection,
 			time.Sleep(2 * time.Second)
 			continue
 		}
+		_ = cursor.Close(ctx)
 
 		for _, idx := range indexes {
 			if idx["name"] == indexName && idx["status"] == "READY" {

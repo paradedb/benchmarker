@@ -216,7 +216,12 @@ export function clickhouseIngest() {
 // ==================== MongoDB ====================
 export function mongodbSimple() {
   const term = getTerm();
-  backends.get("mongodb").searchText("documents", "content", term);
+  backends.get("mongodb").search(
+    JSON.stringify({
+      text: { query: term, path: ["title", "content"] },
+    }),
+    "documents",
+  );
 }
 
 export function mongodbIngest() {

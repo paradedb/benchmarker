@@ -297,7 +297,7 @@ func (o *Output) flush() {
 				queryName := tags["scenario"]
 				if queryName != "" && rm.Queries[queryName] == nil {
 					rm.Queries[queryName] = &QueryMetrics{Name: queryName}
-					if info := metrics.ScenarioInfos[queryName]; info != nil {
+					if info := metrics.GetScenarioInfo(queryName); info != nil {
 						rm.Queries[queryName].VUs = int(info.VUs)
 						rm.Queries[queryName].Executor = info.Executor
 					}
@@ -335,7 +335,7 @@ func (o *Output) flush() {
 					qm := rm.Queries[queryName]
 					qm.Latencies = append(qm.Latencies, value)
 					if qm.VUs == 0 || qm.Executor == "" {
-						if info := metrics.ScenarioInfos[queryName]; info != nil {
+						if info := metrics.GetScenarioInfo(queryName); info != nil {
 							if qm.VUs == 0 {
 								qm.VUs = int(info.VUs)
 							}
@@ -756,10 +756,7 @@ func maxVal(values []float64) float64 {
 
 // getQueryPattern looks up a query pattern by scenario name.
 func getQueryPattern(qName string) string {
-	if p, ok := metrics.QueryPatterns[qName]; ok {
-		return p
-	}
-	return ""
+	return metrics.GetQueryPattern(qName)
 }
 
 // getBackendConfig returns the database config and container limits for a backend type.
@@ -769,10 +766,10 @@ func getBackendConfig(backend, container string) (map[string]interface{}, map[st
 		return nil, nil
 	}
 	// Look up limits by container name (which may be alias or custom container name)
-	limits := metrics.ContainerLimits[container]
+	limits := metrics.GetContainerLimits(container)
 	if limits == nil && container != backend {
 		// Fall back to backend name for backwards compatibility
-		limits = metrics.ContainerLimits[backend]
+		limits = metrics.GetContainerLimits(backend)
 	}
 	return metrics.GetBackendConfig(backend), limits
 }
