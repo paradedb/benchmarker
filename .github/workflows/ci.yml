@@ -10,8 +10,8 @@ on:
     branches:
       - main
     paths:
-      - '**/*.go'
-      - '.github/workflows/ci.yml'
+      - "**/*.go"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 permissions:
