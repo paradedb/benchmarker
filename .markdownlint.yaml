@@ -1,0 +1,2 @@
+MD013: false # Line length
+MD034: false # Bare URLs (used for local dashboard examples)

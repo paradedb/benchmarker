@@ -50,7 +50,7 @@ make clean        # Remove build artifacts
 
 ### Project Structure
 
-```
+```text
 benchmarker/
 ├── module.go              # k6 module registration
 ├── backends.go            # Backend config for k6
@@ -84,7 +84,7 @@ benchmarker/
 
 Datasets follow this structure:
 
-```
+```text
 datasets/<name>/
 ├── schema.yaml           # Column definitions
 ├── data.csv              # Source data

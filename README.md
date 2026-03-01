@@ -371,7 +371,7 @@ The loader CLI handles bulk data loading with lifecycle scripts.
 
 ### Dataset Structure
 
-```
+```text
 datasets/
 └── sample/
     ├── schema.yaml              # Column definitions
@@ -428,7 +428,7 @@ CREATE INDEX ON documents USING bm25 (content);
 VACUUM ANALYZE documents;
 ```
 
-#### Elasticsearch / OpenSearch
+#### Elasticsearch / OpenSearch Pre/Post Scripts
 
 **pre.json** - Creates index with mappings (single object, sent to PUT /{index}):
 
@@ -598,7 +598,7 @@ docker compose --profile all down
 
 ## Project Structure
 
-```
+```text
 benchmarks/
 ├── module.go                    # k6 module registration
 ├── backends.go                  # Backend configuration for k6
