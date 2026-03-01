@@ -214,7 +214,9 @@ func (o *Output) Stop() error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	o.server.Shutdown(ctx)
+	if err := o.server.Shutdown(ctx); err != nil && err != http.ErrServerClosed {
+		return err
+	}
 
 	return nil
 }
@@ -710,7 +712,9 @@ func (o *Output) handleData(w http.ResponseWriter, r *http.Request) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	json.NewEncoder(w).Encode(o.getSummary())
+	if err := json.NewEncoder(w).Encode(o.getSummary()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func percentile(values []float64, p float64) float64 {
@@ -815,7 +819,9 @@ func ServeFile(filename string, notes ...string) error {
 	mux.HandleFunc("/data", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Write(compactData)
+		if _, err := w.Write(compactData); err != nil {
+			return
+		}
 	})
 
 	server := &http.Server{

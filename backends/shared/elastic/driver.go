@@ -71,7 +71,11 @@ func (d *Driver) Exec(ctx context.Context, statements string) error {
 func (d *Driver) createIndex(ctx context.Context, index string, config map[string]interface{}) error {
 	// Delete existing index
 	req, _ := http.NewRequestWithContext(ctx, "DELETE", fmt.Sprintf("%s/%s", d.address, index), nil)
-	d.client.Do(req)
+	resp, err := d.client.Do(req)
+	if err == nil && resp != nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
 
 	// Remove "index" key before sending - it's only used for routing
 	delete(config, "index")
@@ -81,7 +85,7 @@ func (d *Driver) createIndex(ctx context.Context, index string, config map[strin
 	req, _ = http.NewRequestWithContext(ctx, "PUT", fmt.Sprintf("%s/%s", d.address, index), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := d.client.Do(req)
+	resp, err = d.client.Do(req)
 	if err != nil {
 		return err
 	}
