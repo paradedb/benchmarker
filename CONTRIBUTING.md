@@ -62,6 +62,7 @@ benchmarks/
 │   ├── paradedb/          # ParadeDB registration
 │   ├── postgresfts/       # PostgreSQL FTS registration
 │   ├── pgtextsearch/      # pg_textsearch registration
+│   │   └── docker/        # pg_textsearch Dockerfile
 │   ├── elasticsearch/     # Elasticsearch
 │   ├── opensearch/        # OpenSearch
 │   ├── clickhouse/        # ClickHouse
@@ -72,7 +73,6 @@ benchmarks/
 ├── cmd/
 │   ├── loader/            # Loader CLI
 │   └── dashboard-viewer/  # Dashboard replay CLI
-├── backends/pgtextsearch/docker/ # pg_textsearch Dockerfile
 ├── datasets/              # Sample datasets + k6 scripts
 └── docker-compose.yml     # Local backend setup
 ```
