@@ -1,4 +1,2 @@
 MD013: false # Line length
-MD024: false # Duplicate headings (allowed across sections in current docs)
 MD034: false # Bare URLs (used for local dashboard examples)
-MD040: false # Fenced code language (tree/command snippets may omit language)
