@@ -379,11 +379,11 @@ func loadWithDriverJSON(driver backends.Driver, tableName, filePath, dataset, ba
 	if dataset != "" {
 		indexStart := time.Now()
 		postPath := filepath.Join(dataset, backendDir, "post.json")
-			if content, err := readFile(postPath); err == nil {
-				if err := driver.Exec(ctx, content); err != nil {
-					return map[string]interface{}{"error": fmt.Sprintf("post.json failed: %v", err)}
-				}
+		if content, err := readFile(postPath); err == nil {
+			if err := driver.Exec(ctx, content); err != nil {
+				return map[string]interface{}{"error": fmt.Sprintf("post.json failed: %v", err)}
 			}
+		}
 		indexTime = time.Since(indexStart)
 	}
 
