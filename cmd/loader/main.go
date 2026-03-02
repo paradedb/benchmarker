@@ -169,6 +169,12 @@ func getConnection(name string) string {
 	if val := os.Getenv(cfg.EnvVar); val != "" {
 		return val
 	}
+	// Backward-compatibility for prior postgresfts env var name.
+	if name == "postgresfts" {
+		if val := os.Getenv("POSTGRESFTS_URL"); val != "" {
+			return val
+		}
+	}
 	return cfg.DefaultConn
 }
 
@@ -198,51 +204,69 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int) 
 	}
 
 	ctx := context.Background()
+	overallFailed := false
 
 	for _, b := range loaders {
-		dir := filepath.Join(datasetDir, b.Name())
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			fmt.Printf("Skipping %s (no config directory)\n", b.Name())
-			continue
-		}
+		func(loader *backends.CLILoader) {
+			defer func() {
+				if err := loader.Close(); err != nil {
+					fmt.Printf("Warning: failed to close %s: %v\n", loader.Name(), err)
+				}
+			}()
 
-		fmt.Printf("\n=== %s ===\n", strings.ToUpper(b.Name()))
+			dir := filepath.Join(datasetDir, loader.Name())
+			if _, err := os.Stat(dir); os.IsNotExist(err) {
+				fmt.Printf("Skipping %s (no config directory)\n", loader.Name())
+				return
+			}
 
-		// Run pre
-		fmt.Print("Running pre... ")
-		start := time.Now()
-		if err := b.RunPre(ctx, dir, schema); err != nil {
-			fmt.Printf("FAILED: %v\n", err)
-			continue
-		}
-		fmt.Printf("OK (%.2fs)\n", time.Since(start).Seconds())
+			fmt.Printf("\n=== %s ===\n", strings.ToUpper(loader.Name()))
 
-		// Load data
-		if workers > 1 {
-			fmt.Printf("Loading data (batch size: %d, workers: %d)... ", batchSize, workers)
-		} else {
-			fmt.Printf("Loading data (batch size: %d)... ", batchSize)
-		}
-		start = time.Now()
-		count, err := b.Load(ctx, schema, csvPath, batchSize, workers)
-		if err != nil {
-			fmt.Printf("FAILED: %v\n", err)
-			continue
-		}
-		elapsed := time.Since(start).Seconds()
-		rate := float64(count) / elapsed
-		fmt.Printf("OK (%d rows, %.2fs, %.0f rows/sec)\n", count, elapsed, rate)
+			// Run pre
+			fmt.Print("Running pre... ")
+			start := time.Now()
+			if err := loader.RunPre(ctx, dir, schema); err != nil {
+				fmt.Printf("FAILED: %v\n", err)
+				overallFailed = true
+				return
+			}
+			fmt.Printf("OK (%.2fs)\n", time.Since(start).Seconds())
 
-		// Run post
-		fmt.Print("Running post... ")
-		start = time.Now()
-		if err := b.RunPost(ctx, dir, schema); err != nil {
-			fmt.Printf("FAILED: %v\n", err)
-			continue
-		}
-		fmt.Printf("OK (%.2fs)\n", time.Since(start).Seconds())
+			// Load data
+			if workers > 1 {
+				fmt.Printf("Loading data (batch size: %d, workers: %d)... ", batchSize, workers)
+			} else {
+				fmt.Printf("Loading data (batch size: %d)... ", batchSize)
+			}
+			start = time.Now()
+			count, err := loader.Load(ctx, schema, csvPath, batchSize, workers)
+			if err != nil {
+				fmt.Printf("FAILED: %v\n", err)
+				overallFailed = true
+				return
+			}
+			elapsed := time.Since(start).Seconds()
+			rate := 0.0
+			if elapsed > 0 {
+				rate = float64(count) / elapsed
+			}
+			fmt.Printf("OK (%d rows, %.2fs, %.0f rows/sec)\n", count, elapsed, rate)
 
-		b.Close()
+			// Run post
+			fmt.Print("Running post... ")
+			start = time.Now()
+			if err := loader.RunPost(ctx, dir, schema); err != nil {
+				fmt.Printf("FAILED: %v\n", err)
+				overallFailed = true
+				return
+			}
+			fmt.Printf("OK (%.2fs)\n", time.Since(start).Seconds())
+		}(b)
+	}
+
+	if overallFailed {
+		fmt.Println("\nCompleted with errors.")
+		os.Exit(1)
 	}
 
 	fmt.Println("\nDone!")

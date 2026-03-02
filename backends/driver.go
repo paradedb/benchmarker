@@ -542,6 +542,12 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, csvPath string, ba
 	if err := l.ensureDriver(); err != nil {
 		return 0, err
 	}
+	if workers < 1 {
+		workers = 1
+	}
+	if batchSize < 1 {
+		batchSize = 1
+	}
 
 	file, err := os.Open(csvPath)
 	if err != nil {
@@ -568,51 +574,200 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, csvPath string, ba
 			cols = append(cols, col)
 		}
 	}
+	if len(cols) == 0 {
+		return 0, fmt.Errorf("no schema columns matched CSV headers")
+	}
 
 	target := schema.Table
+	if target == "" {
+		target = "documents"
+	}
 
+	// Reuse loader driver for worker 0 and create additional drivers as needed.
+	drivers := make([]Driver, 0, workers)
+	drivers = append(drivers, l.driver)
+	for i := 1; i < workers; i++ {
+		d, err := l.factory(l.connString)
+		if err != nil {
+			for j := 1; j < len(drivers); j++ {
+				drivers[j].Close()
+			}
+			return 0, err
+		}
+		drivers = append(drivers, d)
+	}
+	defer func() {
+		for i := 1; i < len(drivers); i++ {
+			drivers[i].Close()
+		}
+	}()
+
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	batchCh := make(chan [][]any, workers*2)
+	var wg sync.WaitGroup
+	var totalMu sync.Mutex
 	total := 0
-	batch := make([][]any, 0, batchSize)
+	var firstErr error
+	var errOnce sync.Once
+	setErr := func(e error) {
+		if e == nil {
+			return
+		}
+		errOnce.Do(func() {
+			firstErr = e
+			cancel()
+		})
+	}
 
+	for _, d := range drivers {
+		driver := d
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for rows := range batchCh {
+				n, err := driver.Insert(workerCtx, target, cols, rows)
+				if err != nil {
+					setErr(err)
+					return
+				}
+				totalMu.Lock()
+				total += n
+				totalMu.Unlock()
+			}
+		}()
+	}
+
+	sendBatch := func(rows [][]any) bool {
+		if len(rows) == 0 {
+			return true
+		}
+		rowsCopy := make([][]any, len(rows))
+		copy(rowsCopy, rows)
+		select {
+		case <-workerCtx.Done():
+			return false
+		case batchCh <- rowsCopy:
+			return true
+		}
+	}
+
+	batch := make([][]any, 0, batchSize)
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return total, err
+			setErr(err)
+			break
 		}
 
 		row := make([]any, len(cols))
 		for i, col := range cols {
-			row[i] = convertValue(record[headerIdx[col]], schema.Columns[col])
+			idx, ok := headerIdx[col]
+			if !ok || idx >= len(record) {
+				row[i] = nil
+				continue
+			}
+			row[i] = convertValue(record[idx], schema.Columns[col])
 		}
 		batch = append(batch, row)
 
 		if len(batch) >= batchSize {
-			n, err := l.driver.Insert(ctx, target, cols, batch)
-			if err != nil {
-				return total, err
+			if !sendBatch(batch) {
+				break
 			}
-			total += n
-			batch = batch[:0]
+			batch = make([][]any, 0, batchSize)
 		}
 	}
 
-	if len(batch) > 0 {
-		n, err := l.driver.Insert(ctx, target, cols, batch)
-		if err != nil {
-			return total, err
-		}
-		total += n
+	if firstErr == nil && len(batch) > 0 {
+		sendBatch(batch)
+	}
+	close(batchCh)
+	wg.Wait()
+
+	if firstErr != nil {
+		return total, firstErr
+	}
+	if workerCtx.Err() != nil && workerCtx.Err() != context.Canceled {
+		return total, workerCtx.Err()
 	}
 
 	return total, nil
 }
 
+func safeSQLIdentifier(name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("empty identifier")
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		isLower := c >= 'a' && c <= 'z'
+		isUpper := c >= 'A' && c <= 'Z'
+		isDigit := c >= '0' && c <= '9'
+		isUnderscore := c == '_'
+		if i == 0 {
+			if !(isLower || isUpper || isUnderscore) {
+				return "", fmt.Errorf("invalid identifier: %q", name)
+			}
+		} else if !(isLower || isUpper || isDigit || isUnderscore) {
+			return "", fmt.Errorf("invalid identifier: %q", name)
+		}
+	}
+	return name, nil
+}
+
 func (l *CLILoader) Drop(ctx context.Context, schema *Schema) error {
-	// Drop is handled by pre.sql/pre.json now
-	return nil
+	if err := l.ensureDriver(); err != nil {
+		return err
+	}
+
+	target := "documents"
+	if schema != nil && schema.Table != "" {
+		target = schema.Table
+	}
+
+	switch l.fileType {
+	case "sql":
+		table, err := safeSQLIdentifier(target)
+		if err != nil {
+			return err
+		}
+		return l.driver.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", table))
+	case "json":
+		switch l.name {
+		case "elasticsearch", "opensearch":
+			ops := []map[string]interface{}{
+				{
+					"method": "DELETE",
+					"index":  target,
+				},
+			}
+			data, err := json.Marshal(ops)
+			if err != nil {
+				return err
+			}
+			return l.driver.Exec(ctx, string(data))
+		case "mongodb":
+			cfg := map[string]interface{}{
+				"database":   "benchmark",
+				"collection": target,
+				"drop":       true,
+			}
+			data, err := json.Marshal(cfg)
+			if err != nil {
+				return err
+			}
+			return l.driver.Exec(ctx, string(data))
+		default:
+			return fmt.Errorf("drop not supported for backend %s", l.name)
+		}
+	default:
+		return fmt.Errorf("unsupported backend file type %s", l.fileType)
+	}
 }
 
 func (l *CLILoader) Close() error {
