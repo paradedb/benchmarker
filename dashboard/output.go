@@ -281,7 +281,8 @@ func (o *Output) flush() {
 				}
 
 			case name == "scenario_started":
-				// Scenario started signal - create run and query entry immediately
+				// Scenario started signal - create run entry immediately
+				// Query entries are created on demand when search_duration arrives
 				backend := tags["backend"]
 				if backend == "" {
 					continue
@@ -293,6 +294,7 @@ func (o *Output) flush() {
 					rm.StartTime = sample.Time.UnixMilli()
 				}
 
+<<<<<<< Updated upstream
 				// Create query entry for the scenario
 				queryName := tags["scenario"]
 				if queryName != "" && rm.Queries[queryName] == nil {
@@ -303,6 +305,8 @@ func (o *Output) flush() {
 					}
 				}
 
+=======
+>>>>>>> Stashed changes
 			case name == "search_duration":
 				backend := tags["backend"]
 				if backend == "" {

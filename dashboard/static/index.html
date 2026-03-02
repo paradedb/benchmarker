@@ -1977,7 +1977,8 @@
         }
 
         // Update ingest chart (only if any run has ingest data)
-        const runsWithIngest = runNames.filter(
+        // Check all runs, not just those with query timelines
+        const runsWithIngest = Object.keys(runs).filter(
           (name) => runs[name].totalIngested > 0,
         );
         if (runsWithIngest.length > 0) {
