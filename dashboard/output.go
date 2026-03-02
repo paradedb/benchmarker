@@ -294,19 +294,6 @@ func (o *Output) flush() {
 					rm.StartTime = sample.Time.UnixMilli()
 				}
 
-<<<<<<< Updated upstream
-				// Create query entry for the scenario
-				queryName := tags["scenario"]
-				if queryName != "" && rm.Queries[queryName] == nil {
-					rm.Queries[queryName] = &QueryMetrics{Name: queryName}
-					if info := metrics.GetScenarioInfo(queryName); info != nil {
-						rm.Queries[queryName].VUs = int(info.VUs)
-						rm.Queries[queryName].Executor = info.Executor
-					}
-				}
-
-=======
->>>>>>> Stashed changes
 			case name == "search_duration":
 				backend := tags["backend"]
 				if backend == "" {
