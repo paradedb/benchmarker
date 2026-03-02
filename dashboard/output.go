@@ -388,6 +388,7 @@ func (o *Output) flush() {
 				o.data.Containers[container].Memory = append(o.data.Containers[container].Memory, TimeValue{Time: sample.Time.UnixMilli(), Value: value})
 
 			case name == "ingest_docs":
+				fmt.Printf("[dashboard] ingest_docs sample: value=%.0f tags=%v\n", value, tags)
 				backend := tags["backend"]
 				if backend == "" {
 					backend = tags["run"]
