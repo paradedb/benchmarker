@@ -31,13 +31,20 @@ type Driver struct {
 	database string
 }
 
+func isLocalMongoURI(connString string) bool {
+	lower := strings.ToLower(connString)
+	return strings.Contains(lower, "localhost") ||
+		strings.Contains(lower, "127.0.0.1") ||
+		strings.Contains(lower, "::1")
+}
+
 // New creates a new MongoDB driver.
 func New(connString string) (backends.Driver, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Add directConnection for local development
-	if !strings.Contains(connString, "directConnection") {
+	// Add directConnection only for local development (single-node/local Docker).
+	if !strings.Contains(strings.ToLower(connString), "directconnection") && isLocalMongoURI(connString) {
 		if strings.Contains(connString, "?") {
 			connString += "&directConnection=true"
 		} else {

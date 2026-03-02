@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -74,7 +75,10 @@ func (d *Driver) createIndex(ctx context.Context, index string, config map[strin
 	resp, err := d.client.Do(req)
 	if err == nil && resp != nil {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
+		resp.Body.Close()
+		if resp.StatusCode >= 400 && resp.StatusCode != http.StatusNotFound {
+			return fmt.Errorf("delete index failed with status %d", resp.StatusCode)
+		}
 	}
 
 	// Remove "index" key before sending - it's only used for routing
@@ -108,32 +112,45 @@ func (d *Driver) execOperations(ctx context.Context, operations []map[string]int
 		}
 
 		endpoint, ok := op["endpoint"].(string)
-		if !ok {
+		if !ok && op["method"] == nil {
 			continue
 		}
 
 		// Build URL with query params
-		url := fmt.Sprintf("%s/%s/%s", d.address, index, endpoint)
+		opURL := fmt.Sprintf("%s/%s", d.address, index)
+		if endpoint != "" {
+			opURL += "/" + strings.TrimPrefix(endpoint, "/")
+		}
 		if params, ok := op["params"].(map[string]interface{}); ok {
-			var queryParts []string
+			query := url.Values{}
 			for k, v := range params {
-				queryParts = append(queryParts, fmt.Sprintf("%s=%v", k, v))
+				query.Set(k, fmt.Sprintf("%v", v))
 			}
-			if len(queryParts) > 0 {
-				url += "?" + strings.Join(queryParts, "&")
+			if encoded := query.Encode(); encoded != "" {
+				opURL += "?" + encoded
 			}
 		}
 
 		// Determine method and body
 		method := "POST"
+		hasExplicitMethod := false
+		if m, ok := op["method"].(string); ok && m != "" {
+			method = strings.ToUpper(m)
+			hasExplicitMethod = true
+		}
 		var bodyReader io.Reader
-		if body, ok := op["body"].(map[string]interface{}); ok {
-			method = "PUT"
-			bodyBytes, _ := json.Marshal(body)
+		if body, ok := op["body"]; ok {
+			if !hasExplicitMethod {
+				method = "PUT"
+			}
+			bodyBytes, err := json.Marshal(body)
+			if err != nil {
+				return fmt.Errorf("failed to marshal operation body: %w", err)
+			}
 			bodyReader = bytes.NewReader(bodyBytes)
 		}
 
-		req, _ := http.NewRequestWithContext(ctx, method, url, bodyReader)
+		req, _ := http.NewRequestWithContext(ctx, method, opURL, bodyReader)
 		if bodyReader != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
@@ -142,6 +159,12 @@ func (d *Driver) execOperations(ctx context.Context, operations []map[string]int
 		if err != nil {
 			return err
 		}
+		if resp.StatusCode >= 400 {
+			respBody, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return fmt.Errorf("operation %s %s failed: %s", method, opURL, string(respBody))
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
 
