@@ -22,9 +22,7 @@ const terms = new SharedArray("search_terms", function () {
 });
 
 // Load documents once on Go side - shared across all VUs
-const DATA_FILE =
-  __ENV.DATA_FILE ||
-  "/Users/jamesblackwood-sewell/ParadeDB-vs-ElasticSearch/data/documents_small.json";
+const DATA_FILE = __ENV.DATA_FILE || "../data.csv";
 const docs = loader.openDocuments(DATA_FILE);
 
 // Ingest batch size
