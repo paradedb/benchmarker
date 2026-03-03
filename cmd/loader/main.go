@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -324,13 +325,25 @@ func loadSchema(datasetDir string) (*backends.Schema, error) {
 }
 
 func findCSV(datasetDir string) string {
-	entries, _ := os.ReadDir(datasetDir)
+	entries, err := os.ReadDir(datasetDir)
+	if err != nil {
+		return ""
+	}
+
+	var csvFiles []string
 	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".csv") {
-			return filepath.Join(datasetDir, e.Name())
+		if e.IsDir() {
+			continue
+		}
+		if strings.EqualFold(filepath.Ext(e.Name()), ".csv") {
+			csvFiles = append(csvFiles, e.Name())
 		}
 	}
-	return ""
+	if len(csvFiles) == 0 {
+		return ""
+	}
+	sort.Strings(csvFiles)
+	return filepath.Join(datasetDir, csvFiles[0])
 }
 
 // ============================================================================
@@ -400,9 +413,12 @@ func runPull(datasetName, sourceURL string, anonymous bool) {
 	var totalBytes int64
 
 	for _, key := range objects {
-		relPath := strings.TrimPrefix(key, prefix)
-		relPath = strings.TrimPrefix(relPath, "/")
-		localPath := filepath.Join(destDir, relPath)
+		relPath, localPath, err := resolveDownloadPath(destDir, prefix, key)
+		if err != nil {
+			fmt.Printf("  Skipping %s: %v\n", key, err)
+			failed++
+			continue
+		}
 
 		if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
 			fmt.Printf("  Error creating directory for %s: %v\n", relPath, err)
@@ -448,6 +464,40 @@ func runPull(datasetName, sourceURL string, anonymous bool) {
 		fmt.Printf(", %d failed", failed)
 	}
 	fmt.Println()
+	if failed > 0 {
+		os.Exit(1)
+	}
+}
+
+func resolveDownloadPath(destDir, prefix, key string) (string, string, error) {
+	relPath := strings.TrimPrefix(key, prefix)
+	if prefix == "" && strings.HasPrefix(relPath, "/") {
+		return "", "", fmt.Errorf("absolute path %q is not allowed", relPath)
+	}
+	relPath = strings.TrimPrefix(relPath, "/")
+	cleanRelPath := filepath.Clean(relPath)
+
+	if cleanRelPath == "." || cleanRelPath == "" {
+		return "", "", fmt.Errorf("empty output path")
+	}
+	if filepath.IsAbs(cleanRelPath) || cleanRelPath == ".." || strings.HasPrefix(cleanRelPath, ".."+string(os.PathSeparator)) {
+		return "", "", fmt.Errorf("unsafe path %q", relPath)
+	}
+
+	localPath := filepath.Join(destDir, cleanRelPath)
+	destAbs, err := filepath.Abs(destDir)
+	if err != nil {
+		return "", "", err
+	}
+	localAbs, err := filepath.Abs(localPath)
+	if err != nil {
+		return "", "", err
+	}
+	if localAbs != destAbs && !strings.HasPrefix(localAbs, destAbs+string(os.PathSeparator)) {
+		return "", "", fmt.Errorf("path escapes destination directory")
+	}
+
+	return cleanRelPath, localPath, nil
 }
 
 func parseS3URL(url string) (bucket, prefix string, err error) {

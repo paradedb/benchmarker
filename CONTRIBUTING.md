@@ -79,8 +79,8 @@ benchmarks/
 
 ### Adding a Backend
 
-1. Create `backends/<name>/driver.go` implementing the interface in `backends/driver.go`
-2. Register it in `backends.go` and `module.go`
+1. Create `backends/<name>/driver.go` (or `register.go`) implementing the interface in `backends/driver.go`
+2. Register it with `backends.Register(...)` and import the package for side-effect registration in `backends.go`
 3. Add a Docker Compose service with a profile in `docker-compose.yml`
 4. Add dataset config under `datasets/sample/<name>/` with `pre` and `post` scripts
 5. Update the README with usage examples
@@ -107,7 +107,7 @@ SQL backends use `.sql` files, HTTP backends (Elasticsearch, OpenSearch, MongoDB
 
 ### Pull Request Workflow
 
-All changes to ParadeDB Benchmarker happen through GitHub Pull Requests. Here is the recommended flow for making a change:
+All changes to ParadeDB Benchmarks happen through GitHub Pull Requests. Here is the recommended flow for making a change:
 
 1. Before working on a change, please check if there is already a GitHub issue open for it. If there is not, please open one first. This gives the community visibility into your work and allows others to make suggestions and leave comments.
 2. Fork the repo and branch out from the `main` branch.

@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestParseS3URL(t *testing.T) {
 	tests := []struct {
@@ -74,5 +77,58 @@ func TestFormatBytes(t *testing.T) {
 		if got != tt.want {
 			t.Fatalf("formatBytes(%d) = %q, want %q", tt.bytes, got, tt.want)
 		}
+	}
+}
+
+func TestResolveDownloadPath(t *testing.T) {
+	destDir := filepath.Join(string(filepath.Separator), "tmp", "datasets", "sample")
+
+	tests := []struct {
+		name    string
+		prefix  string
+		key     string
+		wantRel string
+		wantErr bool
+	}{
+		{
+			name:    "nested path",
+			prefix:  "datasets/sample",
+			key:     "datasets/sample/k6/script.js",
+			wantRel: filepath.Join("k6", "script.js"),
+		},
+		{
+			name:    "path traversal",
+			prefix:  "datasets/sample",
+			key:     "datasets/sample/../../etc/passwd",
+			wantErr: true,
+		},
+		{
+			name:    "absolute-like key",
+			prefix:  "",
+			key:     "/etc/passwd",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rel, local, err := resolveDownloadPath(destDir, tt.prefix, tt.key)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for key %q", tt.key)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if rel != tt.wantRel {
+				t.Fatalf("rel mismatch: got %q, want %q", rel, tt.wantRel)
+			}
+			wantLocal := filepath.Join(destDir, tt.wantRel)
+			if local != wantLocal {
+				t.Fatalf("local mismatch: got %q, want %q", local, wantLocal)
+			}
+		})
 	}
 }

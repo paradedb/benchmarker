@@ -41,7 +41,7 @@ This is a **k6 extension** (`xk6-search`) that provides a unified API for benchm
 
 - `backends(config)` → initializes backend drivers based on config map
 - `metrics()` → creates a Docker container metrics collector
-- `loader()` → creates a JSONL document reader for k6 scripts
+- `loader()` → creates a CSV document reader for k6 scripts
 
 ### Backend Plugin Architecture
 
@@ -68,11 +68,11 @@ The `Driver` interface is minimal: `Close()`, `Exec()`, `Query()`, `Insert()`, `
 Two modes:
 
 - **CLI** (`cmd/loader/main.go`): Reads `schema.yaml` + `data.csv`, runs backend-specific `pre.sql`/`pre.json`, bulk inserts, then runs `post.sql`/`post.json`. Supports `--batch-size`, `--workers`, and S3 pulls.
-- **k6 module** (`loader/loader.go`): Opens JSONL files with global caching, provides `Next()`, `NextBatch()`, `NextBatchNewIds()` with atomic counters for thread-safe VU pagination.
+- **k6 module** (`loader/loader.go`): Opens CSV files with global caching, provides `Next()`, `NextBatch()`, `NextBatchNewIds()` with atomic counters for thread-safe VU pagination.
 
 ## Key Conventions
 
 - Backend connection strings come from environment variables (`PARADEDB_URL`, `ELASTICSEARCH_URL`, etc.) or inline config in k6 scripts
 - SQL backends (PostgreSQL variants, ClickHouse) use `.sql` lifecycle scripts; HTTP backends (Elasticsearch, OpenSearch, MongoDB) use `.json`
 - Dataset directories follow a strict structure: `schema.yaml`, `data.csv`, per-backend subdirectories with `pre`/`post` scripts, and a `k6/` directory for benchmark scripts
-- The postgres driver (`backends/postgres/`) handles three separate backends (paradedb, postgresfts, pgtextsearch) via different registrations with different default ports and env vars
+- The shared postgres driver (`backends/shared/postgres/`) handles three separate backends (paradedb, postgresfts, pgtextsearch) via different registrations with different default ports and env vars
