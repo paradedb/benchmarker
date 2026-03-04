@@ -2021,9 +2021,10 @@
           const ingestDatasets = runsWithIngest.map((name) => {
             const run = runs[name];
             const color = getRunColor(name, run);
-            // Use global test start time so ingest data appears at its actual
-            // position on the timeline (e.g. if ingest starts at 30s, it shows at 30s)
-            const startTime = data.startTime || 0;
+            // Use each run's own start time so ingest offset is relative to when
+            // the run began (same as search charts). This keeps second/third phases
+            // visible within the chart's x-axis range.
+            const startTime = run.startTime || data.startTime || 0;
             return {
               label: name,
               borderColor: color,
