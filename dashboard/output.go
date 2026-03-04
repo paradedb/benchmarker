@@ -196,6 +196,22 @@ func (o *Output) Stop() error {
 	close(o.stopCh)
 	<-o.doneCh
 
+	// Final flush to process any remaining buffered samples
+	o.flush()
+
+	// Finalize all runs that haven't ended yet — the last run to finish
+	// won't have triggered the 2-second timeout before k6 calls Stop().
+	o.mu.Lock()
+	for _, rm := range o.data.Runs {
+		if rm.EndTime == 0 && rm.LastUpdateTime > 0 {
+			rm.EndTime = rm.LastUpdateTime
+		}
+	}
+	o.mu.Unlock()
+
+	// One final broadcast so SSE clients get the corrected QPS
+	o.broadcast()
+
 	// Save dashboard state to JSON file if DASHBOARD_EXPORT=true
 	if os.Getenv("DASHBOARD_EXPORT") == "true" {
 		o.mu.RLock()
@@ -281,7 +297,8 @@ func (o *Output) flush() {
 				}
 
 			case name == "scenario_started":
-				// Scenario started signal - create run and query entry immediately
+				// Scenario started signal - create run entry immediately
+				// Query entries are created on demand when search_duration arrives
 				backend := tags["backend"]
 				if backend == "" {
 					continue
@@ -291,16 +308,6 @@ func (o *Output) flush() {
 				rm := o.getOrCreateRun(runName, backend, tags)
 				if rm.StartTime == 0 {
 					rm.StartTime = sample.Time.UnixMilli()
-				}
-
-				// Create query entry for the scenario
-				queryName := tags["scenario"]
-				if queryName != "" && rm.Queries[queryName] == nil {
-					rm.Queries[queryName] = &QueryMetrics{Name: queryName}
-					if info := metrics.GetScenarioInfo(queryName); info != nil {
-						rm.Queries[queryName].VUs = int(info.VUs)
-						rm.Queries[queryName].Executor = info.Executor
-					}
 				}
 
 			case name == "search_duration":
@@ -397,6 +404,7 @@ func (o *Output) flush() {
 				o.data.Containers[container].Memory = append(o.data.Containers[container].Memory, TimeValue{Time: sample.Time.UnixMilli(), Value: value})
 
 			case name == "ingest_docs":
+				fmt.Printf("[dashboard] ingest_docs sample: value=%.0f tags=%v\n", value, tags)
 				backend := tags["backend"]
 				if backend == "" {
 					backend = tags["run"]

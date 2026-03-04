@@ -640,7 +640,6 @@
       };
       let isDark = false;
       let runColors = {};
-      let runStartTimes = {};
       let selectedMetric = "p95";
       let lastMetric = "p95";
       let chartType = "latency"; // 'latency' or 'hits'
@@ -659,7 +658,6 @@
 
       function resetState() {
         runColors = {};
-        runStartTimes = {};
         colorIndex = 0;
         lastElapsed = 0;
         chartDuration = 30;
@@ -1975,7 +1973,8 @@
         }
 
         // Update ingest chart (only if any run has ingest data)
-        const runsWithIngest = runNames.filter(
+        // Check all runs, not just those with query timelines
+        const runsWithIngest = Object.keys(runs).filter(
           (name) => runs[name].totalIngested > 0,
         );
         if (runsWithIngest.length > 0) {
@@ -2021,11 +2020,10 @@
           const ingestDatasets = runsWithIngest.map((name) => {
             const run = runs[name];
             const color = getRunColor(name, run);
-            const startTime =
-              runStartTimes[name] || run.ingestRate?.[0]?.time || 0;
-            if (!runStartTimes[name] && run.ingestRate?.length > 0) {
-              runStartTimes[name] = run.ingestRate[0].time;
-            }
+            // Use each run's own start time so ingest offset is relative to when
+            // the run began (same as search charts). This keeps second/third phases
+            // visible within the chart's x-axis range.
+            const startTime = run.startTime || data.startTime || 0;
             return {
               datasetKey: `ingest:${name}`,
               label: name,

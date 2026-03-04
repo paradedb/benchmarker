@@ -361,6 +361,8 @@ func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
 func (c *K6Client) InsertBatch(table string, docs []map[string]interface{}) map[string]interface{} {
 	c.emitInitMetrics()
 
+	fmt.Printf("[%s] InsertBatch called: table=%s docs=%d\n", c.backend, table, len(docs))
+
 	if len(docs) == 0 {
 		return map[string]interface{}{"rows": 0, "latencyMs": 0.0}
 	}
