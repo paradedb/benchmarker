@@ -183,6 +183,37 @@ func parseConfig(config map[string]interface{}) (filePath, tableName, dataset st
 	return
 }
 
+func parseColumns(config map[string]interface{}, filePath string) ([]string, error) {
+	if rawCols, ok := config["columns"].([]interface{}); ok && len(rawCols) > 0 {
+		cols := make([]string, 0, len(rawCols))
+		for _, c := range rawCols {
+			s, ok := c.(string)
+			if ok && s != "" {
+				cols = append(cols, s)
+			}
+		}
+		if len(cols) > 0 {
+			return cols, nil
+		}
+	}
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	headers, err := reader.Read()
+	if err != nil {
+		return nil, err
+	}
+	if len(headers) == 0 {
+		return nil, fmt.Errorf("CSV has no headers")
+	}
+	return headers, nil
+}
+
 // readCSVDocuments reads documents from a CSV file.
 func readCSVDocuments(filePath string) ([]map[string]interface{}, error) {
 	file, err := os.Open(filePath)
@@ -377,7 +408,14 @@ func (l *Loader) Load(backendName, connectionString string, config map[string]in
 	}
 
 	filePath, tableName, dataset, batchSize := parseConfig(config)
-	columns := []string{"id", "title", "content"}
+	if filePath == "" {
+		return map[string]interface{}{"error": "missing required config field: file"}
+	}
+
+	columns, err := parseColumns(config, filePath)
+	if err != nil {
+		return map[string]interface{}{"error": fmt.Sprintf("failed to determine columns: %v", err)}
+	}
 
 	driver, err := cfg.Factory(connectionString)
 	if err != nil {

@@ -56,7 +56,15 @@ func RegisterBackendConfig(backend string, config map[string]interface{}) {
 func GetBackendConfig(backend string) map[string]interface{} {
 	backendConfigsMu.RLock()
 	defer backendConfigsMu.RUnlock()
-	return backendConfigs[backend]
+	config := backendConfigs[backend]
+	if config == nil {
+		return nil
+	}
+	result := make(map[string]interface{}, len(config))
+	for k, v := range config {
+		result[k] = v
+	}
+	return result
 }
 
 // GetContainerLimits returns captured container limits by container name.
@@ -178,14 +186,14 @@ type dockerStats struct {
 
 // NewCollector creates a new metrics collector.
 func NewCollector(vu modules.VU, config map[string]interface{}) *Collector {
-	// Register metrics once during init phase
-	metricsOnce.Do(func() {
-		if initEnv := vu.InitEnv(); initEnv != nil {
-			registry := initEnv.Registry
+	// Register metrics once during init phase.
+	if vu != nil && vu.InitEnv() != nil {
+		metricsOnce.Do(func() {
+			registry := vu.InitEnv().Registry
 			containerCPU, _ = registry.NewMetric("container_cpu_percent", metrics.Gauge)
 			containerMemory, _ = registry.NewMetric("container_memory_bytes", metrics.Gauge)
-		}
-	})
+		})
+	}
 
 	var containers []string
 	if c, ok := config["containers"].([]interface{}); ok {
@@ -253,16 +261,17 @@ func (c *Collector) Collect() map[string]interface{} {
 	for _, container := range c.containers {
 		containerLimitsMu.Lock()
 		needsCapture := !limitsCapture[container]
-		if needsCapture {
-			limitsCapture[container] = true
-		}
 		containerLimitsMu.Unlock()
 
 		if needsCapture {
 			limitsWg.Add(1)
 			go func(cont string) {
 				defer limitsWg.Done()
-				c.captureContainerLimits(cont)
+				if c.captureContainerLimits(cont) {
+					containerLimitsMu.Lock()
+					limitsCapture[cont] = true
+					containerLimitsMu.Unlock()
+				}
 			}(container)
 		}
 	}
@@ -377,27 +386,27 @@ type dockerInspect struct {
 }
 
 // captureContainerLimits fetches container resource limits from Docker API.
-func (c *Collector) captureContainerLimits(container string) {
+func (c *Collector) captureContainerLimits(container string) bool {
 	url := fmt.Sprintf("http://localhost/containers/%s/json", container)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return
+		return false
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return
+		return false
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return
+		return false
 	}
 
 	var inspect dockerInspect
 	if err := json.NewDecoder(resp.Body).Decode(&inspect); err != nil {
-		return
+		return false
 	}
 
 	limits := make(map[string]interface{})
@@ -421,5 +430,7 @@ func (c *Collector) captureContainerLimits(container string) {
 		containerLimitsMu.Lock()
 		ContainerLimits[container] = limits
 		containerLimitsMu.Unlock()
+		return true
 	}
+	return false
 }

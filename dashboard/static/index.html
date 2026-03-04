@@ -973,7 +973,7 @@
         const section = document.createElement("div");
         section.id = `chart-group-${safeId}`;
         section.className = "main-row";
-        const chartTitle = chartName ? `<span style="color: var(--text); margin-right: 8px;">${chartName}</span>` : '';
+        const chartTitle = chartName ? `<span style="color: var(--text); margin-right: 8px;">${escapeHtml(chartName)}</span>` : '';
         section.innerHTML = `
         <div class="chart-container">
           <div class="chart-header">
@@ -1233,6 +1233,10 @@
         return Math.floor(n).toString();
       }
 
+      function safeId(value) {
+        return String(value).replace(/[^a-zA-Z0-9_-]/g, "_");
+      }
+
       function formatLatency(ms) {
         if (!ms) return "-";
         if (ms >= 10000) return (ms / 1000).toFixed(1) + "s";
@@ -1315,60 +1319,64 @@
             sortedBackends.forEach((name, idx) => {
               const run = runs[name];
               const color = getRunColor(name, run);
+              const safeNameId = safeId(name);
+              const statId = `stat-${safeNameId}`;
+              const queryContainerId = `${safeNameId}-queries`;
 
               // Store config if available
               if (run.config && Object.keys(run.config).length > 0) {
                 runConfigs[name] = run.config;
               }
 
-              let el = document.getElementById(`stat-${name}`);
+              let el = document.getElementById(statId);
 
               if (!el) {
                 el = document.createElement("div");
-                el.id = `stat-${name}`;
+                el.id = statId;
                 el.className = "stat-group expanded";
                 el.style.borderLeftColor = color;
                 const hasConfig =
                   run.config && Object.keys(run.config).length > 0;
-                const clickStyle = hasConfig
-                  ? "cursor: pointer; text-decoration: underline; text-decoration-style: dotted;"
-                  : "";
-                const clickHandler = hasConfig
-                  ? `onclick="showConfigModal('${name}')"`
-                  : "";
+                const labelId = `label-${safeNameId}`;
 
                 // Build limits string
                 let limitsStr = "";
                 if (run.containerLimits) {
                   const parts = [];
                   if (run.containerLimits.cpu_limit)
-                    parts.push(run.containerLimits.cpu_limit);
+                    parts.push(escapeHtml(run.containerLimits.cpu_limit));
                   if (run.containerLimits.memory_limit)
-                    parts.push(run.containerLimits.memory_limit);
+                    parts.push(escapeHtml(run.containerLimits.memory_limit));
                   if (parts.length > 0)
                     limitsStr = `<span style="color: var(--text-dim); font-size: 9px; margin-left: 8px;">${parts.join(" / ")}</span>`;
                 }
 
                 el.innerHTML = `
               <div class="stat-group-header">
-                <div class="stat-group-label" style="color: ${color}; ${clickStyle}" ${clickHandler}>${getBaseName(name)}</div>${limitsStr}
+                <div id="${labelId}" class="stat-group-label" style="color: ${color};">${escapeHtml(getBaseName(name))}</div>${limitsStr}
               </div>
-              <div class="query-details" id="${name}-queries"></div>
+              <div class="query-details" id="${queryContainerId}"></div>
             `;
+                if (hasConfig) {
+                  const labelEl = document.getElementById(labelId);
+                  if (labelEl) {
+                    labelEl.style.cursor = "pointer";
+                    labelEl.style.textDecoration = "underline";
+                    labelEl.style.textDecorationStyle = "dotted";
+                    labelEl.addEventListener("click", () => showConfigModal(name));
+                  }
+                }
                 container.appendChild(el);
               }
 
               // Update query details - only create if not exists, then just update values
-              const queriesEl = document.getElementById(`${name}-queries`);
+              const queriesEl = document.getElementById(queryContainerId);
               const queries = run.queries || {};
               const queryNames = Object.keys(queries).sort();
 
               queryNames.forEach((qName) => {
                 const q = queries[qName];
-                const queryId = `${name}-${qName}`.replace(
-                  /[^a-zA-Z0-9]/g,
-                  "_",
-                );
+                const queryId = `${safeNameId}-${safeId(qName)}`;
                 let queryEl = document.getElementById(queryId);
 
                 // Store query text if available
@@ -1504,11 +1512,16 @@
                 const isEnabled = selectedQueries.has(qName);
                 const disabledClass = isEnabled ? "" : " disabled";
                 items.push(
-                  `<div class="legend-item${disabledClass}" data-query="${qName}" onclick="toggleQueryFilter('${qName}', event)" title="Click to toggle, Shift+click to isolate"><div class="legend-color" style="background: ${color}"></div> ${qName}</div>`,
+                  `<div class="legend-item${disabledClass}" data-query="${escapeHtml(qName)}" title="Click to toggle, Shift+click to isolate"><div class="legend-color" style="background: ${color}"></div> ${escapeHtml(qName)}</div>`,
                 );
               });
             });
             legend.innerHTML = items.join("");
+            legend.querySelectorAll(".legend-item").forEach((item) => {
+              item.addEventListener("click", (event) => {
+                toggleQueryFilter(item.dataset.query, event);
+              });
+            });
           });
       }
 
@@ -1984,7 +1997,7 @@
           document.getElementById("ingest-legend").innerHTML = runsWithIngest
             .map((name) => {
               const color = getRunColor(name, runs[name]);
-              return `<div class="legend-item"><div class="legend-color" style="background: ${color}"></div> ${name}</div>`;
+              return `<div class="legend-item"><div class="legend-color" style="background: ${color}"></div> ${escapeHtml(name)}</div>`;
             })
             .join("");
 
@@ -1995,26 +2008,27 @@
           runsWithIngest.forEach((name) => {
             const run = runs[name];
             const color = getRunColor(name, run);
-            let el = document.getElementById(`ingest-stat-${name}`);
+            const ingestId = safeId(name);
+            let el = document.getElementById(`ingest-stat-${ingestId}`);
             if (!el) {
               el = document.createElement("div");
-              el.id = `ingest-stat-${name}`;
+              el.id = `ingest-stat-${ingestId}`;
               el.className = "stat-group";
               el.style.borderLeftColor = color;
               el.innerHTML = `
               <div class="stat-group-header">
-                <div class="stat-group-label" style="color: ${color}">${getBaseName(name)}</div>
+                <div class="stat-group-label" style="color: ${color}">${escapeHtml(getBaseName(name))}</div>
               </div>
               <div class="stats" style="grid-template-columns: 1fr 1fr;">
-                <div class="stat"><div class="stat-value" id="ingest-${name}-total">0</div><div class="stat-label">Total</div></div>
-                <div class="stat"><div class="stat-value" id="ingest-${name}-rate">0</div><div class="stat-label">Rate/s</div></div>
+                <div class="stat"><div class="stat-value" id="ingest-${ingestId}-total">0</div><div class="stat-label">Total</div></div>
+                <div class="stat"><div class="stat-value" id="ingest-${ingestId}-rate">0</div><div class="stat-label">Rate/s</div></div>
               </div>
             `;
               ingestStatsContainer.appendChild(el);
             }
-            document.getElementById(`ingest-${name}-total`).textContent =
+            document.getElementById(`ingest-${ingestId}-total`).textContent =
               formatNumber(run.totalIngested);
-            document.getElementById(`ingest-${name}-rate`).textContent =
+            document.getElementById(`ingest-${ingestId}-rate`).textContent =
               formatNumber(Math.floor(run.avgIngestRate || 0));
           });
 

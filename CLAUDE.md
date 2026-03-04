@@ -47,7 +47,7 @@ This is a **k6 extension** (`xk6-search`) that provides a unified API for benchm
 
 Backends use a **registry pattern** with factory functions:
 
-1. Each backend package calls `Register()` in its `init()` function (e.g., `backends/postgres/driver.go` registers "paradedb", "postgresfts", "")
+1. Each backend package calls `Register()` in its `init()` function (e.g., `backends/paradedb/register.go`, `backends/postgresfts/register.go`, and `backends//register.go`)
 2. `backends.go:newBackends()` reads the JS config, looks up registered factories, creates drivers, and wraps each in a `K6Client`
 3. `K6Client` (in `backends/driver.go`) is the adapter that wraps every `Driver` to add k6 metric emission (timing, tagging, sample pushing)
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/nickbruun/pgsplit"
 	"github.com/paradedb/benchmarks/backends"
 	"github.com/paradedb/benchmarks/metrics"
 )
@@ -63,7 +64,11 @@ func (d *Driver) Close() error {
 
 // Exec executes SQL statements separated by semicolons.
 func (d *Driver) Exec(ctx context.Context, statements string) error {
-	for _, stmt := range strings.Split(statements, ";") {
+	stmts, err := pgsplit.SplitStatements(statements)
+	if err != nil {
+		return err
+	}
+	for _, stmt := range stmts {
 		stmt = strings.TrimSpace(stmt)
 		if stmt == "" {
 			continue

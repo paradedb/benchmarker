@@ -55,7 +55,7 @@ make loader # Build the loader CLI
 ./k6 run --out dashboard datasets/sample/k6/simple.js
 ```
 
-Open http://localhost:5665 to see real-time results.
+Open http://localhost:5665/static/ to see real-time results.
 
 ## Writing k6 Scripts
 
@@ -243,7 +243,7 @@ Enable with the `--out dashboard` flag:
 ./k6 run --out dashboard script.js
 ```
 
-Then open http://localhost:5665 in your browser.
+Then open http://localhost:5665/static/ in your browser.
 
 ### Export & Replay
 
@@ -310,11 +310,12 @@ backends.get("clickhouse").search(`
 ### MongoDB Atlas Search
 
 ```javascript
-backends.get("mongodb").search("documents", {
-  $search: {
-    text: { query: "search term", path: "content" },
-  },
-});
+backends.get("mongodb").search(
+  JSON.stringify({
+    text: { query: "search term", path: ["content"] },
+  }),
+  "documents",
+);
 ```
 
 ### Ingesting Data
@@ -329,9 +330,9 @@ const backends = search.backends({
   backends: ["paradedb", "elasticsearch"],
 });
 
-// Load documents from JSON file
+// Load documents from CSV file
 const loader = search.loader();
-const docs = loader.openDocuments("/path/to/documents.json");
+const docs = loader.openDocuments("/path/to/data.csv");
 
 const BATCH_SIZE = 1000;
 

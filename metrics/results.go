@@ -58,16 +58,17 @@ func GetScenarioInfo(scenario string) *ScenarioInfo {
 // RegisterMetrics registers the unified metrics once during init phase.
 // Call this from any backend's NewClient during init.
 func RegisterMetrics(vu modules.VU) {
+	if vu == nil || vu.InitEnv() == nil {
+		return
+	}
 	metricsRegOnce.Do(func() {
-		if initEnv := vu.InitEnv(); initEnv != nil {
-			registry := initEnv.Registry
-			searchDuration, _ = registry.NewMetric("search_duration", metrics.Trend, metrics.Time)
-			searchHits, _ = registry.NewMetric("search_hits", metrics.Gauge)
-			ingestDuration, _ = registry.NewMetric("ingest_duration", metrics.Trend, metrics.Time)
-			ingestDocs, _ = registry.NewMetric("ingest_docs", metrics.Counter)
-			backendInit, _ = registry.NewMetric("backend_init", metrics.Gauge)
-			scenarioStarted, _ = registry.NewMetric("scenario_started", metrics.Gauge)
-		}
+		registry := vu.InitEnv().Registry
+		searchDuration, _ = registry.NewMetric("search_duration", metrics.Trend, metrics.Time)
+		searchHits, _ = registry.NewMetric("search_hits", metrics.Gauge)
+		ingestDuration, _ = registry.NewMetric("ingest_duration", metrics.Trend, metrics.Time)
+		ingestDocs, _ = registry.NewMetric("ingest_docs", metrics.Counter)
+		backendInit, _ = registry.NewMetric("backend_init", metrics.Gauge)
+		scenarioStarted, _ = registry.NewMetric("scenario_started", metrics.Gauge)
 	})
 }
 

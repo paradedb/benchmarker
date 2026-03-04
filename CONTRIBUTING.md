@@ -21,8 +21,8 @@ Ideal issues for external contributors include well-scoped, individual features 
 ### Development Setup
 
 ```bash
-git clone https://github.com/paradedb/benchmarker.git
-cd benchmarker
+git clone https://github.com/paradedb/benchmarks.git
+cd benchmarks
 make deps    # Install Go modules + xk6
 make         # Build k6 and loader
 ```
@@ -51,23 +51,28 @@ make clean        # Remove build artifacts
 ### Project Structure
 
 ```text
-benchmarker/
+benchmarks/
 ├── module.go              # k6 module registration
 ├── backends.go            # Backend config for k6
 ├── backends/
 │   ├── driver.go          # Driver interface
-│   ├── postgres/          # PostgreSQL (paradedb, postgresfts, )
+│   ├── shared/
+│   │   ├── postgres/      # Shared PostgreSQL driver
+│   │   └── elastic/       # Shared Elasticsearch/OpenSearch driver
+│   ├── paradedb/          # ParadeDB registration
+│   ├── postgresfts/       # PostgreSQL FTS registration
+│   ├── /      #  registration
+│   │   └── docker/        #  Dockerfile
 │   ├── elasticsearch/     # Elasticsearch
 │   ├── opensearch/        # OpenSearch
 │   ├── clickhouse/        # ClickHouse
 │   └── mongodb/           # MongoDB
 ├── metrics/               # Metrics collection
-├── dashboard/             # Real-time dashboard + WebSocket
+├── dashboard/             # Real-time dashboard + SSE output
 ├── loader/                # k6 data loader module
 ├── cmd/
 │   ├── loader/            # Loader CLI
 │   └── dashboard-viewer/  # Dashboard replay CLI
-├── docker/                # Backend Dockerfiles
 ├── datasets/              # Sample datasets + k6 scripts
 └── docker-compose.yml     # Local backend setup
 ```
@@ -114,7 +119,7 @@ All changes to ParadeDB Benchmarker happen through GitHub Pull Requests. Here is
 
 ### Reporting Issues
 
-File issues at [GitHub Issues](https://github.com/paradedb/benchmarker/issues) with:
+File issues at [GitHub Issues](https://github.com/paradedb/benchmarks/issues) with:
 
 - A clear description of the problem or feature request
 - Steps to reproduce (for bugs)
