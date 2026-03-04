@@ -9,6 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.8.0
+	github.com/nickbruun/pgsplit v0.0.0-20240103043353-43e6c2dddfad
 	go.k6.io/k6 v1.6.1
 	go.mongodb.org/mongo-driver v1.17.1
 	gopkg.in/yaml.v3 v3.0.1
