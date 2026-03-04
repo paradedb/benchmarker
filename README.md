@@ -113,7 +113,7 @@ export function searchQuery() {
   backends
     .get("paradedb")
     .search(
-      `SELECT id, title FROM documents WHERE content @@@ $1 LIMIT 10`,
+      `SELECT id, title FROM documents WHERE content ||| $1 LIMIT 10`,
       term,
     );
 }
@@ -251,8 +251,8 @@ Then open http://localhost:5665/static/ in your browser.
 # Export dashboard data during run
 DASHBOARD_EXPORT=true ./k6 run --out dashboard benchmark.js
 
-# View saved data later
-./bin/dashboard-viewer ./dashboard-export.json
+# View saved data later (use generated dashboard_<timestamp>.json file)
+./bin/dashboard-viewer ./dashboard_2026-02-28_12-00-00.json
 ```
 
 ## Backend Examples
@@ -262,9 +262,9 @@ DASHBOARD_EXPORT=true ./k6 run --out dashboard benchmark.js
 ```javascript
 backends.get("paradedb").search(
   `
-  SELECT id, title, paradedb.score(id) as score
+  SELECT id, title, pdb.score(id) as score
   FROM documents
-  WHERE content @@@ $1
+  WHERE content ||| $1
   ORDER BY score DESC
   LIMIT 10
 `,
@@ -402,7 +402,7 @@ datasets/
 ```yaml
 table: documents
 columns:
-  id: bigint
+  id: uuid
   title: text
   content: text
 ```
