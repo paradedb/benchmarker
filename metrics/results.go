@@ -21,7 +21,7 @@ var (
 	scenarioStarted *metrics.Metric
 	metricsRegOnce  sync.Once
 
-	// Query patterns per scenario (captured on first call)
+	// Query patterns per backend/chart/scenario (captured on first call)
 	QueryPatterns   = make(map[string]string)
 	queryPatternsMu sync.RWMutex
 
@@ -36,10 +36,20 @@ type ScenarioInfo struct {
 	VUs      int64
 }
 
-// GetQueryPattern returns a query pattern by scenario name.
-func GetQueryPattern(scenario string) string {
+func queryPatternKey(backend, chart, scenario string) string {
+	return backend + "\x00" + chart + "\x00" + scenario
+}
+
+// GetQueryPattern returns a query pattern by backend/chart/scenario.
+func GetQueryPattern(backend, chart, scenario string) string {
 	queryPatternsMu.RLock()
 	defer queryPatternsMu.RUnlock()
+
+	// Prefer exact key (backend + chart + scenario).
+	if q, ok := QueryPatterns[queryPatternKey(backend, chart, scenario)]; ok {
+		return q
+	}
+	// Backward-compatibility: older runs only keyed by scenario.
 	return QueryPatterns[scenario]
 }
 
@@ -108,7 +118,7 @@ func EmitScenarioStarted(vu modules.VU, backend string) {
 	emitGaugeMetric(vu, scenarioStarted, backend)
 }
 
-// CaptureQueryPattern stores the first query pattern seen for each scenario.
+// CaptureQueryPattern stores the first query pattern seen for each backend/chart/scenario.
 func CaptureQueryPattern(vu modules.VU, query string) {
 	state := vu.State()
 	if state == nil {
@@ -120,15 +130,18 @@ func CaptureQueryPattern(vu modules.VU, query string) {
 	if !ok {
 		return
 	}
+	backend, _ := tags.Tags.Get("backend")
+	chart, _ := tags.Tags.Get("chart")
+	key := queryPatternKey(backend, chart, scenario)
 
 	queryPatternsMu.RLock()
-	_, exists := QueryPatterns[scenario]
+	_, exists := QueryPatterns[key]
 	queryPatternsMu.RUnlock()
 
 	if !exists {
 		queryPatternsMu.Lock()
-		if _, exists := QueryPatterns[scenario]; !exists {
-			QueryPatterns[scenario] = query
+		if _, exists := QueryPatterns[key]; !exists {
+			QueryPatterns[key] = query
 		}
 		queryPatternsMu.Unlock()
 	}
