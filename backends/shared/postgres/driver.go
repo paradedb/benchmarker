@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nickbruun/pgsplit"
 	"github.com/paradedb/benchmarks/backends"
 	"github.com/paradedb/benchmarks/metrics"
 )
@@ -64,7 +65,11 @@ func (d *Driver) SetExtraGUCs(gucs []string) {
 
 // Exec executes SQL statements separated by semicolons.
 func (d *Driver) Exec(ctx context.Context, statements string) error {
-	for _, stmt := range backends.SplitSQLStatements(statements) {
+	stmts, err := pgsplit.SplitStatements(statements)
+	if err != nil {
+		return err
+	}
+	for _, stmt := range stmts {
 		if _, err := d.pool.Exec(ctx, stmt); err != nil {
 			return err
 		}
