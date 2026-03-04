@@ -7,7 +7,7 @@ XK6 := $(GOBIN)/xk6
 all: build
 
 # Build everything
-build: k6 loader
+build: k6 loader viewer
 
 # Build k6 with the search extension
 k6: $(XK6)
@@ -64,6 +64,7 @@ help:
 	@echo "  build    Build k6 and loader"
 	@echo "  k6       Build k6 with xk6-search extension"
 	@echo "  loader   Build the loader CLI to bin/"
+	@echo "  viewer   Build the dashboard-viewer CLI to bin/"
 	@echo "  test     Run tests"
 	@echo "  fmt      Format code"
 	@echo "  lint     Run golangci-lint"

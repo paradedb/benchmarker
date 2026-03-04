@@ -14,12 +14,24 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/paradedb/benchmarks/backends"
+	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 )
 
 // Loader handles loading data into search backends.
 type Loader struct {
 	vu modules.VU
+}
+
+func (l *Loader) throwConfigErrorf(format string, args ...interface{}) *DocumentReader {
+	err := fmt.Errorf(format, args...)
+	if l.vu != nil {
+		if rt := l.vu.Runtime(); rt != nil {
+			common.Throw(rt, err)
+			return nil
+		}
+	}
+	panic(err.Error())
 }
 
 // Global document cache - shared across all VUs
@@ -70,7 +82,7 @@ func (l *Loader) OpenDocuments(filePath string) *DocumentReader {
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		return &DocumentReader{size: 0}
+		return l.throwConfigErrorf("openDocuments: failed to open %q: %v", filePath, err)
 	}
 	defer file.Close()
 
@@ -79,7 +91,7 @@ func (l *Loader) OpenDocuments(filePath string) *DocumentReader {
 	// Read header
 	headers, err := csvReader.Read()
 	if err != nil {
-		return &DocumentReader{size: 0}
+		return l.throwConfigErrorf("openDocuments: failed to read CSV headers from %q: %v", filePath, err)
 	}
 
 	// Read all rows
@@ -410,6 +422,9 @@ func (l *Loader) Load(backendName, connectionString string, config map[string]in
 	filePath, tableName, dataset, batchSize := parseConfig(config)
 	if filePath == "" {
 		return map[string]interface{}{"error": "missing required config field: file"}
+	}
+	if batchSize <= 0 {
+		return map[string]interface{}{"error": "batchSize must be greater than 0"}
 	}
 
 	columns, err := parseColumns(config, filePath)

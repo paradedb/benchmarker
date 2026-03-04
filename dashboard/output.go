@@ -434,6 +434,10 @@ func (o *Output) flush() {
 		for _, qm := range rm.Queries {
 			o.updateQueryTimeline(qm, rm.StartTime, now)
 		}
+		// Mark run ended after inactivity timeout.
+		if rm.EndTime == 0 && rm.LastUpdateTime > 0 && (now-rm.LastUpdateTime) > runEndTimeoutMs {
+			rm.EndTime = rm.LastUpdateTime
+		}
 	}
 }
 
@@ -569,11 +573,6 @@ func (o *Output) getSummary() map[string]interface{} {
 
 	runs := make(map[string]interface{})
 	for name, rm := range o.data.Runs {
-		// Check if run has ended (no updates for runEndTimeoutMs)
-		if rm.EndTime == 0 && rm.LastUpdateTime > 0 && (now-rm.LastUpdateTime) > runEndTimeoutMs {
-			rm.EndTime = rm.LastUpdateTime
-		}
-
 		// Calculate run duration (used for QPS calculations)
 		var runDuration float64
 		if rm.StartTime > 0 {
@@ -604,8 +603,8 @@ func (o *Output) getSummary() map[string]interface{} {
 		// Build per-query stats
 		queries := make(map[string]interface{})
 		for qName, qm := range rm.Queries {
-			// Get query pattern from any registered backend
-			queryPattern := getQueryPattern(qName)
+			// Get query pattern for this run/backend+chart+scenario.
+			queryPattern := getQueryPattern(rm.Backend, rm.Chart, qName)
 
 			// Calculate query-specific QPS using run duration
 			var queryQPS float64
@@ -762,9 +761,9 @@ func maxVal(values []float64) float64 {
 	return max
 }
 
-// getQueryPattern looks up a query pattern by scenario name.
-func getQueryPattern(qName string) string {
-	return metrics.GetQueryPattern(qName)
+// getQueryPattern looks up a query pattern by backend/chart/scenario.
+func getQueryPattern(backend, chart, qName string) string {
+	return metrics.GetQueryPattern(backend, chart, qName)
 }
 
 // getBackendConfig returns the database config and container limits for a backend type.
@@ -872,21 +871,12 @@ func ExportStandalone(jsonFile, outputFile string, notes ...string) error {
 		return fmt.Errorf("failed to read HTML template: %w", err)
 	}
 
-	// Replace the EventSource code with inline data
-	oldCode := `const events = new EventSource("/events");
-      events.onmessage = (e) => {
-        try {
-          update(JSON.parse(e.data));
-        } catch (err) {
-          console.error(err);
-        }
-      };`
-
-	newCode := fmt.Sprintf(`// Standalone mode - embedded data
-      const embeddedData = %s;
-      update(embeddedData);`, string(compactJSON))
-
-	html := strings.Replace(string(htmlData), oldCode, newCode, 1)
+	html := string(htmlData)
+	dataScript := fmt.Sprintf("<script>window.__DASHBOARD_EMBEDDED_DATA = %s;</script>", string(compactJSON))
+	if !strings.Contains(html, "</body>") {
+		return fmt.Errorf("failed to inject embedded data: missing </body> tag")
+	}
+	html = strings.Replace(html, "</body>", dataScript+"\n</body>", 1)
 
 	// Write the output file
 	if err := os.WriteFile(outputFile, []byte(html), 0644); err != nil {
