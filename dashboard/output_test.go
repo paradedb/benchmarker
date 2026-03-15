@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 	"time"
+
+	"github.com/paradedb/benchmarks/metrics"
 )
 
 func TestUpdateIngestRateSkipsInitialPoint(t *testing.T) {
@@ -87,5 +89,48 @@ func TestGetSummaryUsesQueryWindowForQPS(t *testing.T) {
 	got := query["qps"].(float64)
 	if math.Abs(got-2.0) > 0.001 {
 		t.Fatalf("expected query qps of 2.0, got %.3f", got)
+	}
+}
+
+func TestRecordRunActivityReopensEndedRun(t *testing.T) {
+	rm := &RunMetrics{
+		StartTime: 1000,
+		EndTime:   2000,
+	}
+
+	recordRunActivity(rm, 3000, 3500)
+
+	if rm.EndTime != 0 {
+		t.Fatalf("expected run to reopen on new activity, got end time %d", rm.EndTime)
+	}
+	if rm.LastUpdateTime != 3500 {
+		t.Fatalf("expected last update time to be recorded, got %d", rm.LastUpdateTime)
+	}
+}
+
+func TestRegisterContainerClearsIdentityForSharedContainer(t *testing.T) {
+	containers := map[string]*ContainerMetrics{}
+
+	registerContainer(containers, "shared", "paradedb", &metrics.BackendOptions{
+		Alias: "paradedb-a",
+		Color: "#111111",
+	}, 1000)
+	registerContainer(containers, "shared", "elasticsearch", &metrics.BackendOptions{
+		Alias: "es-b",
+		Color: "#222222",
+	}, 2000)
+
+	cm := containers["shared"]
+	if cm == nil {
+		t.Fatal("expected container metrics entry to be created")
+	}
+	if !cm.Shared {
+		t.Fatal("expected shared container to be marked ambiguous")
+	}
+	if cm.Backend != "" || cm.Alias != "" || cm.Color != "" {
+		t.Fatalf("expected shared container identity to be cleared, got backend=%q alias=%q color=%q", cm.Backend, cm.Alias, cm.Color)
+	}
+	if cm.Start != 1000 {
+		t.Fatalf("expected earliest container start time to be preserved, got %d", cm.Start)
 	}
 }

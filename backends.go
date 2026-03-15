@@ -50,6 +50,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 		clients: make(map[string]*backends.K6Client),
 	}
 	var enabledContainers []string
+	seenContainers := make(map[string]struct{})
 	ctx := context.Background()
 
 	datasetPath := parseDatasetPath(config, m.vu)
@@ -134,7 +135,12 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 
 		client := backends.NewK6Client(m.vu, driver, alias)
 		b.clients[alias] = client
-		enabledContainers = append(enabledContainers, container)
+		if container != "" {
+			if _, seen := seenContainers[container]; !seen {
+				enabledContainers = append(enabledContainers, container)
+				seenContainers[container] = struct{}{}
+			}
+		}
 
 		driver.CaptureConfig(ctx, alias)
 		metrics.CapturePrePostScripts(alias, backendType, datasetPath, backendCfg.FileType)

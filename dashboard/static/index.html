@@ -736,6 +736,10 @@
       let containerColorIndex = 0;
 
       function getContainerColor(name, container) {
+        const hasIdentityMetadata =
+          Boolean(container?.alias) ||
+          Boolean(container?.backend) ||
+          Boolean(container?.color);
         // Check for custom color first
         if (container?.color) {
           const customColor = sanitizeColor(container.color);
@@ -745,7 +749,7 @@
           }
         }
         // Try to match with a run's color for consistency across panels
-        if (lastData?.runs) {
+        if (lastData?.runs && hasIdentityMetadata) {
           for (const [runName, runData] of Object.entries(lastData.runs)) {
             if (runData.backend === container?.backend || runData.container === name) {
               return getRunColor(runName, runData);
@@ -1906,7 +1910,7 @@
             return byContainer[0];
           }
           if (byContainer.length > 1) {
-            return byContainer.sort((a, b) => (a.startTime || 0) - (b.startTime || 0))[0];
+            return null;
           }
 
           // Fallback to backend only when unambiguous.
@@ -1921,7 +1925,7 @@
         const activeContainerNames = Object.keys(containers).filter(name => {
           const container = containers[name];
           const matchingRun = getContainerRun(name, container);
-          return matchingRun?.startTime > 0;
+          return (container.startTime || 0) > 0 || matchingRun?.startTime > 0;
         }).sort();
 
         if (activeContainerNames.length > 0) {
@@ -1930,7 +1934,7 @@
           // Find start time for each container based on its associated run
           const getContainerBaseline = (container) => {
             const matchingRun = getContainerRun(container.name, container);
-            return matchingRun?.startTime || data.startTime || Date.now();
+            return container.startTime || matchingRun?.startTime || data.startTime || Date.now();
           };
 
           const cpuDatasets = activeContainerNames.map((name) => {

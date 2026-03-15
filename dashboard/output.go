@@ -55,8 +55,10 @@ type ContainerMetrics struct {
 	Backend string      `json:"backend"` // Associated backend name
 	Alias   string      `json:"alias"`   // User-defined alias for display
 	Color   string      `json:"color"`
+	Start   int64       `json:"startTime"`
 	CPU     []TimeValue `json:"cpu"`
 	Memory  []TimeValue `json:"memory"`
+	Shared  bool        `json:"-"`
 }
 
 // RunMetrics holds metrics for a single run/phase.
@@ -148,6 +150,74 @@ func (o *Output) getOrCreateRun(runName, backend string, tags map[string]string)
 	}
 	o.data.Runs[runName] = rm
 	return rm
+}
+
+func recordRunActivity(rm *RunMetrics, sampleTime, now int64) {
+	if rm.StartTime == 0 {
+		rm.StartTime = sampleTime
+	}
+	if rm.EndTime > 0 && sampleTime >= rm.EndTime {
+		rm.EndTime = 0
+	}
+	rm.LastUpdateTime = now
+}
+
+func registerContainer(
+	containers map[string]*ContainerMetrics,
+	container, backend string,
+	opts *metrics.BackendOptions,
+	startTime int64,
+) {
+	if container == "" {
+		return
+	}
+
+	alias := ""
+	color := ""
+	if opts != nil {
+		alias = opts.Alias
+		color = opts.Color
+	}
+
+	cm := containers[container]
+	if cm == nil {
+		containers[container] = &ContainerMetrics{
+			Name:    container,
+			Backend: backend,
+			Alias:   alias,
+			Color:   color,
+			Start:   startTime,
+		}
+		return
+	}
+
+	if startTime > 0 && (cm.Start == 0 || startTime < cm.Start) {
+		cm.Start = startTime
+	}
+	if cm.Shared {
+		return
+	}
+
+	conflicts := (backend != "" && cm.Backend != "" && cm.Backend != backend) ||
+		(alias != "" && cm.Alias != "" && cm.Alias != alias) ||
+		(color != "" && cm.Color != "" && cm.Color != color)
+	if conflicts {
+		cm.Shared = true
+		cm.Backend = ""
+		cm.Alias = ""
+		cm.Color = ""
+		return
+	}
+
+	if cm.Backend == "" {
+		cm.Backend = backend
+	}
+	if cm.Alias == "" {
+		cm.Alias = alias
+	}
+	if cm.Color == "" {
+		cm.Color = color
+	}
 }
 
 // New creates a new dashboard output.
@@ -285,19 +355,7 @@ func (o *Output) flush() {
 				// Register container for metrics
 				opts := metrics.GetBackendOptions(backend)
 				if opts != nil && opts.Container != "" {
-					if o.data.Containers[opts.Container] == nil {
-						o.data.Containers[opts.Container] = &ContainerMetrics{
-							Name:    opts.Container,
-							Backend: backend,
-							Alias:   opts.Alias,
-							Color:   opts.Color,
-						}
-					} else {
-						// Update backend/color/alias info if container already exists
-						o.data.Containers[opts.Container].Backend = backend
-						o.data.Containers[opts.Container].Alias = opts.Alias
-						o.data.Containers[opts.Container].Color = opts.Color
-					}
+					registerContainer(o.data.Containers, opts.Container, backend, opts, sample.Time.UnixMilli())
 				}
 
 			case name == "scenario_started":
@@ -310,9 +368,7 @@ func (o *Output) flush() {
 
 				runName := getRunName(backend, tags)
 				rm := o.getOrCreateRun(runName, backend, tags)
-				if rm.StartTime == 0 {
-					rm.StartTime = sample.Time.UnixMilli()
-				}
+				recordRunActivity(rm, sample.Time.UnixMilli(), now)
 
 			case name == "search_duration":
 				backend := tags["backend"]
@@ -329,10 +385,7 @@ func (o *Output) flush() {
 				runName := getRunName(backend, tags)
 				rm := o.getOrCreateRun(runName, backend, tags)
 				rm.Latencies = append(rm.Latencies, value)
-				if rm.StartTime == 0 {
-					rm.StartTime = sample.Time.UnixMilli()
-				}
-				rm.LastUpdateTime = now
+				recordRunActivity(rm, sample.Time.UnixMilli(), now)
 
 				// Track per-query metrics
 				queryName := tags["query"]
@@ -396,7 +449,9 @@ func (o *Output) flush() {
 				}
 				// Create container entry if it doesn't exist
 				if o.data.Containers[container] == nil {
-					o.data.Containers[container] = &ContainerMetrics{Name: container}
+					o.data.Containers[container] = &ContainerMetrics{Name: container, Start: sample.Time.UnixMilli()}
+				} else if o.data.Containers[container].Start == 0 {
+					o.data.Containers[container].Start = sample.Time.UnixMilli()
 				}
 				o.data.Containers[container].CPU = append(o.data.Containers[container].CPU, TimeValue{Time: sample.Time.UnixMilli(), Value: value})
 
@@ -407,7 +462,9 @@ func (o *Output) flush() {
 				}
 				// Create container entry if it doesn't exist
 				if o.data.Containers[container] == nil {
-					o.data.Containers[container] = &ContainerMetrics{Name: container}
+					o.data.Containers[container] = &ContainerMetrics{Name: container, Start: sample.Time.UnixMilli()}
+				} else if o.data.Containers[container].Start == 0 {
+					o.data.Containers[container].Start = sample.Time.UnixMilli()
 				}
 				o.data.Containers[container].Memory = append(o.data.Containers[container].Memory, TimeValue{Time: sample.Time.UnixMilli(), Value: value})
 
@@ -429,10 +486,7 @@ func (o *Output) flush() {
 				if rm.FirstIngestTime == 0 {
 					rm.FirstIngestTime = sample.Time.UnixMilli()
 				}
-				if rm.StartTime == 0 {
-					rm.StartTime = sample.Time.UnixMilli()
-				}
-				rm.LastUpdateTime = now
+				recordRunActivity(rm, sample.Time.UnixMilli(), now)
 			}
 		}
 	}
@@ -663,12 +717,13 @@ func (o *Output) getSummary() map[string]interface{} {
 	containers := make(map[string]interface{})
 	for name, cm := range o.data.Containers {
 		containers[name] = map[string]interface{}{
-			"name":    cm.Name,
-			"backend": cm.Backend,
-			"alias":   cm.Alias,
-			"color":   cm.Color,
-			"cpu":     cm.CPU,
-			"memory":  cm.Memory,
+			"name":      cm.Name,
+			"backend":   cm.Backend,
+			"alias":     cm.Alias,
+			"color":     cm.Color,
+			"startTime": cm.Start,
+			"cpu":       cm.CPU,
+			"memory":    cm.Memory,
 		}
 	}
 

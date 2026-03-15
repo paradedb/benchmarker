@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	backendpkg "github.com/paradedb/benchmarks/backends"
@@ -50,5 +51,35 @@ func TestNewBackendsUsesBackendDefaultContainerWhenAliasIsSet(t *testing.T) {
 	}
 	if opts.Container != "default-container" {
 		t.Fatalf("expected default container %q, got %q", "default-container", opts.Container)
+	}
+}
+
+func TestNewBackendsDeduplicatesContainerMetricsCollection(t *testing.T) {
+	backendA := "testbackendcontainera"
+	backendB := "testbackendcontainerb"
+
+	for _, name := range []string{backendA, backendB} {
+		backendpkg.Register(name, backendpkg.BackendConfig{
+			Factory:     func(string) (backendpkg.Driver, error) { return stubDriver{}, nil },
+			FileType:    "sql",
+			DefaultConn: "stub://default",
+			Container:   "shared-container",
+		})
+	}
+
+	m := &ModuleInstance{}
+	b := m.newBackends(map[string]interface{}{
+		"backends": []interface{}{backendA, backendB},
+	})
+	if b == nil || b.Metrics == nil {
+		t.Fatal("expected metrics collector to be created")
+	}
+
+	containers := reflect.ValueOf(b.Metrics).Elem().FieldByName("containers")
+	if containers.Len() != 1 {
+		t.Fatalf("expected one deduplicated container, got %d", containers.Len())
+	}
+	if got := containers.Index(0).String(); got != "shared-container" {
+		t.Fatalf("expected shared container name to be preserved, got %q", got)
 	}
 }

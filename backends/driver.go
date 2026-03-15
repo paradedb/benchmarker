@@ -169,6 +169,19 @@ func NewK6Client(vu modules.VU, driver Driver, backend string) *K6Client {
 	return &K6Client{driver: driver, vu: vu, backend: backend, timeout: 0}
 }
 
+func (c *K6Client) requestContext() (context.Context, context.CancelFunc) {
+	ctx := context.Background()
+	if c.vu != nil {
+		if vuCtx := c.vu.Context(); vuCtx != nil {
+			ctx = vuCtx
+		}
+	}
+	if c.timeout > 0 {
+		return context.WithTimeout(ctx, c.timeout)
+	}
+	return ctx, func() {}
+}
+
 // SetTimeout sets the query timeout duration.
 // Use 0 to disable timeout (default).
 func (c *K6Client) SetTimeout(seconds int) {
@@ -189,12 +202,8 @@ func (c *K6Client) emitInitMetrics() {
 func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
 	c.emitInitMetrics()
 
-	ctx := context.Background()
-	var cancel context.CancelFunc
-	if c.timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, c.timeout)
-		defer cancel()
-	}
+	ctx, cancel := c.requestContext()
+	defer cancel()
 
 	// Capture query pattern - for ES/OS style queries (index, queryObj), serialize the query object
 	queryPattern := strings.TrimSpace(query)
@@ -250,7 +259,8 @@ func (c *K6Client) InsertBatch(table string, docs []map[string]interface{}) map[
 		rows[i] = row
 	}
 
-	ctx := context.Background()
+	ctx, cancel := c.requestContext()
+	defer cancel()
 	start := time.Now()
 	count, err := c.driver.Insert(ctx, table, cols, rows)
 	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
