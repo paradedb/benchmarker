@@ -286,12 +286,15 @@ func convertValue(rawValue, schemaType string) any {
 	// Strip null bytes (invalid in PostgreSQL text)
 	rawValue = strings.ReplaceAll(rawValue, "\x00", "")
 
-	// Handle empty strings as NULL for most types
-	if rawValue == "" {
-		return nil
-	}
-
 	schemaType = strings.ToLower(schemaType)
+	if rawValue == "" {
+		switch schemaType {
+		case "text", "varchar", "char", "character varying", "string":
+			return ""
+		default:
+			return nil
+		}
+	}
 
 	switch schemaType {
 	case "bigint", "int8":
