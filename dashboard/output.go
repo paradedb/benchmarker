@@ -2,6 +2,7 @@
 package dashboard
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
@@ -853,7 +854,7 @@ func ServeFile(filename string, notes ...string) error {
 	return server.ListenAndServe()
 }
 
-// ExportStandalone creates a standalone HTML file with embedded JSON data.
+// ExportStandalone creates an HTML file with embedded dashboard data.
 // Optional notes parameter adds a notes section below the title.
 func ExportStandalone(jsonFile, outputFile string, notes ...string) error {
 	// Read the JSON data
@@ -874,6 +875,8 @@ func ExportStandalone(jsonFile, outputFile string, notes ...string) error {
 	}
 
 	compactJSON, _ := json.Marshal(parsed)
+	var escapedJSON bytes.Buffer
+	json.HTMLEscape(&escapedJSON, compactJSON)
 
 	// Read the embedded HTML template
 	htmlData, err := staticFiles.ReadFile("static/index.html")
@@ -882,7 +885,7 @@ func ExportStandalone(jsonFile, outputFile string, notes ...string) error {
 	}
 
 	html := string(htmlData)
-	dataScript := fmt.Sprintf("<script>window.__DASHBOARD_EMBEDDED_DATA = %s;</script>", string(compactJSON))
+	dataScript := fmt.Sprintf("<script>window.__DASHBOARD_EMBEDDED_DATA = %s;</script>", escapedJSON.String())
 	if !strings.Contains(html, "</body>") {
 		return fmt.Errorf("failed to inject embedded data: missing </body> tag")
 	}
