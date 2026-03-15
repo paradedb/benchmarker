@@ -96,14 +96,16 @@ func (l *Loader) OpenDocuments(filePath string) *DocumentReader {
 
 	// Read all rows
 	var docs []map[string]interface{}
+	rowNum := 1 // Header row
 	for {
 		record, err := csvReader.Read()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			continue
+			return l.throwConfigErrorf("openDocuments: failed to read CSV row %d from %q: %v", rowNum+1, filePath, err)
 		}
+		rowNum++
 
 		doc := make(map[string]interface{}, len(headers))
 		for i, header := range headers {
@@ -244,14 +246,16 @@ func readCSVDocuments(filePath string) ([]map[string]interface{}, error) {
 
 	// Read all rows
 	var docs []map[string]interface{}
+	rowNum := 1 // Header row
 	for {
 		record, err := csvReader.Read()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("failed to read CSV row %d from %q: %w", rowNum+1, filePath, err)
 		}
+		rowNum++
 
 		doc := make(map[string]interface{}, len(headers))
 		for i, header := range headers {
