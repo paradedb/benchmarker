@@ -205,7 +205,7 @@ func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
 			}
 		}
 	}
-	metrics.CaptureQueryPattern(c.vu, queryPattern)
+	metrics.CaptureQueryPattern(c.vu, c.backend, queryPattern)
 	metrics.CaptureScenarioInfo(c.vu)
 
 	start := time.Now()
@@ -229,8 +229,6 @@ func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
 // InsertBatch inserts documents and emits metrics.
 func (c *K6Client) InsertBatch(table string, docs []map[string]interface{}) map[string]interface{} {
 	c.emitInitMetrics()
-
-	fmt.Printf("[%s] InsertBatch called: table=%s docs=%d\n", c.backend, table, len(docs))
 
 	if len(docs) == 0 {
 		return map[string]interface{}{"rows": 0, "latencyMs": 0.0}
