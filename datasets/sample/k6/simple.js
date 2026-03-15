@@ -29,11 +29,11 @@ export const options = {
     },
 
     // ParadeDB simple query
-    pg_simple: {
+    paradedb_simple: {
       executor: "constant-vus",
       vus: 5,
       duration: "500s",
-      exec: "pgSimpleQuery",
+      exec: "paradedbSimpleQuery",
     },
   },
 };
@@ -43,7 +43,7 @@ export function collectMetrics() {
 }
 
 // ParadeDB simple query
-export function pgSimpleQuery() {
+export function paradedbSimpleQuery() {
   const term = getTerm();
   backends.get("paradedb").search(
     `

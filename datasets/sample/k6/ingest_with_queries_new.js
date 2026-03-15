@@ -181,12 +181,15 @@ export function esIngest() {
 // ==================== pg_textsearch ====================
 export function textsearchSimple() {
   const term = getTerm();
-  backends.get("pgtextsearch").search(`
+  backends.get("pgtextsearch").search(
+    `
     SELECT id, title
     FROM documents
-    ORDER BY content <@> '${term}'
+    ORDER BY content <@> $1
     LIMIT 10
-  `);
+  `,
+    term,
+  );
 }
 
 export function textsearchIngest() {

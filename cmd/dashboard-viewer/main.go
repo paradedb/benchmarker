@@ -18,7 +18,8 @@ func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: dashboard-viewer <dashboard.json> [--export <output.html>] [--notes \"Description\"]")
 		fmt.Println("\nViews a saved k6-search dashboard JSON file in your browser.")
-		fmt.Println("Use --export to create a standalone HTML file.")
+		fmt.Println("Use --export to create a single-file HTML viewer with embedded dashboard data.")
+		fmt.Println("The exported HTML still loads frontend assets from CDNs.")
 		fmt.Println("Use --notes to add a description below the title.")
 		os.Exit(1)
 	}
@@ -69,7 +70,7 @@ func main() {
 			fmt.Printf("Error: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Exported standalone dashboard to: %s\n", exportFile)
+		fmt.Printf("Exported HTML viewer to: %s\n", exportFile)
 		return
 	}
 
