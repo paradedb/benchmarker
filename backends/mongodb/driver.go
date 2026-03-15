@@ -127,15 +127,21 @@ func (d *Driver) Exec(ctx context.Context, statements string) error {
 		}
 
 		// Wait for index to be ready
-		d.waitForSearchIndex(ctx, coll, indexName, 120*time.Second)
+		if err := d.waitForSearchIndex(ctx, coll, indexName, 120*time.Second); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func (d *Driver) waitForSearchIndex(ctx context.Context, coll *mongo.Collection, indexName string, timeout time.Duration) {
+func (d *Driver) waitForSearchIndex(ctx context.Context, coll *mongo.Collection, indexName string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		cursor, err := coll.SearchIndexes().List(ctx, options.SearchIndexes().SetName(indexName))
 		if err != nil {
 			time.Sleep(2 * time.Second)
@@ -152,11 +158,13 @@ func (d *Driver) waitForSearchIndex(ctx context.Context, coll *mongo.Collection,
 
 		for _, idx := range indexes {
 			if idx["name"] == indexName && idx["status"] == "READY" {
-				return
+				return nil
 			}
 		}
 		time.Sleep(2 * time.Second)
 	}
+
+	return fmt.Errorf("timed out waiting for search index %q to become READY", indexName)
 }
 
 // Query executes a search aggregation and returns the hit count.
