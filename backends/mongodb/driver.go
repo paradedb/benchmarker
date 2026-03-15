@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/paradedb/benchmarks/backends"
@@ -13,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	mongoconnstring "go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
 )
 
 func init() {
@@ -27,8 +29,9 @@ func init() {
 
 // Driver implements the backends.Driver interface for MongoDB.
 type Driver struct {
-	client   *mongo.Client
-	database string
+	client     *mongo.Client
+	database   string
+	databaseMu sync.RWMutex
 }
 
 func isLocalMongoURI(connString string) bool {
@@ -67,7 +70,7 @@ func New(connString string) (backends.Driver, error) {
 		return nil, err
 	}
 
-	return &Driver{client: client, database: "benchmark"}, nil
+	return &Driver{client: client, database: databaseFromConnString(connString)}, nil
 }
 
 // Close disconnects the client.
@@ -78,6 +81,30 @@ func (d *Driver) Close() error {
 	return nil
 }
 
+func databaseFromConnString(connString string) string {
+	cs, err := mongoconnstring.ParseAndValidate(connString)
+	if err == nil && cs.Database != "" {
+		return cs.Database
+	}
+	return "benchmark"
+}
+
+func (d *Driver) getDatabase() string {
+	d.databaseMu.RLock()
+	defer d.databaseMu.RUnlock()
+	return d.database
+}
+
+func (d *Driver) setDatabase(database string) {
+	d.databaseMu.Lock()
+	defer d.databaseMu.Unlock()
+	d.database = database
+}
+
+func (d *Driver) DatabaseName() string {
+	return d.getDatabase()
+}
+
 // Exec executes JSON configuration (drop collection, create search index, etc).
 func (d *Driver) Exec(ctx context.Context, statements string) error {
 	var config map[string]interface{}
@@ -85,9 +112,10 @@ func (d *Driver) Exec(ctx context.Context, statements string) error {
 		return err
 	}
 
-	database := d.database
+	database := d.getDatabase()
 	if db, ok := config["database"].(string); ok {
 		database = db
+		d.setDatabase(database)
 	}
 
 	collection := "documents"
@@ -185,7 +213,7 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 		{{Key: "$search", Value: searchStage}},
 	}
 
-	cursor, err := d.client.Database(d.database).Collection(collection).Aggregate(ctx, pipeline)
+	cursor, err := d.client.Database(d.getDatabase()).Collection(collection).Aggregate(ctx, pipeline)
 	if err != nil {
 		return 0, err
 	}
@@ -213,7 +241,7 @@ func (d *Driver) Insert(ctx context.Context, collection string, cols []string, r
 		docs[i] = doc
 	}
 
-	result, err := d.client.Database(d.database).Collection(collection).InsertMany(ctx, docs)
+	result, err := d.client.Database(d.getDatabase()).Collection(collection).InsertMany(ctx, docs)
 	if err != nil {
 		return 0, err
 	}

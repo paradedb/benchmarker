@@ -149,8 +149,9 @@ func (r *DocumentReader) NextBatch(n int) []map[string]interface{} {
 	return batch
 }
 
-// NextBatchNewIds returns the next n documents with fresh UUIDs.
-// Use this when re-inserting documents that already exist in the database.
+// NextBatchNewIds returns the next n documents with fresh UUIDs in the "id" field.
+// Use this when re-inserting documents that already exist in the database and the
+// dataset stores identifiers in an "id" column that accepts UUID-style strings.
 // Thread-safe via atomic counter.
 func (r *DocumentReader) NextBatchNewIds(n int) []map[string]interface{} {
 	if r.size == 0 || n <= 0 {

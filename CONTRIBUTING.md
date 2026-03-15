@@ -100,7 +100,7 @@ datasets/<name>/
 │   ├── pre.json          # Index mapping
 │   └── post.json         # Refresh, force merge
 └── k6/
-    └── benchmark.js      # k6 test script
+    └── *.js              # k6 test scripts
 ```
 
 SQL backends use `.sql` files, HTTP backends (Elasticsearch, OpenSearch, MongoDB) use `.json`.

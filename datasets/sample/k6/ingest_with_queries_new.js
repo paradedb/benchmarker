@@ -49,7 +49,7 @@ export const options = {
       executor: "constant-vus",
       vus: 5,
       duration: "30s",
-      exec: "pgSimpleQuery",
+      exec: "paradedbSimpleQuery",
     },
     // ParadeDB ingest: 0s - 30s (parallel with query)
     pdb_ingest: {
@@ -142,7 +142,7 @@ export function collectMetrics() {
 }
 
 // ==================== ParadeDB ====================
-export function pgSimpleQuery() {
+export function paradedbSimpleQuery() {
   const term = getTerm();
   backends.get("paradedb").search(
     `

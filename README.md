@@ -249,7 +249,7 @@ Then open http://localhost:5665/static/ in your browser.
 
 ```bash
 # Export dashboard data during run
-DASHBOARD_EXPORT=true ./k6 run --out dashboard benchmark.js
+DASHBOARD_EXPORT=true ./k6 run --out dashboard datasets/sample/k6/simple.js
 
 # View saved data later (use generated dashboard_<timestamp>.json file)
 ./bin/dashboard-viewer ./dashboard_2026-02-28_12-00-00.json
@@ -345,7 +345,7 @@ export function ingestTest() {
 }
 ```
 
-The `nextBatchNewIds()` method returns documents with new UUID strings in the `id` field, cycling through the source file. This allows continuous ingestion without ID conflicts.
+The `nextBatchNewIds()` method returns documents with new UUID strings in the `id` field, cycling through the source file. Use it only when your dataset has an `id` column that accepts UUID-style string values.
 
 ## Data Loader
 
