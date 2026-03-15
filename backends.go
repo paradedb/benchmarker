@@ -110,11 +110,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 			conn = defaults[backendType]
 		}
 		if container == "" {
-			if alias != backendType {
-				container = alias // default container to alias if alias is set
-			} else {
-				container = defaultContainers[backendType]
-			}
+			container = defaultContainers[backendType]
 		}
 
 		// Check for duplicate alias
