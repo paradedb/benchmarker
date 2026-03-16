@@ -92,6 +92,31 @@ func TestGetSummaryUsesQueryWindowForQPS(t *testing.T) {
 	}
 }
 
+func TestGetSummaryUsesLastRunActivityForChartDuration(t *testing.T) {
+	o := &Output{
+		data: &DashboardData{
+			StartTime: time.Unix(0, 0),
+			Runs: map[string]*RunMetrics{
+				"ingest": {
+					Name:            "ingest",
+					Backend:         "paradedb",
+					StartTime:       1000,
+					LastUpdateTime:  6000,
+					FirstIngestTime: 1000,
+					TotalIngested:   300,
+					Queries:         map[string]*QueryMetrics{},
+				},
+			},
+		},
+	}
+
+	summary := o.getSummary()
+	got := summary["chartDuration"].(float64)
+	if math.Abs(got-10.0) > 0.001 {
+		t.Fatalf("expected chart duration of 10.0 seconds, got %.3f", got)
+	}
+}
+
 func TestRecordRunActivityReopensEndedRun(t *testing.T) {
 	rm := &RunMetrics{
 		StartTime: 1000,

@@ -1,4 +1,4 @@
-// Command dashboard-viewer serves saved k6-search dashboard JSON files.
+// Command dashboard-viewer serves saved benchmark dashboard JSON files.
 //
 // Usage:
 //
@@ -17,7 +17,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: dashboard-viewer <dashboard.json> [--export <output.html>] [--notes \"Description\"]")
-		fmt.Println("\nViews a saved k6-search dashboard JSON file in your browser.")
+		fmt.Println("\nViews a saved benchmark dashboard JSON file in your browser.")
 		fmt.Println("Use --export to create a single-file HTML viewer with embedded dashboard data.")
 		fmt.Println("The exported HTML still loads frontend assets from CDNs.")
 		fmt.Println("Use --notes to add a description below the title.")

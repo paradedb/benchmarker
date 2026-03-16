@@ -1,4 +1,4 @@
-// Package dashboard provides a web-based dashboard for k6 search benchmarks.
+// Package dashboard provides a web-based dashboard for benchmark runs.
 package dashboard
 
 import (
@@ -43,10 +43,9 @@ type Output struct {
 
 // DashboardData holds all metrics for the dashboard.
 type DashboardData struct {
-	StartTime     time.Time                    `json:"startTime"`
-	TotalDuration float64                      `json:"totalDuration"` // Total test duration in seconds
-	Runs          map[string]*RunMetrics       `json:"runs"`
-	Containers    map[string]*ContainerMetrics `json:"-"` // Container metrics by container name (independent of runs)
+	StartTime  time.Time                    `json:"startTime"`
+	Runs       map[string]*RunMetrics       `json:"runs"`
+	Containers map[string]*ContainerMetrics `json:"-"` // Container metrics by container name (independent of runs)
 }
 
 // ContainerMetrics holds CPU/memory metrics for a container.
@@ -70,7 +69,6 @@ type RunMetrics struct {
 	Color           string                   `json:"color"`     // Custom color for this backend
 	Chart           string                   `json:"chart"`     // Chart group for separating graphs
 	Latencies       []float64                `json:"latencies"`
-	Timeline        []TimelinePoint          `json:"timeline"`
 	IngestRate      []TimeValue              `json:"ingestRate"`    // Docs/sec timeline
 	TotalIngested   int64                    `json:"totalIngested"` // Total docs ingested
 	FirstIngestTime int64                    `json:"-"`             // Timestamp of the first ingest sample
@@ -608,6 +606,38 @@ func (o *Output) broadcast() {
 	o.mu.Unlock()
 }
 
+func latestRunTime(rm *RunMetrics) int64 {
+	latest := rm.StartTime
+	if rm.EndTime > latest {
+		latest = rm.EndTime
+	}
+	if rm.LastUpdateTime > latest {
+		latest = rm.LastUpdateTime
+	}
+	if rm.LastIngestTime > latest {
+		latest = rm.LastIngestTime
+	}
+	if len(rm.IngestRate) > 0 {
+		if t := rm.IngestRate[len(rm.IngestRate)-1].Time; t > latest {
+			latest = t
+		}
+	}
+	for _, qm := range rm.Queries {
+		if qm.StartTime > latest {
+			latest = qm.StartTime
+		}
+		if qm.EndTime > latest {
+			latest = qm.EndTime
+		}
+		if len(qm.Timeline) > 0 {
+			if t := qm.Timeline[len(qm.Timeline)-1].Time; t > latest {
+				latest = t
+			}
+		}
+	}
+	return latest
+}
+
 func (o *Output) getSummary() map[string]interface{} {
 	elapsed := time.Since(o.data.StartTime).Seconds()
 	now := time.Now().UnixMilli()
@@ -616,31 +646,18 @@ func (o *Output) getSummary() map[string]interface{} {
 	var maxRunDuration float64
 	for _, rm := range o.data.Runs {
 		if rm.StartTime > 0 {
-			var runDuration float64
-			if rm.EndTime > 0 {
-				runDuration = float64(rm.EndTime-rm.StartTime) / 1000
-			} else {
-				// Check query timelines for last data point
-				var lastTime int64
-				for _, qm := range rm.Queries {
-					if len(qm.Timeline) > 0 {
-						if t := qm.Timeline[len(qm.Timeline)-1].Time; t > lastTime {
-							lastTime = t
-						}
-					}
-				}
-				if lastTime > 0 {
-					runDuration = float64(lastTime-rm.StartTime) / 1000
-				}
+			runEnd := latestRunTime(rm)
+			if runEnd <= rm.StartTime {
+				continue
 			}
+			runDuration := float64(runEnd-rm.StartTime) / 1000
 			if runDuration > maxRunDuration {
 				maxRunDuration = runDuration
 			}
 		}
 	}
-	// Use totalDuration if set, otherwise use max run duration + buffer
-	chartDuration := o.data.TotalDuration
-	if chartDuration == 0 && maxRunDuration > 0 {
+	chartDuration := 0.0
+	if maxRunDuration > 0 {
 		chartDuration = maxRunDuration + 5 // Add 5 second buffer
 	}
 	if chartDuration == 0 {

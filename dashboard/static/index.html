@@ -656,6 +656,32 @@
       let chartLegendKeys = {}; // Legend keys per dashboard group
       let chartGroupOrder = []; // Track order of chart groups by first emission
 
+      function clearNotes() {
+        const notesContainer = document.getElementById("notes-container");
+        notesContainer.textContent = "";
+        notesContainer.style.display = "none";
+      }
+
+      function clearMetricsPanel() {
+        document.getElementById("metrics-container").style.display = "none";
+        [cpuChart, memoryChart].forEach((chart) => {
+          chart.data.datasets = [];
+          delete chart.options.scales.y.min;
+          delete chart.options.scales.y.max;
+          chart.update("none");
+        });
+      }
+
+      function clearIngestPanel() {
+        document.getElementById("ingest-legend").innerHTML = "";
+        document.getElementById("ingest-stats-container").innerHTML = "";
+        document.getElementById("ingest-container").style.display = "none";
+        ingestChart.data.datasets = [];
+        delete ingestChart.options.scales.y.min;
+        delete ingestChart.options.scales.y.max;
+        ingestChart.update("none");
+      }
+
       function resetState() {
         runColors = {};
         colorIndex = 0;
@@ -673,10 +699,10 @@
           .querySelectorAll(".reset-zoom")
           .forEach((btn) => btn.classList.remove("visible"));
         document.getElementById("chart-groups-container").innerHTML = "";
-        document.getElementById("ingest-legend").innerHTML = "";
         chartLegendKeys = {};
-        document.getElementById("ingest-stats-container").innerHTML = "";
-        document.getElementById("ingest-container").style.display = "none";
+        clearNotes();
+        clearMetricsPanel();
+        clearIngestPanel();
         // Destroy existing dashboard charts
         Object.values(chartInstances).forEach((chart) => chart.destroy());
         chartInstances = {};
@@ -686,6 +712,7 @@
           chart.options.scales.x.min = 0;
           chart.options.scales.x.max = chartDuration;
           delete chart.options.scales.y.max;
+          delete chart.options.scales.y.min;
           chart.update("none");
         });
       }
@@ -1785,6 +1812,8 @@
         if (data.notes) {
           notesContainer.textContent = data.notes;
           notesContainer.style.display = "block";
+        } else {
+          clearNotes();
         }
 
         const runs = data.runs || {};
@@ -1974,6 +2003,8 @@
           updateChartDatasets(memoryChart, memoryDatasets);
           updateChartYAxis(memoryChart);
           memoryChart.update("none");
+        } else {
+          clearMetricsPanel();
         }
 
         // Update ingest chart (only if any run has ingest data)
@@ -2041,6 +2072,8 @@
           updateChartDatasets(ingestChart, ingestDatasets);
           updateChartYAxis(ingestChart);
           ingestChart.update("none");
+        } else {
+          clearIngestPanel();
         }
       }
 
