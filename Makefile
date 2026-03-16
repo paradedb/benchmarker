@@ -61,7 +61,7 @@ help:
 	@echo ""
 	@echo "Targets:"
 	@echo "  all      Build everything (default)"
-	@echo "  build    Build k6 and loader"
+	@echo "  build    Build k6, loader, and viewer"
 	@echo "  k6       Build k6 with xk6-search extension"
 	@echo "  loader   Build the loader CLI to bin/"
 	@echo "  viewer   Build the dashboard-viewer CLI to bin/"

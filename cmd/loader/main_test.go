@@ -170,3 +170,55 @@ func TestFindCSV(t *testing.T) {
 		}
 	})
 }
+
+func TestDatasetBackendDir(t *testing.T) {
+	t.Run("existing directory", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "paradedb"), 0755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+
+		got, ok, err := datasetBackendDir(dir, "paradedb")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !ok {
+			t.Fatal("expected backend config directory to exist")
+		}
+		want := filepath.Join(dir, "paradedb")
+		if got != want {
+			t.Fatalf("datasetBackendDir() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("missing directory", func(t *testing.T) {
+		dir := t.TempDir()
+		got, ok, err := datasetBackendDir(dir, "paradedb")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ok {
+			t.Fatal("expected missing backend config directory to return false")
+		}
+		want := filepath.Join(dir, "paradedb")
+		if got != want {
+			t.Fatalf("datasetBackendDir() = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestAnonymousRegion(t *testing.T) {
+	t.Run("defaults to us-east-1", func(t *testing.T) {
+		t.Setenv("AWS_REGION", "")
+		if got := anonymousRegion(); got != "us-east-1" {
+			t.Fatalf("anonymousRegion() = %q, want %q", got, "us-east-1")
+		}
+	})
+
+	t.Run("uses aws region env var", func(t *testing.T) {
+		t.Setenv("AWS_REGION", "eu-west-1")
+		if got := anonymousRegion(); got != "eu-west-1" {
+			t.Fatalf("anonymousRegion() = %q, want %q", got, "eu-west-1")
+		}
+	})
+}

@@ -215,8 +215,13 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int) 
 				}
 			}()
 
-			dir := filepath.Join(datasetDir, loader.Name())
-			if _, err := os.Stat(dir); os.IsNotExist(err) {
+			dir, ok, err := datasetBackendDir(datasetDir, loader.Name())
+			if err != nil {
+				fmt.Printf("FAILED: %v\n", err)
+				overallFailed = true
+				return
+			}
+			if !ok {
 				fmt.Printf("Skipping %s (no config directory)\n", loader.Name())
 				return
 			}
@@ -293,15 +298,41 @@ func runDrop(datasetDir string, backendName string) {
 	}
 
 	ctx := context.Background()
+	overallFailed := false
 
 	for _, b := range loaders {
-		fmt.Printf("Dropping %s... ", b.Name())
-		if err := b.Drop(ctx, schema); err != nil {
-			fmt.Printf("FAILED: %v\n", err)
-		} else {
+		func(loader *backends.CLILoader) {
+			defer func() {
+				if err := loader.Close(); err != nil {
+					fmt.Printf("Warning: failed to close %s: %v\n", loader.Name(), err)
+				}
+			}()
+
+			_, ok, err := datasetBackendDir(datasetDir, loader.Name())
+			if err != nil {
+				fmt.Printf("Dropping %s... FAILED: %v\n", loader.Name(), err)
+				overallFailed = true
+				return
+			}
+			if !ok {
+				fmt.Printf("Skipping %s (no config directory)\n", loader.Name())
+				return
+			}
+
+			fmt.Printf("Dropping %s... ", loader.Name())
+			if err := loader.Drop(ctx, schema); err != nil {
+				fmt.Printf("FAILED: %v\n", err)
+				overallFailed = true
+				return
+			}
 			fmt.Println("OK")
-		}
-		b.Close()
+
+		}(b)
+	}
+
+	if overallFailed {
+		fmt.Println("\nCompleted with errors.")
+		os.Exit(1)
 	}
 }
 
@@ -349,6 +380,21 @@ func findCSV(datasetDir string) (string, error) {
 	return filepath.Join(datasetDir, csvFiles[0]), nil
 }
 
+func datasetBackendDir(datasetDir, backendName string) (string, bool, error) {
+	dir := filepath.Join(datasetDir, backendName)
+	info, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return dir, false, nil
+		}
+		return "", false, err
+	}
+	if !info.IsDir() {
+		return "", false, fmt.Errorf("%q exists but is not a directory", dir)
+	}
+	return dir, true, nil
+}
+
 // ============================================================================
 // S3 Pull
 // ============================================================================
@@ -372,7 +418,7 @@ func runPull(datasetName, sourceURL string, anonymous bool) {
 	if anonymous {
 		cfg, err = config.LoadDefaultConfig(ctx,
 			config.WithCredentialsProvider(aws.AnonymousCredentials{}),
-			config.WithRegion("us-east-1"),
+			config.WithRegion(anonymousRegion()),
 		)
 	} else {
 		cfg, err = config.LoadDefaultConfig(ctx)
@@ -470,6 +516,13 @@ func runPull(datasetName, sourceURL string, anonymous bool) {
 	if failed > 0 {
 		os.Exit(1)
 	}
+}
+
+func anonymousRegion() string {
+	if region := strings.TrimSpace(os.Getenv("AWS_REGION")); region != "" {
+		return region
+	}
+	return "us-east-1"
 }
 
 func resolveDownloadPath(destDir, prefix, key string) (string, string, error) {

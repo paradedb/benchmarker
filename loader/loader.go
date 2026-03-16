@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -199,19 +201,45 @@ func parseConfig(config map[string]interface{}) (filePath, tableName, dataset st
 }
 
 func parseColumns(config map[string]interface{}, filePath string) ([]string, error) {
-	if rawCols, ok := config["columns"].([]interface{}); ok && len(rawCols) > 0 {
-		cols := make([]string, 0, len(rawCols))
-		for _, c := range rawCols {
-			s, ok := c.(string)
-			if ok && s != "" {
-				cols = append(cols, s)
-			}
-		}
-		if len(cols) > 0 {
-			return cols, nil
-		}
+	headers, err := readCSVHeaders(filePath)
+	if err != nil {
+		return nil, err
 	}
 
+	rawCols, ok := config["columns"].([]interface{})
+	if !ok || len(rawCols) == 0 {
+		return headers, nil
+	}
+
+	cols := make([]string, 0, len(rawCols))
+	for i, c := range rawCols {
+		s, ok := c.(string)
+		if !ok || strings.TrimSpace(s) == "" {
+			return nil, fmt.Errorf("columns[%d] must be a non-empty string", i)
+		}
+		cols = append(cols, s)
+	}
+
+	headerSet := make(map[string]struct{}, len(headers))
+	for _, header := range headers {
+		headerSet[header] = struct{}{}
+	}
+
+	var missing []string
+	for _, col := range cols {
+		if _, ok := headerSet[col]; !ok {
+			missing = append(missing, col)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return nil, fmt.Errorf("columns not found in CSV header: %s", strings.Join(missing, ", "))
+	}
+
+	return cols, nil
+}
+
+func readCSVHeaders(filePath string) ([]string, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err

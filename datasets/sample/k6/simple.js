@@ -24,7 +24,7 @@ export const options = {
     metrics_collector: {
       executor: "constant-vus",
       vus: 1,
-      duration: "500s",
+      duration: "35s",
       exec: "collectMetrics",
     },
 
@@ -32,7 +32,7 @@ export const options = {
     paradedb_simple: {
       executor: "constant-vus",
       vus: 5,
-      duration: "500s",
+      duration: "30s",
       exec: "paradedbSimpleQuery",
     },
   },

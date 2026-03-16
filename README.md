@@ -33,7 +33,7 @@ docker compose --profile all up -d
 ### 2. Build
 
 ```bash
-make        # Builds both k6 and loader
+make        # Builds k6, the loader, and the dashboard viewer
 ```
 
 Or individually:
@@ -46,7 +46,7 @@ make loader # Build the loader CLI
 ### 3. Load test data
 
 ```bash
-./bin/loader load ./datasets/sample
+./bin/loader load --backend paradedb ./datasets/sample
 ```
 
 ### 4. Run a benchmark
@@ -55,7 +55,7 @@ make loader # Build the loader CLI
 ./k6 run --out dashboard datasets/sample/k6/simple.js
 ```
 
-Open http://localhost:5665/static/ to see real-time results.
+The sample script runs for 30 seconds. Open http://localhost:5665/static/ to see real-time results.
 
 ## Writing k6 Scripts
 
@@ -351,6 +351,8 @@ The `nextBatchNewIds()` method returns documents with new UUID strings in the `i
 
 The loader CLI handles bulk data loading with lifecycle scripts.
 
+The `load` and `drop` commands only work for backends that have a matching config directory in the dataset, and `load` expects the corresponding backend service to be running.
+
 ### Commands
 
 ```bash
@@ -380,6 +382,12 @@ datasets/
     ├── paradedb/
     │   ├── pre.sql              # Create tables, indexes
     │   └── post.sql             # VACUUM, ANALYZE
+    ├── postgresfts/
+    │   ├── pre.sql
+    │   └── post.sql
+    ├── pgtextsearch/
+    │   ├── pre.sql
+    │   └── post.sql
     ├── elasticsearch/
     │   ├── pre.json             # Create index with mappings
     │   └── post.json            # Refresh, force merge
@@ -409,7 +417,7 @@ columns:
 
 ### Pre/Post Scripts
 
-Pre and post scripts are defined per dataset in the dataset directory (e.g., `datasets/sample/paradedb/pre.sql`). They run during data loading to set up and optimize each backend.
+Pre and post scripts are defined per dataset in the dataset directory (for example, `datasets/sample/paradedb/pre.sql`). They run during data loading to set up and optimize each backend.
 
 #### SQL Backends (ParadeDB, PostgreSQL, ClickHouse)
 
