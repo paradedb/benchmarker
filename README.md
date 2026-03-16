@@ -552,6 +552,9 @@ export CLICKHOUSE_URL="clickhouse://default:clickhouse@localhost:9000/default"
 export MONGODB_URL="mongodb://localhost:27017"
 ```
 
+For self-signed HTTPS OpenSearch development clusters, set `OPENSEARCH_SKIP_TLS_VERIFY=true`.
+Leave it unset to keep certificate verification enabled.
+
 Or configure per-backend:
 
 ```javascript
