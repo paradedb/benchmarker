@@ -548,6 +548,7 @@
     <div class="header">
       <h1>K6 Search Benchmark</h1>
       <div style="display: flex; align-items: center; gap: 16px">
+        <div id="timeline-settings" style="font-size: 11px; color: var(--text-dim)"></div>
         <div class="elapsed" id="elapsed">00:00</div>
         <button class="theme-toggle" onclick="toggleTheme()">◐ Theme</button>
       </div>
@@ -1775,6 +1776,15 @@
         document.getElementById("elapsed").textContent = formatElapsed(
           data.elapsed,
         );
+
+        // Display timeline settings if present
+        const settingsEl = document.getElementById("timeline-settings");
+        if (data.broadcastInterval != null || data.timelineWindow != null) {
+          const parts = [];
+          if (data.broadcastInterval != null) parts.push("updating every " + data.broadcastInterval + "ms");
+          if (data.timelineWindow != null) parts.push(data.timelineWindow === 0 ? "no smoothing" : "smoothed over " + data.timelineWindow + "ms");
+          settingsEl.textContent = parts.join(", ");
+        }
 
         // Display notes if present
         const notesContainer = document.getElementById("notes-container");

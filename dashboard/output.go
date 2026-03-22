@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,10 @@ type Output struct {
 
 	// Accumulated data per run
 	data *DashboardData
+
+	// Timeline controls (resolved from env vars or defaults)
+	broadcastInterval time.Duration
+	timelineWindow    time.Duration
 }
 
 // DashboardData holds all metrics for the dashboard.
@@ -114,9 +119,9 @@ const (
 	runEndTimeoutMs      = 2000 // Time without updates before run is considered ended
 	ingestRateIntervalMs = 500  // Minimum interval between ingest rate calculations
 
-	// Timeline controls
-	broadcastInterval = 200 * time.Millisecond // How often the UI receives updates (controls draw smoothness)
-	timelineWindow    = 1 * time.Second         // Sliding window size for percentile calculation (0 = no window, use all samples since last point)
+	// Default timeline controls (overridable via DASHBOARD_BROADCAST_MS and DASHBOARD_WINDOW_MS)
+	defaultBroadcastInterval = 200 * time.Millisecond
+	defaultTimelineWindow    = 1 * time.Second
 )
 
 // getRunName computes the run identifier from backend, alias, and chart tag.
@@ -156,11 +161,25 @@ func (o *Output) getOrCreateRun(runName, backend string, tags map[string]string)
 
 // New creates a new dashboard output.
 func New(params output.Params) (output.Output, error) {
+	broadcast := defaultBroadcastInterval
+	if v, err := strconv.Atoi(os.Getenv("DASHBOARD_BROADCAST_MS")); err == nil && v > 0 {
+		broadcast = time.Duration(v) * time.Millisecond
+	}
+
+	window := defaultTimelineWindow
+	if s := os.Getenv("DASHBOARD_WINDOW_MS"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v >= 0 {
+			window = time.Duration(v) * time.Millisecond
+		}
+	}
+
 	return &Output{
-		params:  params,
-		stopCh:  make(chan struct{}),
-		doneCh:  make(chan struct{}),
-		clients: make(map[chan []byte]struct{}),
+		params:            params,
+		stopCh:            make(chan struct{}),
+		doneCh:            make(chan struct{}),
+		clients:           make(map[chan []byte]struct{}),
+		broadcastInterval: broadcast,
+		timelineWindow:    window,
 		data: &DashboardData{
 			StartTime:  time.Now(),
 			Runs:       make(map[string]*RunMetrics),
@@ -223,7 +242,7 @@ func (o *Output) Stop() error {
 	// Save dashboard state to JSON file if DASHBOARD_EXPORT=true
 	if os.Getenv("DASHBOARD_EXPORT") == "true" {
 		o.mu.RLock()
-		data := o.getSummary()
+		data := o.getExportData()
 		o.mu.RUnlock()
 
 		jsonData, err := json.MarshalIndent(data, "", "  ")
@@ -247,7 +266,7 @@ func (o *Output) Stop() error {
 
 func (o *Output) loop() {
 	defer close(o.doneCh)
-	ticker := time.NewTicker(broadcastInterval)
+	ticker := time.NewTicker(o.broadcastInterval)
 	defer ticker.Stop()
 
 	for {
@@ -461,9 +480,9 @@ func (o *Output) updateQueryTimeline(qm *QueryMetrics, runStartTime int64, now i
 		return
 	}
 
-	if timelineWindow > 0 {
+	if o.timelineWindow > 0 {
 		// Sliding window mode: gather all samples within the window
-		windowStart := now - timelineWindow.Milliseconds()
+		windowStart := now - o.timelineWindow.Milliseconds()
 		var windowLatencies []float64
 		var windowHits []int64
 		for i, ts := range qm.Timestamps {
@@ -713,12 +732,307 @@ func (o *Output) getSummary() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"elapsed":       elapsed,
-		"chartDuration": chartDuration,
-		"runs":          runs,
-		"containers":    containers,
-		"startTime":     o.data.StartTime.UnixMilli(),
+		"elapsed":           elapsed,
+		"chartDuration":     chartDuration,
+		"runs":              runs,
+		"containers":        containers,
+		"startTime":         o.data.StartTime.UnixMilli(),
+		"broadcastInterval": o.broadcastInterval.Milliseconds(),
+		"timelineWindow":    o.timelineWindow.Milliseconds(),
 	}
+}
+
+// getExportData returns raw data for JSON export — no pre-aggregated timeline,
+// just raw latencies/timestamps so the viewer can re-aggregate with its own settings.
+func (o *Output) getExportData() map[string]interface{} {
+	now := time.Now().UnixMilli()
+
+	runs := make(map[string]interface{})
+	for name, rm := range o.data.Runs {
+		queries := make(map[string]interface{})
+		for qName, qm := range rm.Queries {
+			queryPattern := getQueryPattern(rm.Backend, rm.Chart, qName)
+
+			queries[qName] = map[string]interface{}{
+				"name":       qm.Name,
+				"vus":        qm.VUs,
+				"executor":   qm.Executor,
+				"latencies":  qm.Latencies,
+				"timestamps": qm.Timestamps,
+				"hitCounts":  qm.HitCounts,
+				"query":      queryPattern,
+			}
+		}
+
+		config, containerLimits := getBackendConfig(rm.Backend, rm.Container)
+
+		var endTime int64
+		if rm.EndTime > 0 {
+			endTime = rm.EndTime
+		} else if rm.LastUpdateTime > 0 {
+			endTime = rm.LastUpdateTime
+		} else {
+			endTime = now
+		}
+
+		runs[name] = map[string]interface{}{
+			"name":            rm.Name,
+			"backend":         rm.Backend,
+			"container":       rm.Container,
+			"alias":           rm.Alias,
+			"color":           rm.Color,
+			"chart":           rm.Chart,
+			"ingestRate":      rm.IngestRate,
+			"totalIngested":   rm.TotalIngested,
+			"startTime":       rm.StartTime,
+			"endTime":         endTime,
+			"config":          config,
+			"containerLimits": containerLimits,
+			"queries":         queries,
+		}
+	}
+
+	containers := make(map[string]interface{})
+	for name, cm := range o.data.Containers {
+		containers[name] = map[string]interface{}{
+			"name":    cm.Name,
+			"backend": cm.Backend,
+			"alias":   cm.Alias,
+			"color":   cm.Color,
+			"cpu":     cm.CPU,
+			"memory":  cm.Memory,
+		}
+	}
+
+	return map[string]interface{}{
+		"startTime":  o.data.StartTime.UnixMilli(),
+		"runs":       runs,
+		"containers": containers,
+	}
+}
+
+// aggregateExportData takes raw export JSON (with latencies/timestamps per query)
+// and re-aggregates it into the timeline format the frontend expects.
+func aggregateExportData(rawData map[string]interface{}, broadcast, window time.Duration) map[string]interface{} {
+	result := make(map[string]interface{})
+	// Copy through non-run fields
+	for k, v := range rawData {
+		if k != "runs" {
+			result[k] = v
+		}
+	}
+	result["broadcastInterval"] = broadcast.Milliseconds()
+	result["timelineWindow"] = window.Milliseconds()
+
+	runsRaw, ok := rawData["runs"].(map[string]interface{})
+	if !ok {
+		result["runs"] = rawData["runs"]
+		return result
+	}
+
+	runs := make(map[string]interface{})
+	for runName, runRaw := range runsRaw {
+		rm, ok := runRaw.(map[string]interface{})
+		if !ok {
+			runs[runName] = runRaw
+			continue
+		}
+
+		run := make(map[string]interface{})
+		for k, v := range rm {
+			if k != "queries" {
+				run[k] = v
+			}
+		}
+
+		// Get run timing
+		runStart := jsonInt64(rm, "startTime")
+		runEnd := jsonInt64(rm, "endTime")
+		runDuration := float64(runEnd-runStart) / 1000
+
+		queriesRaw, ok := rm["queries"].(map[string]interface{})
+		if !ok {
+			run["queries"] = rm["queries"]
+			runs[runName] = run
+			continue
+		}
+
+		queries := make(map[string]interface{})
+		for qName, qRaw := range queriesRaw {
+			qm, ok := qRaw.(map[string]interface{})
+			if !ok {
+				queries[qName] = qRaw
+				continue
+			}
+
+			latencies := jsonFloat64Slice(qm, "latencies")
+			timestamps := jsonInt64Slice(qm, "timestamps")
+			hitCounts := jsonInt64Slice(qm, "hitCounts")
+
+			// Build timeline from raw data
+			var timeline []TimelinePoint
+			if len(latencies) > 0 && len(timestamps) > 0 {
+				timeline = buildTimeline(latencies, timestamps, hitCounts, broadcast, window)
+			}
+
+			// Compute aggregate stats
+			var queryQPS float64
+			if len(latencies) > 0 && runDuration > 0 {
+				queryQPS = float64(len(latencies)) / runDuration
+			}
+
+			queries[qName] = map[string]interface{}{
+				"name":     qm["name"],
+				"vus":      qm["vus"],
+				"executor": qm["executor"],
+				"count":    len(latencies),
+				"qps":      queryQPS,
+				"min":      minVal(latencies),
+				"max":      maxVal(latencies),
+				"p50":      percentile(latencies, 50),
+				"p95":      percentile(latencies, 95),
+				"p99":      percentile(latencies, 99),
+				"timeline": timeline,
+				"query":    qm["query"],
+			}
+		}
+
+		// Compute avgIngestRate
+		totalIngested := jsonInt64(rm, "totalIngested")
+		if totalIngested > 0 && runDuration > 0 {
+			run["avgIngestRate"] = float64(totalIngested) / runDuration
+		}
+
+		run["queries"] = queries
+		runs[runName] = run
+	}
+
+	// Compute chartDuration from runs
+	var maxRunDuration float64
+	for _, runRaw := range runs {
+		rm, ok := runRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		start := jsonInt64(rm, "startTime")
+		end := jsonInt64(rm, "endTime")
+		if start > 0 && end > 0 {
+			d := float64(end-start) / 1000
+			if d > maxRunDuration {
+				maxRunDuration = d
+			}
+		}
+	}
+	if maxRunDuration > 0 {
+		result["chartDuration"] = maxRunDuration + 5
+	}
+	result["elapsed"] = maxRunDuration
+
+	result["runs"] = runs
+	return result
+}
+
+// buildTimeline creates timeline points from raw latencies/timestamps.
+func buildTimeline(latencies []float64, timestamps []int64, hitCounts []int64, broadcast, window time.Duration) []TimelinePoint {
+	if len(timestamps) == 0 {
+		return nil
+	}
+
+	broadcastMs := broadcast.Milliseconds()
+	windowMs := window.Milliseconds()
+	startTime := timestamps[0]
+	endTime := timestamps[len(timestamps)-1]
+
+	var timeline []TimelinePoint
+	for t := startTime; t <= endTime; t += broadcastMs {
+		var windowLat []float64
+		var windowHits []int64
+
+		if windowMs > 0 {
+			// Sliding window: gather samples within [t-window, t]
+			wStart := t - windowMs
+			for i, ts := range timestamps {
+				if ts > wStart && ts <= t {
+					windowLat = append(windowLat, latencies[i])
+					if i < len(hitCounts) {
+						windowHits = append(windowHits, hitCounts[i])
+					}
+				}
+			}
+		} else {
+			// Non-overlapping: gather samples within (t-broadcast, t]
+			wStart := t - broadcastMs
+			for i, ts := range timestamps {
+				if ts > wStart && ts <= t {
+					windowLat = append(windowLat, latencies[i])
+					if i < len(hitCounts) {
+						windowHits = append(windowHits, hitCounts[i])
+					}
+				}
+			}
+		}
+
+		if len(windowLat) == 0 {
+			continue
+		}
+
+		var avgHits float64
+		if len(windowHits) > 0 {
+			var sum int64
+			for _, h := range windowHits {
+				sum += h
+			}
+			avgHits = float64(sum) / float64(len(windowHits))
+		}
+
+		timeline = append(timeline, TimelinePoint{
+			Time:  t,
+			P50:   percentile(windowLat, 50),
+			P90:   percentile(windowLat, 90),
+			P95:   percentile(windowLat, 95),
+			P99:   percentile(windowLat, 99),
+			Count: len(windowLat),
+			Hits:  avgHits,
+		})
+	}
+
+	return timeline
+}
+
+// JSON helper functions for untyped map access.
+func jsonInt64(m map[string]interface{}, key string) int64 {
+	if v, ok := m[key].(float64); ok {
+		return int64(v)
+	}
+	return 0
+}
+
+func jsonFloat64Slice(m map[string]interface{}, key string) []float64 {
+	arr, ok := m[key].([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]float64, 0, len(arr))
+	for _, v := range arr {
+		if f, ok := v.(float64); ok {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func jsonInt64Slice(m map[string]interface{}, key string) []int64 {
+	arr, ok := m[key].([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]int64, 0, len(arr))
+	for _, v := range arr {
+		if f, ok := v.(float64); ok {
+			out = append(out, int64(f))
+		}
+	}
+	return out
 }
 
 func (o *Output) handleSSE(w http.ResponseWriter, r *http.Request) {
@@ -833,44 +1147,55 @@ func getBackendConfig(backend, container string) (map[string]interface{}, map[st
 }
 
 // ServeFile starts a server to view a saved dashboard JSON file.
+// It re-aggregates raw latency data using DASHBOARD_BROADCAST_MS and DASHBOARD_WINDOW_MS
+// env vars (or defaults), so the same export can be viewed with different settings.
 // Optional notes parameter adds a notes section below the title.
 func ServeFile(filename string, notes ...string) error {
-	// Read the JSON file
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
 
-	// Parse and re-encode as compact JSON (SSE requires single-line data)
-	var jsonData map[string]interface{}
-	if err := json.Unmarshal(data, &jsonData); err != nil {
+	var rawData map[string]interface{}
+	if err := json.Unmarshal(data, &rawData); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
 
-	// Add notes if provided
 	if len(notes) > 0 && notes[0] != "" {
-		jsonData["notes"] = notes[0]
+		rawData["notes"] = notes[0]
 	}
 
-	compactData, _ := json.Marshal(jsonData)
+	// Read viewer settings from env vars
+	broadcast := defaultBroadcastInterval
+	if v, err := strconv.Atoi(os.Getenv("DASHBOARD_BROADCAST_MS")); err == nil && v > 0 {
+		broadcast = time.Duration(v) * time.Millisecond
+	}
+	window := defaultTimelineWindow
+	if s := os.Getenv("DASHBOARD_WINDOW_MS"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v >= 0 {
+			window = time.Duration(v) * time.Millisecond
+		}
+	}
+
+	// Re-aggregate raw data into timeline points
+	aggregated := aggregateExportData(rawData, broadcast, window)
+
+	compactData, _ := json.Marshal(aggregated)
 
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.FS(staticFiles)))
 
-	// Serve the static data
 	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
-		// Send the compact JSON data once (SSE requires single-line format)
 		fmt.Fprintf(w, "data: %s\n\n", compactData)
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
 
-		// Keep connection open (browser expects SSE to stay open)
 		<-r.Context().Done()
 	})
 
@@ -888,6 +1213,7 @@ func ServeFile(filename string, notes ...string) error {
 	}
 
 	fmt.Printf("\n📊 Viewing: %s\n", filename)
+	fmt.Printf("   Window: %dms, Broadcast: %dms\n", window.Milliseconds(), broadcast.Milliseconds())
 	fmt.Printf("   Chart: http://localhost:5665/static/\n")
 	fmt.Printf("   Press Ctrl+C to exit\n\n")
 
@@ -895,26 +1221,38 @@ func ServeFile(filename string, notes ...string) error {
 }
 
 // ExportStandalone creates a standalone HTML file with embedded JSON data.
+// It re-aggregates raw latency data using DASHBOARD_BROADCAST_MS and DASHBOARD_WINDOW_MS
+// env vars (or defaults).
 // Optional notes parameter adds a notes section below the title.
 func ExportStandalone(jsonFile, outputFile string, notes ...string) error {
-	// Read the JSON data
 	jsonData, err := os.ReadFile(jsonFile)
 	if err != nil {
 		return fmt.Errorf("failed to read JSON file: %w", err)
 	}
 
-	// Validate and compact JSON
-	var parsed map[string]interface{}
-	if err := json.Unmarshal(jsonData, &parsed); err != nil {
+	var rawData map[string]interface{}
+	if err := json.Unmarshal(jsonData, &rawData); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
 
-	// Add notes if provided
 	if len(notes) > 0 && notes[0] != "" {
-		parsed["notes"] = notes[0]
+		rawData["notes"] = notes[0]
 	}
 
-	compactJSON, _ := json.Marshal(parsed)
+	// Read viewer settings from env vars
+	broadcast := defaultBroadcastInterval
+	if v, err := strconv.Atoi(os.Getenv("DASHBOARD_BROADCAST_MS")); err == nil && v > 0 {
+		broadcast = time.Duration(v) * time.Millisecond
+	}
+	window := defaultTimelineWindow
+	if s := os.Getenv("DASHBOARD_WINDOW_MS"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v >= 0 {
+			window = time.Duration(v) * time.Millisecond
+		}
+	}
+
+	aggregated := aggregateExportData(rawData, broadcast, window)
+	compactJSON, _ := json.Marshal(aggregated)
 
 	// Read the embedded HTML template
 	htmlData, err := staticFiles.ReadFile("static/index.html")
