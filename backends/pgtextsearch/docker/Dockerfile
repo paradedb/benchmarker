@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
 # Download and install prebuilt pg_textsearch extension
 # The zip contains a .deb package that we need to install
 # Check https://github.com/timescale/pg_textsearch/releases for latest version
-ARG PG_TEXTSEARCH_VERSION=0.4.2
+ARG PG_TEXTSEARCH_VERSION=0.6.1
 ARG TARGETARCH
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") && \
     curl -L -o /tmp/pg_textsearch.zip \
