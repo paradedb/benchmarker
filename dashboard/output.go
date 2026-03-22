@@ -86,6 +86,10 @@ type QueryMetrics struct {
 	Latencies []float64       `json:"latencies"`
 	HitCounts []int64         `json:"-"` // Raw hit counts for timeline calculation
 	Timeline  []TimelinePoint `json:"timeline"`
+
+	// Timestamps track when each latency sample arrived (parallel to Latencies slice)
+	Timestamps    []int64 `json:"-"`
+	LastPointTime int64   `json:"-"` // Tracks the last consumed index for no-window mode
 }
 
 // TimelinePoint is a point in time with aggregated metrics.
@@ -109,6 +113,10 @@ type TimeValue struct {
 const (
 	runEndTimeoutMs      = 2000 // Time without updates before run is considered ended
 	ingestRateIntervalMs = 500  // Minimum interval between ingest rate calculations
+
+	// Timeline controls
+	broadcastInterval = 200 * time.Millisecond // How often the UI receives updates (controls draw smoothness)
+	timelineWindow    = 1 * time.Second         // Sliding window size for percentile calculation (0 = no window, use all samples since last point)
 )
 
 // getRunName computes the run identifier from backend, alias, and chart tag.
@@ -239,7 +247,7 @@ func (o *Output) Stop() error {
 
 func (o *Output) loop() {
 	defer close(o.doneCh)
-	ticker := time.NewTicker(200 * time.Millisecond)
+	ticker := time.NewTicker(broadcastInterval)
 	defer ticker.Stop()
 
 	for {
@@ -341,6 +349,7 @@ func (o *Output) flush() {
 					}
 					qm := rm.Queries[queryName]
 					qm.Latencies = append(qm.Latencies, value)
+					qm.Timestamps = append(qm.Timestamps, now)
 					if qm.VUs == 0 || qm.Executor == "" {
 						if info := metrics.GetScenarioInfo(queryName); info != nil {
 							if qm.VUs == 0 {
@@ -442,51 +451,93 @@ func (o *Output) flush() {
 }
 
 // updateQueryTimeline updates the timeline for a specific query.
+// When timelineWindow > 0, uses a sliding window: percentiles are computed over
+// all samples within the last timelineWindow duration, giving smooth lines with
+// statistically meaningful sample sizes.
+// When timelineWindow == 0, uses non-overlapping buckets: each point covers only
+// new samples since the last point (original behavior).
 func (o *Output) updateQueryTimeline(qm *QueryMetrics, runStartTime int64, now int64) {
 	if len(qm.Latencies) == 0 {
 		return
 	}
 
-	lastIdx := 0
-	if len(qm.Timeline) > 0 {
-		lastCount := 0
-		for _, tp := range qm.Timeline {
-			lastCount += tp.Count
+	if timelineWindow > 0 {
+		// Sliding window mode: gather all samples within the window
+		windowStart := now - timelineWindow.Milliseconds()
+		var windowLatencies []float64
+		var windowHits []int64
+		for i, ts := range qm.Timestamps {
+			if ts >= windowStart {
+				windowLatencies = append(windowLatencies, qm.Latencies[i])
+				if i < len(qm.HitCounts) {
+					windowHits = append(windowHits, qm.HitCounts[i])
+				}
+			}
 		}
-		lastIdx = lastCount
-	}
+		if len(windowLatencies) == 0 {
+			return
+		}
 
-	if lastIdx >= len(qm.Latencies) {
-		return
-	}
-
-	recent := qm.Latencies[lastIdx:]
-	if len(recent) == 0 {
-		return
-	}
-
-	// Calculate average hits for this interval
-	var avgHits float64
-	if len(qm.HitCounts) > lastIdx {
-		recentHits := qm.HitCounts[lastIdx:]
-		if len(recentHits) > 0 {
+		var avgHits float64
+		if len(windowHits) > 0 {
 			var sum int64
-			for _, h := range recentHits {
+			for _, h := range windowHits {
 				sum += h
 			}
-			avgHits = float64(sum) / float64(len(recentHits))
+			avgHits = float64(sum) / float64(len(windowHits))
 		}
-	}
 
-	qm.Timeline = append(qm.Timeline, TimelinePoint{
-		Time:  now,
-		P50:   percentile(recent, 50),
-		P90:   percentile(recent, 90),
-		P95:   percentile(recent, 95),
-		P99:   percentile(recent, 99),
-		Count: len(recent),
-		Hits:  avgHits,
-	})
+		qm.Timeline = append(qm.Timeline, TimelinePoint{
+			Time:  now,
+			P50:   percentile(windowLatencies, 50),
+			P90:   percentile(windowLatencies, 90),
+			P95:   percentile(windowLatencies, 95),
+			P99:   percentile(windowLatencies, 99),
+			Count: len(windowLatencies),
+			Hits:  avgHits,
+		})
+	} else {
+		// Non-overlapping bucket mode: only new samples since last point
+		lastIdx := 0
+		if len(qm.Timeline) > 0 {
+			lastCount := 0
+			for _, tp := range qm.Timeline {
+				lastCount += tp.Count
+			}
+			lastIdx = lastCount
+		}
+
+		if lastIdx >= len(qm.Latencies) {
+			return
+		}
+
+		recent := qm.Latencies[lastIdx:]
+		if len(recent) == 0 {
+			return
+		}
+
+		var avgHits float64
+		if len(qm.HitCounts) > lastIdx {
+			recentHits := qm.HitCounts[lastIdx:]
+			if len(recentHits) > 0 {
+				var sum int64
+				for _, h := range recentHits {
+					sum += h
+				}
+				avgHits = float64(sum) / float64(len(recentHits))
+			}
+		}
+
+		qm.Timeline = append(qm.Timeline, TimelinePoint{
+			Time:  now,
+			P50:   percentile(recent, 50),
+			P90:   percentile(recent, 90),
+			P95:   percentile(recent, 95),
+			P99:   percentile(recent, 99),
+			Count: len(recent),
+			Hits:  avgHits,
+		})
+	}
 }
 
 // updateIngestRate calculates docs/sec for the last interval.

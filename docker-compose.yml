@@ -15,7 +15,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - paradedb_data:/var/lib/postgresql/18/main
+      - paradedb_data:/var/lib/postgresql/18/docker
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -35,7 +35,7 @@ services:
     command:
       - "postgres"
       - "-c"
-      - "shared_preload_libraries=pg_stat_statements,pg_search,pg_cron"
+      - "shared_preload_libraries=pg_search"
       - "-c"
       - "shared_buffers=2GB"
       - "-c"
@@ -59,15 +59,13 @@ services:
       - "-c"
       - "effective_io_concurrency=200"
       - "-c"
-      - "max_parallel_workers_per_gather=0"
+      - "max_parallel_workers_per_gather=2"
       - "-c"
-      - "max_parallel_workers=0"
+      - "max_parallel_workers=2"
       - "-c"
       - "max_worker_processes=16"
       - "-c"
       - "jit=off"
-      - "-c"
-      - "paradedb.global_mutable_segment_rows=0"
 
   postgresfts:
     profiles: [postgresfts, all]
@@ -142,7 +140,7 @@ services:
     ports:
       - "5435:5432"
     volumes:
-      - _data:/var/lib/postgresql/data
+      - _data:/var/lib/postgresql/18/docker
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
