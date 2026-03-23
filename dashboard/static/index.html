@@ -8,7 +8,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap"
       rel="stylesheet"
     />
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
     <script src="https://cdn.jsdelivr.net/npm/sql-formatter@15.4.2/dist/sql-formatter.min.js"></script>
@@ -1315,13 +1315,13 @@
           return aTime - bTime;
         });
         sortedChartGroups.forEach((chartGroup) => {
-            const safeId = (chartGroup || "default").replace(
+            const safeChartId = (chartGroup || "default").replace(
               /[^a-zA-Z0-9]/g,
               "_",
             );
             // Ensure chart group exists
             getOrCreateChartGroup(chartGroup === "default" ? "" : chartGroup);
-            const container = document.getElementById(`stats-${safeId}`);
+            const container = document.getElementById(`stats-${safeChartId}`);
             if (!container) return;
 
             // Sort backends by selected metric (fastest first)
@@ -1496,11 +1496,11 @@
           return aTime - bTime;
         });
         sortedChartGroups.forEach((chartGroup) => {
-            const safeId = (chartGroup || "default").replace(
+            const safeChartId = (chartGroup || "default").replace(
               /[^a-zA-Z0-9]/g,
               "_",
             );
-            const legend = document.getElementById(`legend-${safeId}`);
+            const legend = document.getElementById(`legend-${safeChartId}`);
             if (!legend) return;
 
             const runNames = runsByChart[chartGroup].slice().sort();
