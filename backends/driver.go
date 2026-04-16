@@ -205,7 +205,7 @@ func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
 			}
 		}
 	}
-	metrics.CaptureQueryPattern(c.vu, queryPattern)
+	metrics.CaptureQueryPattern(c.vu, c.backend, queryPattern)
 	metrics.CaptureScenarioInfo(c.vu)
 
 	start := time.Now()
