@@ -125,6 +125,12 @@ func (d *Driver) Insert(ctx context.Context, table string, cols []string, rows [
 	return len(rows), nil
 }
 
+// Update upserts rows by re-inserting them.
+// ClickHouse uses ReplacingMergeTree to deduplicate by primary key.
+func (d *Driver) Update(ctx context.Context, table string, keyCols []string, cols []string, rows [][]any) (int, error) {
+	return d.Insert(ctx, table, cols, rows)
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

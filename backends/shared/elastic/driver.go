@@ -343,6 +343,83 @@ func (d *Driver) Insert(ctx context.Context, index string, cols []string, rows [
 	return len(result.Items), nil
 }
 
+// Update upserts documents using the bulk index API.
+// In Elasticsearch, indexing a document with an existing ID replaces it.
+func (d *Driver) Update(ctx context.Context, index string, keyCols []string, cols []string, rows [][]any) (int, error) {
+	var body strings.Builder
+
+	// Find the key column index (id or _id)
+	keyIdx := -1
+	keyCol := "id"
+	if len(keyCols) > 0 {
+		keyCol = keyCols[0]
+	}
+	for i, col := range cols {
+		if col == keyCol {
+			keyIdx = i
+			break
+		}
+	}
+
+	for _, row := range rows {
+		doc := make(map[string]interface{})
+		for i, col := range cols {
+			doc[col] = row[i]
+		}
+
+		// Use the key column as _id
+		if keyIdx >= 0 {
+			body.WriteString(fmt.Sprintf(`{"index":{"_index":"%s","_id":"%v"}}`, index, row[keyIdx]))
+		} else {
+			body.WriteString(fmt.Sprintf(`{"index":{"_index":"%s"}}`, index))
+		}
+		body.WriteByte('\n')
+
+		docJSON, _ := json.Marshal(doc)
+		body.Write(docJSON)
+		body.WriteByte('\n')
+	}
+
+	req, _ := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/_bulk", d.address), strings.NewReader(body.String()))
+	req.Header.Set("Content-Type", "application/x-ndjson")
+
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("bulk update failed: %s", string(respBody))
+	}
+
+	var result struct {
+		Errors bool `json:"errors"`
+		Items  []struct {
+			Index struct {
+				Error struct {
+					Type   string `json:"type"`
+					Reason string `json:"reason"`
+				} `json:"error"`
+			} `json:"index"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("failed to decode bulk response: %w", err)
+	}
+
+	if result.Errors {
+		for _, item := range result.Items {
+			if item.Index.Error.Type != "" {
+				return 0, fmt.Errorf("bulk update error: %s - %s", item.Index.Error.Type, item.Index.Error.Reason)
+			}
+		}
+	}
+
+	return len(result.Items), nil
+}
+
 // CaptureConfig captures cluster configuration and registers it with metrics.
 func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 	config := make(map[string]interface{})

@@ -148,6 +148,7 @@ type Driver interface {
 	Exec(ctx context.Context, statements string) error
 	Query(ctx context.Context, query string, args ...any) (hitCount int, err error)
 	Insert(ctx context.Context, table string, cols []string, rows [][]any) (int, error)
+	Update(ctx context.Context, table string, keyCols []string, cols []string, rows [][]any) (int, error)
 	CaptureConfig(ctx context.Context, backendName string)
 }
 
@@ -274,13 +275,68 @@ func (c *K6Client) Insert(table string, doc map[string]interface{}) map[string]i
 	return c.InsertBatch(table, []map[string]interface{}{doc})
 }
 
+// UpdateBatch updates documents and emits metrics.
+// The first column is used as the key for matching existing rows.
+func (c *K6Client) UpdateBatch(table string, docs []map[string]interface{}) map[string]interface{} {
+	c.emitInitMetrics()
+
+	if len(docs) == 0 {
+		return map[string]interface{}{"rows": 0, "latencyMs": 0.0}
+	}
+
+	// Extract columns from first doc; "id" is the key column
+	var keyCols []string
+	var valCols []string
+	for col := range docs[0] {
+		if col == "id" || col == "_id" {
+			keyCols = append(keyCols, col)
+		} else {
+			valCols = append(valCols, col)
+		}
+	}
+	allCols := append(keyCols, valCols...)
+
+	// Convert docs to rows
+	rows := make([][]any, len(docs))
+	for i, doc := range docs {
+		row := make([]any, len(allCols))
+		for j, col := range allCols {
+			row[j] = doc[col]
+		}
+		rows[i] = row
+	}
+
+	ctx := context.Background()
+	start := time.Now()
+	count, err := c.driver.Update(ctx, table, keyCols, allCols, rows)
+	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
+
+	if err != nil {
+		fmt.Printf("[%s] update error: %v\n", c.backend, err)
+		return map[string]interface{}{
+			"rows":      0,
+			"latencyMs": latencyMs,
+			"error":     err.Error(),
+		}
+	}
+
+	result := &metrics.UpdateResult{Rows: count, LatencyMs: latencyMs}
+	result.Emit(ctx, c.vu, c.backend)
+	return result.ToMap()
+}
+
+// Update updates a single document and emits metrics.
+func (c *K6Client) Update(table string, doc map[string]interface{}) map[string]interface{} {
+	return c.UpdateBatch(table, []map[string]interface{}{doc})
+}
+
 // Close closes the underlying driver.
 func (c *K6Client) Close() {
 	c.driver.Close()
 }
 
 // convertValue converts a raw CSV string value to the appropriate Go type based on schema type.
-func convertValue(rawValue, schemaType string) any {
+func convertValue(rawValue, schemaType string) (any, error) {
 	// Strip null bytes (invalid in PostgreSQL text)
 	rawValue = strings.ReplaceAll(rawValue, "\x00", "")
 
@@ -288,9 +344,9 @@ func convertValue(rawValue, schemaType string) any {
 	if rawValue == "" {
 		switch schemaType {
 		case "text", "varchar", "char", "character varying", "string":
-			return ""
+			return "", nil
 		default:
-			return nil
+			return nil, nil
 		}
 	}
 
@@ -298,43 +354,49 @@ func convertValue(rawValue, schemaType string) any {
 	case "bigint", "int8":
 		v, err := strconv.ParseInt(rawValue, 10, 64)
 		if err != nil {
-			return nil
+			return nil, fmt.Errorf("invalid bigint %q: %w", rawValue, err)
 		}
-		return v
+		return v, nil
 
 	case "integer", "int", "int4":
 		v, err := strconv.ParseInt(rawValue, 10, 32)
 		if err != nil {
-			return nil
+			return nil, fmt.Errorf("invalid integer %q: %w", rawValue, err)
 		}
-		return int32(v)
+		return int32(v), nil
 
 	case "boolean", "bool":
-		return rawValue == "true" || rawValue == "t" || rawValue == "1"
+		switch strings.ToLower(rawValue) {
+		case "true", "t", "1":
+			return true, nil
+		case "false", "f", "0":
+			return false, nil
+		default:
+			return nil, fmt.Errorf("invalid boolean %q", rawValue)
+		}
 
 	case "bigint[]", "int8[]":
 		var arr []int64
 		if err := json.Unmarshal([]byte(rawValue), &arr); err != nil {
-			return []int64{} // Return empty array on parse error
+			return nil, fmt.Errorf("invalid bigint array %q: %w", rawValue, err)
 		}
-		return arr
+		return arr, nil
 
 	case "integer[]", "int[]", "int4[]":
 		var arr []int32
 		if err := json.Unmarshal([]byte(rawValue), &arr); err != nil {
-			return []int32{}
+			return nil, fmt.Errorf("invalid integer array %q: %w", rawValue, err)
 		}
-		return arr
+		return arr, nil
 
 	case "text[]", "varchar[]":
 		var arr []string
 		if err := json.Unmarshal([]byte(rawValue), &arr); err != nil {
-			return []string{}
+			return nil, fmt.Errorf("invalid text array %q: %w", rawValue, err)
 		}
-		return arr
+		return arr, nil
 
 	case "timestamp", "timestamptz":
-		// Try common timestamp formats
 		formats := []string{
 			"2006-01-02 15:04:05",
 			"2006-01-02T15:04:05Z",
@@ -343,23 +405,53 @@ func convertValue(rawValue, schemaType string) any {
 		}
 		for _, format := range formats {
 			if t, err := time.Parse(format, rawValue); err == nil {
-				return t
+				return t, nil
 			}
 		}
-		return nil // Unparseable timestamp
+		return nil, fmt.Errorf("invalid timestamp %q", rawValue)
 
 	case "jsonb", "json":
-		// Parse JSON into a map for ES/OS compatibility
-		var obj map[string]interface{}
+		var obj interface{}
 		if err := json.Unmarshal([]byte(rawValue), &obj); err != nil {
-			return rawValue // Fall back to string if not valid JSON
+			return nil, fmt.Errorf("invalid json %q: %w", rawValue, err)
 		}
-		return obj
+		return obj, nil
 
 	default:
 		// text, varchar, etc - return as-is
-		return rawValue
+		return rawValue, nil
 	}
+}
+
+func schemaColumnsInOrder(schema *Schema, headers []string) ([]string, error) {
+	if schema == nil || len(schema.Columns) == 0 {
+		return nil, fmt.Errorf("schema has no columns")
+	}
+
+	seen := make(map[string]struct{}, len(headers))
+	cols := make([]string, 0, len(headers))
+	for _, header := range headers {
+		if _, ok := schema.Columns[header]; ok {
+			cols = append(cols, header)
+			seen[header] = struct{}{}
+		}
+	}
+
+	var missing []string
+	for col := range schema.Columns {
+		if _, ok := seen[col]; !ok {
+			missing = append(missing, col)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return nil, fmt.Errorf("schema columns missing from CSV: %s", strings.Join(missing, ", "))
+	}
+	if len(cols) == 0 {
+		return nil, fmt.Errorf("no schema columns matched CSV headers")
+	}
+
+	return cols, nil
 }
 
 // CLILoader wraps a Driver for CLI bulk loading.
@@ -448,15 +540,9 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, csvPath string, ba
 		headerIdx[h] = i
 	}
 
-	// Determine which columns to use from schema
-	var cols []string
-	for col := range schema.Columns {
-		if _, ok := headerIdx[col]; ok {
-			cols = append(cols, col)
-		}
-	}
-	if len(cols) == 0 {
-		return 0, fmt.Errorf("no schema columns matched CSV headers")
+	cols, err := schemaColumnsInOrder(schema, headers)
+	if err != nil {
+		return 0, err
 	}
 
 	target := schema.Table
@@ -535,15 +621,18 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, csvPath string, ba
 	}
 
 	batch := make([][]any, 0, batchSize)
+	rowNum := 1 // header row
+rowLoop:
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			setErr(err)
+			setErr(fmt.Errorf("failed to read CSV row %d from %q: %w", rowNum+1, csvPath, err))
 			break
 		}
+		rowNum++
 
 		row := make([]any, len(cols))
 		for i, col := range cols {
@@ -552,7 +641,12 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, csvPath string, ba
 				row[i] = nil
 				continue
 			}
-			row[i] = convertValue(record[idx], schema.Columns[col])
+			value, err := convertValue(record[idx], schema.Columns[col])
+			if err != nil {
+				setErr(fmt.Errorf("row %d column %q: %w", rowNum, col, err))
+				break rowLoop
+			}
+			row[i] = value
 		}
 		batch = append(batch, row)
 
@@ -633,8 +727,14 @@ func (l *CLILoader) Drop(ctx context.Context, schema *Schema) error {
 			}
 			return l.driver.Exec(ctx, string(data))
 		case "mongodb":
+			database := "benchmark"
+			if provider, ok := l.driver.(interface{ DatabaseName() string }); ok {
+				if name := provider.DatabaseName(); name != "" {
+					database = name
+				}
+			}
 			cfg := map[string]interface{}{
-				"database":   "benchmark",
+				"database":   database,
 				"collection": target,
 				"drop":       true,
 			}
