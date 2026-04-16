@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -108,6 +109,12 @@ func TestResolveDownloadPath(t *testing.T) {
 			key:     "/etc/passwd",
 			wantErr: true,
 		},
+		{
+			name:    "prefix collision",
+			prefix:  "datasets/sample",
+			key:     "datasets/sample2/k6/script.js",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -131,4 +138,35 @@ func TestResolveDownloadPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFindCSV(t *testing.T) {
+	t.Run("single csv", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "data.csv"), []byte("id\n1\n"), 0644); err != nil {
+			t.Fatalf("write csv: %v", err)
+		}
+
+		got, err := findCSV(dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := filepath.Join(dir, "data.csv")
+		if got != want {
+			t.Fatalf("findCSV() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("multiple csv files", func(t *testing.T) {
+		dir := t.TempDir()
+		for _, name := range []string{"a.csv", "b.csv"} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("id\n1\n"), 0644); err != nil {
+				t.Fatalf("write %s: %v", name, err)
+			}
+		}
+
+		if _, err := findCSV(dir); err == nil {
+			t.Fatal("expected error when multiple CSV files are present")
+		}
+	})
 }
