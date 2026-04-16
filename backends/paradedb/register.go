@@ -23,10 +23,17 @@ func New(connString string) (backends.Driver, error) {
 		return nil, err
 	}
 
+	pgDriver := driver.(*postgres.Driver)
+
 	// Add ParadeDB-specific GUCs to capture
-	driver.(*postgres.Driver).SetExtraGUCs([]string{
+	pgDriver.SetExtraGUCs([]string{
 		"paradedb.global_mutable_segment_rows",
 		"paradedb.global_target_segment_size",
+	})
+
+	// Add ParadeDB-specific queries to capture
+	pgDriver.SetExtraQueries([]postgres.ConfigQuery{
+		{Key: "paradedb_version", Query: "SELECT paradedb.version_info()"},
 	})
 
 	return driver, nil

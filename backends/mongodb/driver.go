@@ -70,6 +70,11 @@ func New(connString string) (backends.Driver, error) {
 	return &Driver{client: client, database: "benchmark"}, nil
 }
 
+// DatabaseName returns the configured database name.
+func (d *Driver) DatabaseName() string {
+	return d.database
+}
+
 // Close disconnects the client.
 func (d *Driver) Close() error {
 	if d.client != nil {
@@ -219,6 +224,39 @@ func (d *Driver) Insert(ctx context.Context, collection string, cols []string, r
 	}
 
 	return len(result.InsertedIDs), nil
+}
+
+// Update upserts documents using bulkWrite with ReplaceOne.
+func (d *Driver) Update(ctx context.Context, collection string, keyCols []string, cols []string, rows [][]any) (int, error) {
+	keyCol := "id"
+	if len(keyCols) > 0 {
+		keyCol = keyCols[0]
+	}
+
+	models := make([]mongo.WriteModel, len(rows))
+	for i, row := range rows {
+		doc := bson.M{}
+		var keyVal interface{}
+		for j, col := range cols {
+			if col == keyCol || col == "id" {
+				keyVal = row[j]
+				doc["_id"] = row[j]
+			} else {
+				doc[col] = row[j]
+			}
+		}
+		models[i] = mongo.NewReplaceOneModel().
+			SetFilter(bson.M{"_id": keyVal}).
+			SetReplacement(doc).
+			SetUpsert(true)
+	}
+
+	result, err := d.client.Database(d.database).Collection(collection).BulkWrite(ctx, models)
+	if err != nil {
+		return 0, err
+	}
+
+	return int(result.ModifiedCount + result.UpsertedCount), nil
 }
 
 // CaptureConfig captures database configuration and registers it with metrics.

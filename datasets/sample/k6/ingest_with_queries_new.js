@@ -157,7 +157,7 @@ export function pgSimpleQuery() {
 }
 
 export function pgIngest() {
-  const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
+  const batch = docs.nextBatch(INGEST_BATCH_SIZE);
   backends.get("paradedb").insertBatch("documents", batch);
 }
 
@@ -174,7 +174,7 @@ export function esSimpleQuery() {
 }
 
 export function esIngest() {
-  const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
+  const batch = docs.nextBatch(INGEST_BATCH_SIZE);
   backends.get("elasticsearch").insertBatch("documents", batch);
 }
 
@@ -193,7 +193,7 @@ export function textsearchSimple() {
 }
 
 export function textsearchIngest() {
-  const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
+  const batch = docs.nextBatch(INGEST_BATCH_SIZE);
   backends.get("pgtextsearch").insertBatch("documents", batch);
 }
 
@@ -212,7 +212,7 @@ export function clickhouseSimple() {
 }
 
 export function clickhouseIngest() {
-  const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
+  const batch = docs.nextBatch(INGEST_BATCH_SIZE);
   backends.get("clickhouse").insertBatch("documents", batch);
 }
 
@@ -228,7 +228,7 @@ export function mongodbSimple() {
 }
 
 export function mongodbIngest() {
-  const batch = docs.nextBatchNewIds(INGEST_BATCH_SIZE);
+  const batch = docs.nextBatch(INGEST_BATCH_SIZE);
   backends.get("mongodb").insertBatch("documents", batch);
 }
 

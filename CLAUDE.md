@@ -68,7 +68,7 @@ The `Driver` interface is minimal: `Close()`, `Exec()`, `Query()`, `Insert()`, `
 Two modes:
 
 - **CLI** (`cmd/loader/main.go`): Reads `schema.yaml` + `data.csv`, runs backend-specific `pre.sql`/`pre.json`, bulk inserts, then runs `post.sql`/`post.json`. Supports `--batch-size`, `--workers`, and S3 pulls.
-- **k6 module** (`loader/loader.go`): Opens CSV files with global caching, provides `Next()`, `NextBatch()`, `NextBatchNewIds()` with atomic counters for thread-safe VU pagination.
+- **k6 module** (`loader/loader.go`): Opens CSV files with global caching, provides `Next()`, `NextBatch()`, `NextBatchSwapped()` with atomic counters for thread-safe VU pagination.
 
 ## Key Conventions
 

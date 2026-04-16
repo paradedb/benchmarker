@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/paradedb/benchmarks/backends"
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
@@ -44,7 +43,12 @@ var (
 type DocumentReader struct {
 	documents []map[string]interface{}
 	index     atomic.Int64
+	updateIdx atomic.Int64
 	size      int
+
+	swapOnce    sync.Once
+	swapField   string
+	swappedDocs []map[string]interface{}
 }
 
 // OpenDocuments loads documents from a CSV file.
@@ -149,25 +153,35 @@ func (r *DocumentReader) NextBatch(n int) []map[string]interface{} {
 	return batch
 }
 
-// NextBatchNewIds returns the next n documents with fresh UUIDs.
-// Use this when re-inserting documents that already exist in the database.
+
+// NextBatchSwapped returns the next n documents with adjacent values of field swapped.
+// The swapped dataset is computed lazily on first call and cached for all subsequent calls.
 // Thread-safe via atomic counter.
-func (r *DocumentReader) NextBatchNewIds(n int) []map[string]interface{} {
+func (r *DocumentReader) NextBatchSwapped(n int, field string) []map[string]interface{} {
 	if r.size == 0 || n <= 0 {
 		return nil
 	}
 
-	startIdx := r.index.Add(int64(n)) - int64(n)
+	r.swapOnce.Do(func() {
+		r.swapField = field
+		r.swappedDocs = make([]map[string]interface{}, r.size)
+		for i, orig := range r.documents {
+			doc := make(map[string]interface{}, len(orig))
+			for k, v := range orig {
+				doc[k] = v
+			}
+			r.swappedDocs[i] = doc
+		}
+		// Swap adjacent field values
+		for i := 0; i+1 < len(r.swappedDocs); i += 2 {
+			r.swappedDocs[i][field], r.swappedDocs[i+1][field] = r.swappedDocs[i+1][field], r.swappedDocs[i][field]
+		}
+	})
+
+	startIdx := r.updateIdx.Add(int64(n)) - int64(n)
 	batch := make([]map[string]interface{}, n)
 	for i := 0; i < n; i++ {
-		orig := r.documents[(startIdx+int64(i))%int64(r.size)]
-		// Copy the document and replace the id
-		doc := make(map[string]interface{}, len(orig))
-		for k, v := range orig {
-			doc[k] = v
-		}
-		doc["id"] = uuid.New().String()
-		batch[i] = doc
+		batch[i] = r.swappedDocs[(startIdx+int64(i))%int64(r.size)]
 	}
 	return batch
 }

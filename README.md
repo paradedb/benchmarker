@@ -337,15 +337,32 @@ const docs = loader.openDocuments("/path/to/data.csv");
 const BATCH_SIZE = 1000;
 
 export function ingestTest() {
-  // Get next batch with auto-generated UUIDs
-  const batch = docs.nextBatchNewIds(BATCH_SIZE);
+  // Get next batch, cycling through the source file
+  const batch = docs.nextBatch(BATCH_SIZE);
 
   // Insert into any backend
   backends.get("paradedb").insertBatch("documents", batch);
 }
 ```
 
-The `nextBatchNewIds()` method returns documents with new UUID strings in the `id` field, cycling through the source file. This allows continuous ingestion without ID conflicts.
+The `nextBatch()` method returns the next n documents, cycling through the source file with atomic counters for thread-safe VU pagination. The insert CSV must contain documents not already in the database — use a separate file from the data loaded during setup.
+
+### Update Benchmarks
+
+```javascript
+// Load the same documents that were ingested during setup
+const docs = loader.openDocuments("/path/to/data.csv");
+
+export function updateTest() {
+  // Get next batch with adjacent content values swapped
+  const batch = docs.nextBatchSwapped(BATCH_SIZE, "content");
+
+  // Upsert into any backend
+  backends.get("paradedb").updateBatch("documents", batch);
+}
+```
+
+The `nextBatchSwapped()` method lazily builds a copy of all documents with adjacent values of the given field swapped, then paginates through them atomically. This provides a realistic update workload that forces re-indexing without runtime mutation in the hot loop. The update CSV should be the same file (or a subset) used for the initial data load, so the IDs already exist in the database.
 
 ## Data Loader
 

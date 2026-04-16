@@ -17,6 +17,8 @@ var (
 	searchHits      *metrics.Metric
 	ingestDuration  *metrics.Metric
 	ingestDocs      *metrics.Metric
+	updateDuration  *metrics.Metric
+	updateDocs      *metrics.Metric
 	backendInit     *metrics.Metric
 	scenarioStarted *metrics.Metric
 	metricsRegOnce  sync.Once
@@ -77,6 +79,8 @@ func RegisterMetrics(vu modules.VU) {
 		searchHits, _ = registry.NewMetric("search_hits", metrics.Gauge)
 		ingestDuration, _ = registry.NewMetric("ingest_duration", metrics.Trend, metrics.Time)
 		ingestDocs, _ = registry.NewMetric("ingest_docs", metrics.Counter)
+		updateDuration, _ = registry.NewMetric("update_duration", metrics.Trend, metrics.Time)
+		updateDocs, _ = registry.NewMetric("update_docs", metrics.Counter)
 		backendInit, _ = registry.NewMetric("backend_init", metrics.Gauge)
 		scenarioStarted, _ = registry.NewMetric("scenario_started", metrics.Gauge)
 	})
@@ -334,6 +338,54 @@ func (r *IngestResult) Emit(ctx context.Context, vu modules.VU, backend string) 
 
 // ToMap converts the result to a map for JavaScript.
 func (r *IngestResult) ToMap() map[string]interface{} {
+	m := map[string]interface{}{
+		"rows":      r.Rows,
+		"latencyMs": r.LatencyMs,
+	}
+	if r.Error != "" {
+		m["error"] = r.Error
+	}
+	return m
+}
+
+// UpdateResult represents the result of an update operation.
+type UpdateResult struct {
+	Rows      int
+	LatencyMs float64
+	Error     string
+}
+
+// Emit pushes update metrics to k6 with the backend tag.
+func (r *UpdateResult) Emit(ctx context.Context, vu modules.VU, backend string) {
+	if r.Error != "" {
+		return
+	}
+
+	state := vu.State()
+	if state == nil || updateDuration == nil || updateDocs == nil {
+		return
+	}
+
+	now := time.Now()
+	tags := state.Tags.GetCurrentValues().Tags
+	if backend != "" {
+		tags = tags.With("backend", backend)
+	}
+
+	metrics.PushIfNotDone(ctx, state.Samples, metrics.Sample{
+		TimeSeries: metrics.TimeSeries{Metric: updateDuration, Tags: tags},
+		Time:       now,
+		Value:      r.LatencyMs,
+	})
+	metrics.PushIfNotDone(ctx, state.Samples, metrics.Sample{
+		TimeSeries: metrics.TimeSeries{Metric: updateDocs, Tags: tags},
+		Time:       now,
+		Value:      float64(r.Rows),
+	})
+}
+
+// ToMap converts the result to a map for JavaScript.
+func (r *UpdateResult) ToMap() map[string]interface{} {
 	m := map[string]interface{}{
 		"rows":      r.Rows,
 		"latencyMs": r.LatencyMs,
