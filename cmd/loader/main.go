@@ -186,9 +186,9 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int) 
 		os.Exit(1)
 	}
 
-	csvPath := findCSV(datasetDir)
-	if csvPath == "" {
-		fmt.Println("Error: no CSV file found in dataset directory")
+	csvPath, err := findCSV(datasetDir)
+	if err != nil {
+		fmt.Printf("Error locating CSV file: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -324,10 +324,10 @@ func loadSchema(datasetDir string) (*backends.Schema, error) {
 	return &schema, nil
 }
 
-func findCSV(datasetDir string) string {
+func findCSV(datasetDir string) (string, error) {
 	entries, err := os.ReadDir(datasetDir)
 	if err != nil {
-		return ""
+		return "", err
 	}
 
 	var csvFiles []string
@@ -340,10 +340,13 @@ func findCSV(datasetDir string) string {
 		}
 	}
 	if len(csvFiles) == 0 {
-		return ""
+		return "", fmt.Errorf("no CSV file found in dataset directory")
 	}
-	sort.Strings(csvFiles)
-	return filepath.Join(datasetDir, csvFiles[0])
+	if len(csvFiles) > 1 {
+		sort.Strings(csvFiles)
+		return "", fmt.Errorf("expected exactly one CSV file, found %d: %s", len(csvFiles), strings.Join(csvFiles, ", "))
+	}
+	return filepath.Join(datasetDir, csvFiles[0]), nil
 }
 
 // ============================================================================
@@ -470,6 +473,10 @@ func runPull(datasetName, sourceURL string, anonymous bool) {
 }
 
 func resolveDownloadPath(destDir, prefix, key string) (string, string, error) {
+	if prefix != "" && key != prefix && !strings.HasPrefix(key, prefix+"/") {
+		return "", "", fmt.Errorf("key %q does not match prefix %q", key, prefix)
+	}
+
 	relPath := strings.TrimPrefix(key, prefix)
 	if prefix == "" && strings.HasPrefix(relPath, "/") {
 		return "", "", fmt.Errorf("absolute path %q is not allowed", relPath)
