@@ -65,22 +65,23 @@ type ContainerMetrics struct {
 
 // RunMetrics holds metrics for a single run/phase.
 type RunMetrics struct {
-	Name           string                   `json:"name"`
-	Backend        string                   `json:"backend"`   // Backend type: paradedb, elasticsearch, clickhouse, mongodb, etc.
-	Container      string                   `json:"container"` // Docker container name for resource metrics
-	Alias          string                   `json:"alias"`     // User-defined alias for this backend instance
-	Color          string                   `json:"color"`     // Custom color for this backend
-	Chart          string                   `json:"chart"`     // Chart group for separating graphs
-	Latencies      []float64                `json:"latencies"`
-	Timeline       []TimelinePoint          `json:"timeline"`
-	IngestRate     []TimeValue              `json:"ingestRate"`    // Docs/sec timeline
-	TotalIngested  int64                    `json:"totalIngested"` // Total docs ingested
-	LastIngestTime int64                    `json:"-"`             // For rate calculation
-	LastIngestDocs int64                    `json:"-"`             // For rate calculation
-	Queries        map[string]*QueryMetrics `json:"-"`             // Per-query breakdown
-	StartTime      int64                    `json:"startTime"`
-	EndTime        int64                    `json:"endTime"`
-	LastUpdateTime int64                    `json:"-"` // Track last update for end detection
+	Name            string                   `json:"name"`
+	Backend         string                   `json:"backend"`   // Backend alias emitted in k6 metric tags
+	Container       string                   `json:"container"` // Docker container name for resource metrics
+	Alias           string                   `json:"alias"`     // User-defined alias for this backend instance
+	Color           string                   `json:"color"`     // Custom color for this backend
+	Chart           string                   `json:"chart"`     // Chart group for separating graphs
+	Latencies       []float64                `json:"latencies"`
+	Timeline        []TimelinePoint          `json:"timeline"`
+	IngestRate      []TimeValue              `json:"ingestRate"`    // Docs/sec timeline
+	TotalIngested   int64                    `json:"totalIngested"` // Total docs ingested
+	FirstIngestTime int64                    `json:"-"`             // Timestamp of the first ingest sample
+	LastIngestTime  int64                    `json:"-"`             // For rate calculation
+	LastIngestDocs  int64                    `json:"-"`             // For rate calculation
+	Queries         map[string]*QueryMetrics `json:"-"`             // Per-query breakdown
+	StartTime       int64                    `json:"startTime"`
+	EndTime         int64                    `json:"endTime"`
+	LastUpdateTime  int64                    `json:"-"` // Track last update for end detection
 }
 
 // QueryMetrics holds metrics for a specific query type within a run.
@@ -91,6 +92,8 @@ type QueryMetrics struct {
 	Latencies []float64       `json:"latencies"`
 	HitCounts []int64         `json:"-"` // Raw hit counts for timeline calculation
 	Timeline  []TimelinePoint `json:"timeline"`
+	StartTime int64           `json:"-"`
+	EndTime   int64           `json:"-"`
 
 	// Timestamps track when each latency sample arrived (parallel to Latencies slice)
 	Timestamps    []int64 `json:"-"`
@@ -367,6 +370,10 @@ func (o *Output) flush() {
 						rm.Queries[queryName] = &QueryMetrics{Name: queryName}
 					}
 					qm := rm.Queries[queryName]
+					if qm.StartTime == 0 {
+						qm.StartTime = sample.Time.UnixMilli()
+					}
+					qm.EndTime = sample.Time.UnixMilli()
 					qm.Latencies = append(qm.Latencies, value)
 					qm.Timestamps = append(qm.Timestamps, now)
 					if qm.VUs == 0 || qm.Executor == "" {
@@ -432,7 +439,6 @@ func (o *Output) flush() {
 				o.data.Containers[container].Memory = append(o.data.Containers[container].Memory, TimeValue{Time: sample.Time.UnixMilli(), Value: value})
 
 			case name == "ingest_docs":
-				fmt.Printf("[dashboard] ingest_docs sample: value=%.0f tags=%v\n", value, tags)
 				backend := tags["backend"]
 				if backend == "" {
 					backend = tags["run"]
@@ -447,6 +453,9 @@ func (o *Output) flush() {
 				runName := getRunName(backend, tags)
 				rm := o.getOrCreateRun(runName, backend, tags)
 				rm.TotalIngested += int64(value)
+				if rm.FirstIngestTime == 0 {
+					rm.FirstIngestTime = sample.Time.UnixMilli()
+				}
 				if rm.StartTime == 0 {
 					rm.StartTime = sample.Time.UnixMilli()
 				}
@@ -460,7 +469,7 @@ func (o *Output) flush() {
 		o.updateIngestRate(rm, now)
 		// Update per-query timelines
 		for _, qm := range rm.Queries {
-			o.updateQueryTimeline(qm, rm.StartTime, now)
+			o.updateQueryTimeline(qm, now)
 		}
 		// Mark run ended after inactivity timeout.
 		if rm.EndTime == 0 && rm.LastUpdateTime > 0 && (now-rm.LastUpdateTime) > runEndTimeoutMs {
@@ -475,7 +484,7 @@ func (o *Output) flush() {
 // statistically meaningful sample sizes.
 // When timelineWindow == 0, uses non-overlapping buckets: each point covers only
 // new samples since the last point (original behavior).
-func (o *Output) updateQueryTimeline(qm *QueryMetrics, runStartTime int64, now int64) {
+func (o *Output) updateQueryTimeline(qm *QueryMetrics, now int64) {
 	if len(qm.Latencies) == 0 {
 		return
 	}
@@ -565,11 +574,10 @@ func (o *Output) updateIngestRate(rm *RunMetrics, now int64) {
 		return
 	}
 
-	// First ingest data point - add initial rate
+	// First ingest sample establishes the baseline for subsequent docs/sec calculations.
 	if rm.LastIngestTime == 0 {
 		rm.LastIngestTime = now
 		rm.LastIngestDocs = rm.TotalIngested
-		rm.IngestRate = append(rm.IngestRate, TimeValue{Time: now, Value: float64(rm.TotalIngested)})
 		return
 	}
 
@@ -585,6 +593,19 @@ func (o *Output) updateIngestRate(rm *RunMetrics, now int64) {
 	rm.IngestRate = append(rm.IngestRate, TimeValue{Time: now, Value: rate})
 	rm.LastIngestTime = now
 	rm.LastIngestDocs = rm.TotalIngested
+}
+
+func queryDurationSeconds(qm *QueryMetrics) float64 {
+	if len(qm.Latencies) == 0 {
+		return 0
+	}
+
+	duration := float64(qm.EndTime-qm.StartTime) / 1000
+	minDuration := maxVal(qm.Latencies) / 1000
+	if duration < minDuration {
+		duration = minDuration
+	}
+	return duration
 }
 
 func (o *Output) broadcast() {
@@ -643,28 +664,17 @@ func (o *Output) getSummary() map[string]interface{} {
 
 	runs := make(map[string]interface{})
 	for name, rm := range o.data.Runs {
-		// Calculate run duration (used for QPS calculations)
-		var runDuration float64
-		if rm.StartTime > 0 {
-			if rm.EndTime > 0 {
-				runDuration = float64(rm.EndTime-rm.StartTime) / 1000
-			} else {
-				runDuration = float64(now-rm.StartTime) / 1000
-			}
-		}
-
 		// Calculate ingest rate (docs/sec) based on actual ingest duration
 		var ingestRate float64
-		if rm.TotalIngested > 0 && len(rm.IngestRate) > 0 {
+		if rm.TotalIngested > 0 && rm.FirstIngestTime > 0 {
 			// Use time from first ingest to now/end for accurate rate
-			ingestStart := rm.IngestRate[0].Time
 			var ingestEnd int64
 			if rm.EndTime > 0 {
 				ingestEnd = rm.EndTime
 			} else {
 				ingestEnd = now
 			}
-			ingestDuration := float64(ingestEnd-ingestStart) / 1000
+			ingestDuration := float64(ingestEnd-rm.FirstIngestTime) / 1000
 			if ingestDuration > 0 {
 				ingestRate = float64(rm.TotalIngested) / ingestDuration
 			}
@@ -676,10 +686,10 @@ func (o *Output) getSummary() map[string]interface{} {
 			// Get query pattern for this run/backend+chart+scenario.
 			queryPattern := getQueryPattern(rm.Backend, rm.Chart, qName)
 
-			// Calculate query-specific QPS using run duration
+			// Calculate query-specific QPS using the query's active window.
 			var queryQPS float64
-			if len(qm.Latencies) > 0 && runDuration > 0 {
-				queryQPS = float64(len(qm.Latencies)) / runDuration
+			if queryDuration := queryDurationSeconds(qm); queryDuration > 0 {
+				queryQPS = float64(len(qm.Latencies)) / queryDuration
 			}
 
 			queries[qName] = map[string]interface{}{

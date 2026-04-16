@@ -118,12 +118,38 @@ func EmitScenarioStarted(vu modules.VU, backend string) {
 	emitGaugeMetric(vu, scenarioStarted, backend)
 }
 
+func storeQueryPattern(backend, chart, scenario, query string) {
+	if scenario == "" {
+		return
+	}
+
+	key := queryPatternKey(backend, chart, scenario)
+
+	queryPatternsMu.RLock()
+	_, exists := QueryPatterns[key]
+	queryPatternsMu.RUnlock()
+
+	if exists {
+		return
+	}
+
+	queryPatternsMu.Lock()
+	if _, exists := QueryPatterns[key]; !exists {
+		QueryPatterns[key] = query
+	}
+	queryPatternsMu.Unlock()
+}
+
 // CaptureQueryPattern stores the first query pattern seen for each backend/chart/scenario.
 // The backend parameter is required because it is added per-sample (via tags.With) and
 // is not present in the VU's default state tags.
 func CaptureQueryPattern(vu modules.VU, backend, query string) {
+	if vu == nil {
+		return
+	}
+
 	state := vu.State()
-	if state == nil {
+	if state == nil || state.Tags == nil {
 		return
 	}
 
@@ -133,25 +159,20 @@ func CaptureQueryPattern(vu modules.VU, backend, query string) {
 		return
 	}
 	chart, _ := tags.Tags.Get("chart")
-	key := queryPatternKey(backend, chart, scenario)
-
-	queryPatternsMu.RLock()
-	_, exists := QueryPatterns[key]
-	queryPatternsMu.RUnlock()
-
-	if !exists {
-		queryPatternsMu.Lock()
-		if _, exists := QueryPatterns[key]; !exists {
-			QueryPatterns[key] = query
-		}
-		queryPatternsMu.Unlock()
+	if backend == "" {
+		backend, _ = tags.Tags.Get("backend")
 	}
+	storeQueryPattern(backend, chart, scenario, query)
 }
 
 // CaptureScenarioInfo stores executor and VU info for each scenario.
 func CaptureScenarioInfo(vu modules.VU) {
+	if vu == nil {
+		return
+	}
+
 	state := vu.State()
-	if state == nil {
+	if state == nil || state.Tags == nil {
 		return
 	}
 
