@@ -119,7 +119,9 @@ func EmitScenarioStarted(vu modules.VU, backend string) {
 }
 
 // CaptureQueryPattern stores the first query pattern seen for each backend/chart/scenario.
-func CaptureQueryPattern(vu modules.VU, query string) {
+// The backend parameter is required because it is added per-sample (via tags.With) and
+// is not present in the VU's default state tags.
+func CaptureQueryPattern(vu modules.VU, backend, query string) {
 	state := vu.State()
 	if state == nil {
 		return
@@ -130,7 +132,6 @@ func CaptureQueryPattern(vu modules.VU, query string) {
 	if !ok {
 		return
 	}
-	backend, _ := tags.Tags.Get("backend")
 	chart, _ := tags.Tags.Get("chart")
 	key := queryPatternKey(backend, chart, scenario)
 
