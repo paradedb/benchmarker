@@ -1355,6 +1355,7 @@
                 runConfigs[name] = run.config;
               }
 
+              const labelId = `label-${safeNameId}`;
               let el = document.getElementById(statId);
 
               if (!el) {
@@ -1362,9 +1363,6 @@
                 el.id = statId;
                 el.className = "stat-group expanded";
                 el.style.borderLeftColor = color;
-                const hasConfig =
-                  run.config && Object.keys(run.config).length > 0;
-                const labelId = `label-${safeNameId}`;
 
                 // Build limits string
                 let limitsStr = "";
@@ -1384,16 +1382,21 @@
               </div>
               <div class="query-details" id="${queryContainerId}"></div>
             `;
-                if (hasConfig) {
-                  const labelEl = document.getElementById(labelId);
-                  if (labelEl) {
-                    labelEl.style.cursor = "pointer";
-                    labelEl.style.textDecoration = "underline";
-                    labelEl.style.textDecorationStyle = "dotted";
-                    labelEl.addEventListener("click", () => showConfigModal(name));
-                  }
-                }
                 container.appendChild(el);
+              }
+
+              // Set up config click handler after element is in the DOM.
+              // Runs on every update so it works even if config arrives later.
+              const hasConfig = run.config && Object.keys(run.config).length > 0;
+              if (hasConfig) {
+                const labelEl = document.getElementById(labelId);
+                if (labelEl && !labelEl.dataset.configHandler) {
+                  labelEl.style.cursor = "pointer";
+                  labelEl.style.textDecoration = "underline";
+                  labelEl.style.textDecorationStyle = "dotted";
+                  labelEl.addEventListener("click", () => showConfigModal(name));
+                  labelEl.dataset.configHandler = "1";
+                }
               }
 
               // Update query details - only create if not exists, then just update values
