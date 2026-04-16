@@ -148,7 +148,7 @@ Environment Variables:
   OPENSEARCH_URL     OpenSearch address
   CLICKHOUSE_URL     ClickHouse connection string
   MONGODB_URL        MongoDB connection string
-  AWS_REGION         AWS region for S3 (default: us-east-1)
+  AWS_REGION         AWS region for S3
   AWS_PROFILE        AWS profile to use for credentials
 
 Examples:
