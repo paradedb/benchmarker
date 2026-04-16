@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,7 +21,7 @@ import (
 
 // DriverConfig holds backend-specific configuration.
 type DriverConfig struct {
-	SkipTLSVerify    bool   // OpenSearch often uses self-signed certs
+	SkipTLSVerify    bool   // Allows self-signed HTTPS endpoints in development.
 	VersionInfoField string // "build_flavor" for ES, "distribution" for OS
 }
 
@@ -171,6 +172,38 @@ func (d *Driver) execOperations(ctx context.Context, operations []map[string]int
 	return nil
 }
 
+type aggregationResult struct {
+	Buckets []interface{} `json:"buckets"`
+	Value   *float64      `json:"value"` // for cardinality/single-value aggs
+}
+
+func aggregationHitCount(aggregations map[string]aggregationResult) (int, bool) {
+	if len(aggregations) == 0 {
+		return 0, false
+	}
+
+	keys := make([]string, 0, len(aggregations))
+	for key := range aggregations {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	// Prefer bucket aggregations because they represent grouped result sets.
+	for _, key := range keys {
+		if count := len(aggregations[key].Buckets); count > 0 {
+			return count, true
+		}
+	}
+
+	for _, key := range keys {
+		if value := aggregations[key].Value; value != nil {
+			return int(*value), true
+		}
+	}
+
+	return 0, false
+}
+
 // Query executes a search query and returns the hit count.
 // Supports two call patterns:
 //   - Query(ctx, jsonQueryString) - query is a JSON string
@@ -229,10 +262,7 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 			} `json:"total"`
 			Hits []interface{} `json:"hits"`
 		} `json:"hits"`
-		Aggregations map[string]struct {
-			Buckets []interface{} `json:"buckets"`
-			Value   *float64      `json:"value"` // for cardinality/single-value aggs
-		} `json:"aggregations"`
+		Aggregations map[string]aggregationResult `json:"aggregations"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return 0, err
@@ -243,16 +273,9 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 		return len(result.Hits.Hits), nil
 	}
 
-	// For aggregations, return bucket count or single value
-	if len(result.Aggregations) > 0 {
-		for _, agg := range result.Aggregations {
-			if len(agg.Buckets) > 0 {
-				return len(agg.Buckets), nil
-			}
-			if agg.Value != nil {
-				return int(*agg.Value), nil
-			}
-		}
+	// For aggregations, return a deterministic bucket count or single value.
+	if count, ok := aggregationHitCount(result.Aggregations); ok {
+		return count, nil
 	}
 
 	// Fall back to total hits (for count queries with size:0)
