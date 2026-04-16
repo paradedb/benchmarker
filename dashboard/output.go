@@ -1262,10 +1262,13 @@ func ExportStandalone(jsonFile, outputFile string, notes ...string) error {
 
 	html := string(htmlData)
 	dataScript := fmt.Sprintf("<script>window.__DASHBOARD_EMBEDDED_DATA = %s;</script>", string(compactJSON))
-	if !strings.Contains(html, "</body>") {
-		return fmt.Errorf("failed to inject embedded data: missing </body> tag")
+	// Inject before </head> so the data is defined before the main script runs.
+	// Injecting before </body> puts it AFTER the main script block, by which time
+	// the embedded-data check has already run and fallen back to EventSource.
+	if !strings.Contains(html, "</head>") {
+		return fmt.Errorf("failed to inject embedded data: missing </head> tag")
 	}
-	html = strings.Replace(html, "</body>", dataScript+"\n</body>", 1)
+	html = strings.Replace(html, "</head>", dataScript+"\n</head>", 1)
 
 	// Write the output file
 	if err := os.WriteFile(outputFile, []byte(html), 0644); err != nil {
