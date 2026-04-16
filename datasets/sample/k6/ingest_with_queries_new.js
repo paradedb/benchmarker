@@ -181,12 +181,15 @@ export function esIngest() {
 // ====================  ====================
 export function Simple() {
   const term = getTerm();
-  backends.get("").search(`
+  backends.get("").search(
+    `
     SELECT id, title
     FROM documents
-    ORDER BY content <@> '${term}'
+    ORDER BY content <@> $1
     LIMIT 10
-  `);
+  `,
+    term,
+  );
 }
 
 export function Ingest() {

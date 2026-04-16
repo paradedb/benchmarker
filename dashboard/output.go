@@ -2,6 +2,7 @@
 package dashboard
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
@@ -1263,6 +1264,8 @@ func ExportStandalone(jsonFile, outputFile string, notes ...string) error {
 
 	aggregated := aggregateExportData(rawData, broadcast, window)
 	compactJSON, _ := json.Marshal(aggregated)
+	var escapedJSON bytes.Buffer
+	json.HTMLEscape(&escapedJSON, compactJSON)
 
 	// Read the embedded HTML template
 	htmlData, err := staticFiles.ReadFile("static/index.html")
@@ -1271,7 +1274,7 @@ func ExportStandalone(jsonFile, outputFile string, notes ...string) error {
 	}
 
 	html := string(htmlData)
-	dataScript := fmt.Sprintf("<script>window.__DASHBOARD_EMBEDDED_DATA = %s;</script>", string(compactJSON))
+	dataScript := fmt.Sprintf("<script>window.__DASHBOARD_EMBEDDED_DATA = %s;</script>", escapedJSON.String())
 	// Inject before </head> so the data is defined before the main script runs.
 	// Injecting before </body> puts it AFTER the main script block, by which time
 	// the embedded-data check has already run and fallen back to EventSource.
