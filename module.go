@@ -9,7 +9,7 @@ import (
 )
 
 func init() {
-	modules.Register("k6/x/search", new(RootModule))
+	modules.Register("k6/x/database", new(RootModule))
 }
 
 // RootModule is the global module instance that will create client instances for each VU.
@@ -34,6 +34,8 @@ func (m *ModuleInstance) Exports() modules.Exports {
 			"backends": m.newBackends,
 			"metrics":  m.newMetrics,
 			"loader":   m.newLoader,
+			"timer":    m.newTimer,
+			"terms":    m.newTerms,
 		},
 	}
 }

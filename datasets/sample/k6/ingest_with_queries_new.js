@@ -1,10 +1,9 @@
-import search from "k6/x/search";
+import db from "k6/x/database";
 import { SharedArray } from "k6/data";
 import exec from "k6/execution";
 
 // Configure backends - uses sensible defaults, override as needed
-const backends = search.backends({
-  datasetPath: "../",
+const backends = db.backends({
   backends: [
     "paradedb",
     "elasticsearch",
@@ -14,7 +13,7 @@ const backends = search.backends({
   ],
 });
 
-const loader = search.loader();
+const loader = db.loader();
 
 // Load search terms once, shared across all VUs
 const terms = new SharedArray("search_terms", function () {
@@ -33,113 +32,97 @@ function getTerm() {
   return terms[exec.vu.iterationInScenario % terms.length];
 }
 
-export const options = {
-  scenarios: {
-    // Metrics collection - covers all phases
-    metrics_collector: {
-      executor: "constant-vus",
-      vus: 1,
-      duration: "3m",
-      exec: "collectMetrics",
-    },
+const timer = db.timer({ duration: "30s", gap: "5s" });
 
-    // ==================== ParadeDB ====================
-    // ParadeDB query: 0s - 30s
-    pdb_query: {
-      executor: "constant-vus",
-      vus: 5,
-      duration: "30s",
-      exec: "pgSimpleQuery",
-    },
-    // ParadeDB ingest: 0s - 30s (parallel with query)
-    pdb_ingest: {
-      executor: "constant-vus",
-      vus: 2,
-      duration: "30s",
-      exec: "pgIngest",
-    },
+const scenarios = {
+  // ParadeDB
+  pdb_query: {
+    executor: "constant-vus",
+    vus: 5,
+    duration: "30s",
+    startTime: timer.advanceAndGet(),
+    exec: "pgSimpleQuery",
+  },
+  pdb_ingest: {
+    executor: "constant-vus",
+    vus: 2,
+    duration: "30s",
+    startTime: timer.get(),
+    exec: "pgIngest",
+  },
 
-    // ==================== Elasticsearch ====================
-    // Elasticsearch query: 35s - 65s
-    es_query: {
-      executor: "constant-vus",
-      vus: 5,
-      duration: "30s",
-      startTime: "35s",
-      exec: "esSimpleQuery",
-    },
-    // Elasticsearch ingest: 35s - 65s (parallel with query)
-    es_ingest: {
-      executor: "constant-vus",
-      vus: 2,
-      duration: "30s",
-      startTime: "35s",
-      exec: "esIngest",
-    },
+  // Elasticsearch
+  es_query: {
+    executor: "constant-vus",
+    vus: 5,
+    duration: "30s",
+    startTime: timer.advanceAndGet(),
+    exec: "esSimpleQuery",
+  },
+  es_ingest: {
+    executor: "constant-vus",
+    vus: 2,
+    duration: "30s",
+    startTime: timer.get(),
+    exec: "esIngest",
+  },
 
-    // ====================  ====================
-    //  query: 70s - 100s
-    _query: {
-      executor: "constant-vus",
-      vus: 5,
-      duration: "30s",
-      startTime: "70s",
-      exec: "Simple",
-    },
-    //  ingest: 70s - 100s (parallel with query)
-    _ingest: {
-      executor: "constant-vus",
-      vus: 2,
-      duration: "30s",
-      startTime: "70s",
-      exec: "Ingest",
-    },
+  // 
+  _query: {
+    executor: "constant-vus",
+    vus: 5,
+    duration: "30s",
+    startTime: timer.advanceAndGet(),
+    exec: "Simple",
+  },
+  _ingest: {
+    executor: "constant-vus",
+    vus: 2,
+    duration: "30s",
+    startTime: timer.get(),
+    exec: "Ingest",
+  },
 
-    // ==================== ClickHouse ====================
-    // ClickHouse query: 105s - 135s
-    clickhouse_query: {
-      executor: "constant-vus",
-      vus: 5,
-      duration: "30s",
-      startTime: "105s",
-      exec: "clickhouseSimple",
-    },
-    // ClickHouse ingest: 105s - 135s (parallel with query)
-    clickhouse_ingest: {
-      executor: "constant-vus",
-      vus: 2,
-      duration: "30s",
-      startTime: "105s",
-      exec: "clickhouseIngest",
-    },
+  // ClickHouse
+  clickhouse_query: {
+    executor: "constant-vus",
+    vus: 5,
+    duration: "30s",
+    startTime: timer.advanceAndGet(),
+    exec: "clickhouseSimple",
+  },
+  clickhouse_ingest: {
+    executor: "constant-vus",
+    vus: 2,
+    duration: "30s",
+    startTime: timer.get(),
+    exec: "clickhouseIngest",
+  },
 
-    // ==================== MongoDB ====================
-    // MongoDB query: 140s - 170s
-    mongodb_query: {
-      executor: "constant-vus",
-      vus: 5,
-      duration: "30s",
-      startTime: "140s",
-      exec: "mongodbSimple",
-    },
-    // MongoDB ingest: 140s - 170s (parallel with query)
-    mongodb_ingest: {
-      executor: "constant-vus",
-      vus: 2,
-      duration: "30s",
-      startTime: "140s",
-      exec: "mongodbIngest",
-    },
+  // MongoDB
+  mongodb_query: {
+    executor: "constant-vus",
+    vus: 5,
+    duration: "30s",
+    startTime: timer.advanceAndGet(),
+    exec: "mongodbSimple",
+  },
+  mongodb_ingest: {
+    executor: "constant-vus",
+    vus: 2,
+    duration: "30s",
+    startTime: timer.get(),
+    exec: "mongodbIngest",
   },
 };
+export const collectMetrics = backends.addDockerMetricsCollector(scenarios, timer);
+
+export const options = { scenarios };
 
 export function setup() {
   console.log(`Loaded ${docs.size()} documents for querying and ingesting`);
 }
 
-export function collectMetrics() {
-  backends.collect();
-}
 
 // ==================== ParadeDB ====================
 export function pgSimpleQuery() {

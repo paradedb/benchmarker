@@ -169,6 +169,30 @@ func (b *Backends) Collect() map[string]interface{} {
 	return nil
 }
 
+// AddDockerMetricsCollector adds a metrics_collector scenario to the given
+// scenarios object and returns the collect function for export.
+// Pass a Timer or a duration string (e.g. "500s").
+//
+//	export const collectMetrics = backends.addDockerMetricsCollector(scenarios, timer);
+func (b *Backends) AddDockerMetricsCollector(scenarios map[string]interface{}, durationSource interface{}) func() map[string]interface{} {
+	var dur string
+	switch v := durationSource.(type) {
+	case *Timer:
+		dur = v.TotalDuration()
+	case string:
+		dur = v
+	default:
+		dur = "0s"
+	}
+	scenarios["metrics_collector"] = map[string]interface{}{
+		"executor": "constant-vus",
+		"vus":      1,
+		"duration": dur,
+		"exec":     "collectMetrics",
+	}
+	return b.Collect
+}
+
 // Close closes all backend connections.
 // Use this at the end of a test or between groups to clean up connections.
 func (b *Backends) Close() {

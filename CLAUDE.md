@@ -33,15 +33,17 @@ Load data and run benchmarks:
 
 ## Architecture
 
-This is a **k6 extension** (`xk6-search`) that provides a unified API for benchmarking full-text search across multiple database backends. It's built with xk6 and registers as `k6/x/search`.
+This is a **k6 extension** (`xk6-search`) that provides a unified API for benchmarking full-text search across multiple database backends. It's built with xk6 and registers as `k6/x/database`.
 
 ### Module System
 
-`module.go` registers the root k6 module. Each VU (Virtual User) gets a `ModuleInstance` that exports three functions to JavaScript:
+`module.go` registers the root k6 module. Each VU (Virtual User) gets a `ModuleInstance` that exports five functions to JavaScript:
 
 - `backends(config)` → initializes backend drivers based on config map
 - `metrics()` → creates a Docker container metrics collector
 - `loader()` → creates a CSV document reader for k6 scripts
+- `timer(config)` → creates a phase timer for staggering scenarios (`timer.go`)
+- `terms(data)` → wraps a JSON string or SharedArray with `next()`/`random()` accessors (`terms.go`)
 
 ### Backend Plugin Architecture
 
@@ -68,7 +70,7 @@ The `Driver` interface is minimal: `Close()`, `Exec()`, `Query()`, `Insert()`, `
 Two modes:
 
 - **CLI** (`cmd/loader/main.go`): Reads `schema.yaml` + `data.csv`, runs backend-specific `pre.sql`/`pre.json`, bulk inserts, then runs `post.sql`/`post.json`. Supports `--batch-size`, `--workers`, and S3 pulls.
-- **k6 module** (`loader/loader.go`): Opens CSV files with global caching, provides `Next()`, `NextBatch()`, `NextBatchSwapped()` with atomic counters for thread-safe VU pagination.
+- **k6 module** (`loader/loader.go`): Opens CSV files with global caching, provides `Next()`, `NextBatch()`, `NextBatchSwapped()` with per-backend pool keys and atomic counters so VUs within a backend don't overlap but each backend starts from document 0.
 
 ## Key Conventions
 

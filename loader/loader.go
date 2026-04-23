@@ -40,15 +40,21 @@ var (
 )
 
 // DocumentReader provides access to documents from a CSV file.
+// Pass a pool key (e.g. backend name) to nextBatch/next to get per-backend
+// atomic counters: VUs within the same backend don't overlap, but each
+// backend starts from document 0 independently.
 type DocumentReader struct {
 	documents []map[string]interface{}
-	index     atomic.Int64
-	updateIdx atomic.Int64
 	size      int
 
-	swapOnce    sync.Once
-	swapField   string
-	swappedDocs []map[string]interface{}
+	counters   map[string]*atomic.Int64
+	countersMu sync.Mutex
+
+	swapOnce       sync.Once
+	swapField      string
+	swappedDocs    []map[string]interface{}
+	swapCounters   map[string]*atomic.Int64
+	swapCountersMu sync.Mutex
 }
 
 // OpenDocuments loads documents from a CSV file.
@@ -92,15 +98,13 @@ func (l *Loader) OpenDocuments(filePath string) *DocumentReader {
 
 	csvReader := csv.NewReader(file)
 
-	// Read header
 	headers, err := csvReader.Read()
 	if err != nil {
 		return l.throwConfigErrorf("openDocuments: failed to read CSV headers from %q: %v", filePath, err)
 	}
 
-	// Read all rows
 	var docs []map[string]interface{}
-	rowNum := 1 // Header row
+	rowNum := 1
 	for {
 		record, err := csvReader.Read()
 		if err == io.EOF {
@@ -121,33 +125,68 @@ func (l *Loader) OpenDocuments(filePath string) *DocumentReader {
 	}
 
 	reader := &DocumentReader{
-		documents: docs,
-		size:      len(docs),
+		documents:    docs,
+		size:         len(docs),
+		counters:     make(map[string]*atomic.Int64),
+		swapCounters: make(map[string]*atomic.Int64),
 	}
 	documentCache[filePath] = reader
 	return reader
 }
 
+// getCounter returns the atomic counter for the given pool key.
+func (r *DocumentReader) getCounter(pool string) *atomic.Int64 {
+	r.countersMu.Lock()
+	defer r.countersMu.Unlock()
+	c, ok := r.counters[pool]
+	if !ok {
+		c = &atomic.Int64{}
+		r.counters[pool] = c
+	}
+	return c
+}
+
+// getSwapCounter returns the atomic swap counter for the given pool key.
+func (r *DocumentReader) getSwapCounter(pool string) *atomic.Int64 {
+	r.swapCountersMu.Lock()
+	defer r.swapCountersMu.Unlock()
+	c, ok := r.swapCounters[pool]
+	if !ok {
+		c = &atomic.Int64{}
+		r.swapCounters[pool] = c
+	}
+	return c
+}
+
+// poolKey extracts the pool name from optional args, defaulting to "_default".
+func poolKey(pool []string) string {
+	if len(pool) > 0 && pool[0] != "" {
+		return pool[0]
+	}
+	return "_default"
+}
+
 // Next returns the next document, cycling through the dataset.
-// Thread-safe via atomic counter.
-func (r *DocumentReader) Next() map[string]interface{} {
+// Pass an optional pool key (e.g. backend name) so each backend
+// gets its own counter starting from 0.
+func (r *DocumentReader) Next(pool ...string) map[string]interface{} {
 	if r.size == 0 {
 		return nil
 	}
-	idx := r.index.Add(1) - 1
+	idx := r.getCounter(poolKey(pool)).Add(1) - 1
 	return r.documents[idx%int64(r.size)]
 }
 
 // NextBatch returns the next n documents, cycling through the dataset.
-// Thread-safe via atomic counter.
-func (r *DocumentReader) NextBatch(n int) []map[string]interface{} {
+// Pass an optional pool key (e.g. backend name) so each backend
+// gets its own counter starting from 0.
+func (r *DocumentReader) NextBatch(n int, pool ...string) []map[string]interface{} {
 	if r.size == 0 || n <= 0 {
 		return nil
 	}
-
-	startIdx := r.index.Add(int64(n)) - int64(n)
+	startIdx := r.getCounter(poolKey(pool)).Add(int64(n)) - int64(n)
 	batch := make([]map[string]interface{}, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		batch[i] = r.documents[(startIdx+int64(i))%int64(r.size)]
 	}
 	return batch
@@ -155,8 +194,8 @@ func (r *DocumentReader) NextBatch(n int) []map[string]interface{} {
 
 // NextBatchSwapped returns the next n documents with adjacent values of field swapped.
 // The swapped dataset is computed lazily on first call and cached for all subsequent calls.
-// Thread-safe via atomic counter.
-func (r *DocumentReader) NextBatchSwapped(n int, field string) []map[string]interface{} {
+// Pass an optional pool key (e.g. backend name) for per-backend counters.
+func (r *DocumentReader) NextBatchSwapped(n int, field string, pool ...string) []map[string]interface{} {
 	if r.size == 0 || n <= 0 {
 		return nil
 	}
@@ -171,15 +210,14 @@ func (r *DocumentReader) NextBatchSwapped(n int, field string) []map[string]inte
 			}
 			r.swappedDocs[i] = doc
 		}
-		// Swap adjacent field values
 		for i := 0; i+1 < len(r.swappedDocs); i += 2 {
 			r.swappedDocs[i][field], r.swappedDocs[i+1][field] = r.swappedDocs[i+1][field], r.swappedDocs[i][field]
 		}
 	})
 
-	startIdx := r.updateIdx.Add(int64(n)) - int64(n)
+	startIdx := r.getSwapCounter(poolKey(pool)).Add(int64(n)) - int64(n)
 	batch := make([]map[string]interface{}, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		batch[i] = r.swappedDocs[(startIdx+int64(i))%int64(r.size)]
 	}
 	return batch
