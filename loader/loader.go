@@ -153,7 +153,6 @@ func (r *DocumentReader) NextBatch(n int) []map[string]interface{} {
 	return batch
 }
 
-
 // NextBatchSwapped returns the next n documents with adjacent values of field swapped.
 // The swapped dataset is computed lazily on first call and cached for all subsequent calls.
 // Thread-safe via atomic counter.

@@ -53,10 +53,10 @@ type recordingDriver struct {
 	inserted int
 }
 
-func (d *recordingDriver) Close() error                                          { return nil }
-func (d *recordingDriver) Exec(context.Context, string) error                    { return nil }
-func (d *recordingDriver) Query(context.Context, string, ...any) (int, error)    { return 0, nil }
-func (d *recordingDriver) CaptureConfig(context.Context, string)                 {}
+func (d *recordingDriver) Close() error                                       { return nil }
+func (d *recordingDriver) Exec(context.Context, string) error                 { return nil }
+func (d *recordingDriver) Query(context.Context, string, ...any) (int, error) { return 0, nil }
+func (d *recordingDriver) CaptureConfig(context.Context, string)              {}
 func (d *recordingDriver) Insert(_ context.Context, _ string, _ []string, rows [][]any) (int, error) {
 	d.inserted += len(rows)
 	return len(rows), nil
