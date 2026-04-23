@@ -195,8 +195,7 @@ services:
     container_name: elasticsearch
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false
-      - xpack.security.http.ssl.enabled=false
+      - ELASTIC_PASSWORD=elastic
       - "ES_JAVA_OPTS=-Xms2g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=50"
       - bootstrap.memory_lock=true
       - thread_pool.search.size=4
@@ -208,11 +207,12 @@ services:
       - "9200:9200"
     volumes:
       - es_data:/usr/share/elasticsearch/data
+      - es_certs:/usr/share/elasticsearch/config/certs
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'",
+          "curl -sk https://elastic:elastic@localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'",
         ]
       interval: 10s
       timeout: 5s
@@ -333,6 +333,7 @@ volumes:
   postgres_fts_data:
   _data:
   es_data:
+  es_certs:
   opensearch_data:
   clickhouse_data:
   mongodb_data:
