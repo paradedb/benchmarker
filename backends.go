@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/grafana/sobek"
 	"github.com/paradedb/benchmarks/backends"
 	"github.com/paradedb/benchmarks/metrics"
 	"go.k6.io/k6/js/common"
@@ -16,8 +17,7 @@ import (
 	_ "github.com/paradedb/benchmarks/backends/mongodb"
 	_ "github.com/paradedb/benchmarks/backends/opensearch"
 	_ "github.com/paradedb/benchmarks/backends/paradedb"
-	_ "github.com/paradedb/benchmarks/backends/"
-	_ "github.com/paradedb/benchmarks/backends/postgresfts"
+_ "github.com/paradedb/benchmarks/backends/postgresfts"
 )
 
 // Backends holds all configured backend clients.
@@ -170,27 +170,46 @@ func (b *Backends) Collect() map[string]interface{} {
 }
 
 // AddDockerMetricsCollector adds a metrics_collector scenario to the given
-// scenarios object and returns the collect function for export.
-// Pass a Timer or a duration string (e.g. "500s").
+// scenarios object. Pass a Timer or a duration string (e.g. "500s").
+// Returns a function that the script should export as collectMetrics:
 //
 //	export const collectMetrics = backends.addDockerMetricsCollector(scenarios, timer);
-func (b *Backends) AddDockerMetricsCollector(scenarios map[string]interface{}, durationSource interface{}) func() map[string]interface{} {
+func (b *Backends) AddDockerMetricsCollector(call sobek.FunctionCall) sobek.Value {
+	rt := b.vu.Runtime()
+
+	if len(call.Arguments) < 2 {
+		common.Throw(rt, fmt.Errorf("addDockerMetricsCollector requires (scenarios, timer|duration)"))
+		return sobek.Undefined()
+	}
+
+	scenarios := call.Arguments[0].ToObject(rt)
+
 	var dur string
-	switch v := durationSource.(type) {
+	durationArg := call.Arguments[1].Export()
+	switch v := durationArg.(type) {
 	case *Timer:
 		dur = v.TotalDuration()
 	case string:
 		dur = v
 	default:
-		dur = "0s"
+		// Timer comes through as a wrapped Go object — try unwrapping
+		if timer, ok := durationArg.(*Timer); ok {
+			dur = timer.TotalDuration()
+		} else {
+			dur = call.Arguments[1].String()
+		}
 	}
-	scenarios["metrics_collector"] = map[string]interface{}{
+
+	scenarios.Set("metrics_collector", rt.ToValue(map[string]interface{}{
 		"executor": "constant-vus",
 		"vus":      1,
 		"duration": dur,
 		"exec":     "collectMetrics",
-	}
-	return b.Collect
+	}))
+
+	return rt.ToValue(func() map[string]interface{} {
+		return b.Collect()
+	})
 }
 
 // Close closes all backend connections.

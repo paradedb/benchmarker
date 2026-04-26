@@ -1,5 +1,5 @@
 // Package postgres provides the shared PostgreSQL driver implementation.
-// Individual PostgreSQL-based backends (paradedb, postgresfts, )
+// Individual PostgreSQL-based backends (paradedb, postgresfts)
 // import this package and register themselves separately.
 package postgres
 

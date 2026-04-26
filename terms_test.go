@@ -2,8 +2,8 @@ package search
 
 import "testing"
 
-func newTestTerms(terms ...string) *Terms {
-	return &Terms{terms: terms}
+func newTestTerms(t ...string) *Terms {
+	return &Terms{terms: t, size: len(t)}
 }
 
 func TestNextCyclesSequentially(t *testing.T) {

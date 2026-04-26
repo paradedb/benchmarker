@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>k6 Search Benchmark</title>
+    <title>ParadeDB Benchmarker</title>
     <link
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap"
       rel="stylesheet"
@@ -546,7 +546,7 @@
   </head>
   <body>
     <div class="header">
-      <h1>K6 Search Benchmark</h1>
+      <h1><a href="https://github.com/paradedb/benchmarker" style="color: inherit; text-decoration: none;">ParadeDB Benchmarker</a></h1>
       <div style="display: flex; align-items: center; gap: 16px">
         <div id="timeline-settings" style="font-size: 11px; color: var(--text-dim)"></div>
         <div class="elapsed" id="elapsed">00:00</div>
@@ -633,7 +633,6 @@
       const BACKEND_COLORS = {
         paradedb: "#7C3AED", // Purple (ParadeDB brand)
         postgresfts: "#3B82F6", // Blue
-        : "#F97316", // Orange
         elasticsearch: "#10B981", // Green (Elastic brand)
         opensearch: "#EF4444", // Red (OpenSearch brand)
         clickhouse: "#FACC15", // Yellow (ClickHouse brand)

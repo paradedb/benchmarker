@@ -62,6 +62,11 @@ func (t *Timer) Get() string {
 	return fmt.Sprintf("%ds", t.phaseStart)
 }
 
+// Duration returns the phase duration as a string (e.g. "30s").
+func (t *Timer) Duration() string {
+	return fmt.Sprintf("%ds", t.durationSec)
+}
+
 // TotalDuration returns the total covering duration as a string (e.g. "70s").
 func (t *Timer) TotalDuration() string {
 	if !t.started {

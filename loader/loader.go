@@ -509,11 +509,6 @@ func (l *Loader) LoadPostgresFTS(connectionString string, config map[string]inte
 	return l.Load("postgresfts", connectionString, config)
 }
 
-// Load loads CSV data into PostgreSQL with  extension.
-func (l *Loader) Load(connectionString string, config map[string]interface{}) map[string]interface{} {
-	return l.Load("", connectionString, config)
-}
-
 // LoadElasticsearch loads CSV data into Elasticsearch.
 func (l *Loader) LoadElasticsearch(config map[string]interface{}) map[string]interface{} {
 	address, _ := config["address"].(string)

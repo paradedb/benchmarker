@@ -143,7 +143,6 @@ Options:
 Environment Variables:
   PARADEDB_URL       ParadeDB connection string
   POSTGRES_FTS_URL   PostgreSQL FTS connection string
-  _URL   connection string
   ELASTICSEARCH_URL  Elasticsearch address
   OPENSEARCH_URL     OpenSearch address
   CLICKHOUSE_URL     ClickHouse connection string
