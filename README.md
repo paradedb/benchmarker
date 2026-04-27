@@ -23,15 +23,19 @@ A [k6](https://grafana.com/docs/k6/latest/) extension for benchmarking databases
 
 Compare performance across **ParadeDB**, **PostgreSQL FTS**, **Elasticsearch**, **OpenSearch**, **ClickHouse**, and **MongoDB Atlas Search** with consistent metrics and visualization. Docker Compose profiles are included for single-node benchmarking, but you can point at any database: local installs, remote servers, or cloud services.
 
+*This tool is intended to make consistent, best practice database benchmarking easier.*
+
 ## How It Works
 
-The benchmarker is built on [k6](https://grafana.com/docs/k6/latest/), a load testing tool written in Go. You write a JavaScript script that defines **scenarios**. Each scenario specifies an executor (how load is generated), a duration, a number of virtual users (VUs), and which function to run. k6 spins up VUs as concurrent goroutines, each looping over your test function for the duration of the scenario.
+The benchmarker is built on [Grafana k6](https://grafana.com/docs/k6/latest/), an amazing load testing tool written in Go. You write a k6 JavaScript script that defines **scenarios** and **backends**. Each scenario specifies an executor (how load is generated), a duration, a number of virtual users (VUs), and which functions to run, using which backends. k6 spins up VUs as concurrent goroutines, each looping over your test function for the duration of the scenario.
 
-This project extends k6 with the `k6/x/database` module, adding backend drivers, automatic metrics, and a real-time dashboard on top.
+This project extends k6 with the `k6/x/database` module, adding backend drivers, automatic metrics, a real-time dashboard, and an export format on top.
 
 ### Composing tests
 
 A single script can compose multiple scenarios across multiple backends. You might run queries against ParadeDB for 30 seconds, then against Elasticsearch for 30 seconds, with a built-in phase timer staggering them so they don't compete for system resources. Within each phase you can layer different workloads: a full-text search at 200 QPS, an aggregation query at 100 QPS, and a 1,000 row/s ingest stream, all running concurrently. The framework times every operation, tags it with the backend name, and pushes metrics to the dashboard automatically.
+
+While the framework exposes many backends, it's up to the user to write the queries to test (in JSON or SQL). A user can expect that the *way* the queries are run is optimal, but must still make sure the content of the queries is sane.
 
 ### Load strategies
 
@@ -57,6 +61,8 @@ make
 
 ### 2. Start backends
 
+The included `docker-compose.yml` uses profiles, which provide an easy way to only spin up a subset of containers.
+
 ```bash
 docker compose --profile paradedb --profile postgresfts up -d
 ```
@@ -67,9 +73,10 @@ See [Docker Setup](docs/docker.md) for all available profiles and services.
 
 ```bash
 ./bin/loader load --backend paradedb --backend postgresfts ./datasets/sample
+./bin/loader load --backend postgresfts ./datasets/sample
 ```
 
-See [Data Loader](docs/loader.md) for advanced options like parallel workers and S3 pulls.
+See [Data Loader](docs/loader.md) for advanced options like custom connection strings, parallel workers and S3 pulls.
 
 ### 4. Run a benchmark
 
@@ -86,9 +93,13 @@ Scripts are standard k6 JavaScript with the `k6/x/database` extension. Here's a 
 ```javascript
 import db from "k6/x/database";
 
+// Connecto to the paradedb container using the standard settings from docker-compose
 const backends = db.backends({ backends: ["paradedb"] });
+
+// Open a file which has a termset we can use to customise queries
 const terms = db.terms(open("./search_terms.json"));
 
+// Define the scenarios to run
 const scenarios = {
   search: {
     executor: "constant-vus",
@@ -97,12 +108,17 @@ const scenarios = {
     exec: "search",
   },
 };
+
+// Add docker based metric collection
 backends.addDockerMetricsCollector(scenarios, "35s");
 export function collectMetrics() { backends.collect(); }
 
 export const options = { scenarios };
 
+// Create the function which k6 will call on each iteration
 export function search() {
+
+// Activate the paradedb backend and run the query, cycling through the items in terms
   backends.get("paradedb").search(
     `SELECT id, title FROM documents WHERE content ||| $1 LIMIT 10`,
     terms.next(),
