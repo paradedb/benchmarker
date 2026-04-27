@@ -80,7 +80,7 @@ func (d *Driver) Exec(ctx context.Context, statements string) error {
 	return nil
 }
 
-// Query executes a search query and returns the hit count.
+// Query executes a query and returns the hit count.
 func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, error) {
 	rows, err := d.conn.Query(ctx, query, args...)
 	if err != nil {

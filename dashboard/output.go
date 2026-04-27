@@ -329,7 +329,7 @@ func (o *Output) flush() {
 
 			case name == "scenario_started":
 				// Scenario started signal - create run entry immediately
-				// Query entries are created on demand when search_duration arrives
+				// Query entries are created on demand when query_duration arrives
 				backend := tags["backend"]
 				if backend == "" {
 					continue
@@ -341,7 +341,7 @@ func (o *Output) flush() {
 					rm.StartTime = sample.Time.UnixMilli()
 				}
 
-			case name == "search_duration":
+			case name == "query_duration":
 				backend := tags["backend"]
 				if backend == "" {
 					backend = tags["run"]
@@ -389,7 +389,7 @@ func (o *Output) flush() {
 					}
 				}
 
-			case name == "search_hits":
+			case name == "query_hits":
 				backend := tags["backend"]
 				if backend == "" {
 					backend = tags["run"]
@@ -404,7 +404,7 @@ func (o *Output) flush() {
 				runName := getRunName(backend, tags)
 				rm := o.data.Runs[runName]
 				if rm == nil {
-					continue // Run should already exist from search_duration
+					continue // Run should already exist from query_duration
 				}
 
 				queryName := tags["query"]

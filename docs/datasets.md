@@ -11,6 +11,9 @@ datasets/sample/
 ├── paradedb/
 │   ├── pre.sql              # Create tables, set up schema
 │   └── post.sql             # Create indexes, VACUUM ANALYZE
+├── postgresfts/
+│   ├── pre.sql
+│   └── post.sql
 ├── elasticsearch/
 │   ├── pre.json             # Create index with mappings
 │   └── post.json            # Refresh, force merge
@@ -120,15 +123,19 @@ Each operation in the array specifies:
 
 ### MongoDB
 
+**pre.json** - Drop existing collection:
+
 ```json
-// pre.json: Drop existing collection
 {
   "database": "benchmark",
   "collection": "documents",
   "drop": true
 }
+```
 
-// post.json: Create search index
+**post.json** - Create search index:
+
+```json
 {
   "database": "benchmark",
   "collection": "documents",

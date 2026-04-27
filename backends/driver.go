@@ -186,8 +186,8 @@ func (c *K6Client) emitInitMetrics() {
 	metrics.EmitScenarioStarted(c.vu, c.backend)
 }
 
-// Search executes a query and emits metrics.
-func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
+// Query executes a query and emits metrics.
+func (c *K6Client) Query(query string, args ...any) map[string]interface{} {
 	c.emitInitMetrics()
 
 	ctx := context.Background()
@@ -214,7 +214,7 @@ func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
 	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
 
 	if err != nil {
-		fmt.Printf("[%s] search error: %v\n", c.backend, err)
+		fmt.Printf("[%s] query error: %v\n", c.backend, err)
 		return map[string]interface{}{
 			"hits":      0,
 			"latencyMs": latencyMs,
@@ -222,7 +222,7 @@ func (c *K6Client) Search(query string, args ...any) map[string]interface{} {
 		}
 	}
 
-	result := &metrics.SearchResult{Hits: int64(hits), LatencyMs: latencyMs}
+	result := &metrics.QueryResult{Hits: int64(hits), LatencyMs: latencyMs}
 	result.Emit(ctx, c.vu, c.backend)
 	return result.ToMap()
 }

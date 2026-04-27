@@ -47,11 +47,23 @@ make viewer
 
 The extension emits standard k6 metrics with backend tags:
 
-| Metric                   | Type    | Description                    |
-| ------------------------ | ------- | ------------------------------ |
-| `search_duration`        | Trend   | Search latency in milliseconds |
-| `search_hits`            | Gauge   | Number of results returned     |
-| `ingest_duration`        | Trend   | Insert latency in milliseconds |
-| `ingest_docs`            | Counter | Documents inserted             |
-| `container_cpu_percent`  | Gauge   | Container CPU usage percentage |
-| `container_memory_bytes` | Gauge   | Container memory usage         |
+| Metric                   | Type    | Description                                  |
+| ------------------------ | ------- | -------------------------------------------- |
+| `query_duration`         | Trend   | Query latency in milliseconds                |
+| `query_hits`             | Gauge   | Number of results returned                   |
+| `ingest_duration`        | Trend   | Insert latency in milliseconds               |
+| `ingest_docs`            | Counter | Documents inserted                           |
+| `update_duration`        | Trend   | Update latency in milliseconds               |
+| `update_docs`            | Counter | Documents updated                            |
+| `backend_init`           | Gauge   | Signals a backend is configured              |
+| `scenario_started`       | Gauge   | Signals a scenario has begun                 |
+| `container_cpu_percent`  | Gauge   | Container CPU usage percentage               |
+| `container_memory_bytes` | Gauge   | Container memory usage                       |
+
+## Environment Variables
+
+| Variable                | Default | Description                                            |
+| ----------------------- | ------- | ------------------------------------------------------ |
+| `DASHBOARD_EXPORT`      | `false` | Set to `true` to save a JSON snapshot when the test ends |
+| `DASHBOARD_BROADCAST_MS`| `200`   | SSE broadcast interval in milliseconds                 |
+| `DASHBOARD_WINDOW_MS`   | `1000`  | Sliding window for timeline percentile aggregation (0 for non-overlapping buckets) |

@@ -92,7 +92,7 @@ export function setup() {
 
 // ==================== ParadeDB ====================
 export function pgSimpleQuery() {
-  backends.get("paradedb").search(
+  backends.get("paradedb").query(
     `
     SELECT id, title
     FROM documents
@@ -111,7 +111,7 @@ export function pgIngest() {
 
 // ==================== Elasticsearch ====================
 export function esSimpleQuery() {
-  backends.get("elasticsearch").search("documents", {
+  backends.get("elasticsearch").query("documents", {
     query: {
       match: { content: terms.next() },
     },
@@ -127,7 +127,7 @@ export function esIngest() {
 
 // ==================== ClickHouse ====================
 export function clickhouseSimple() {
-  backends.get("clickhouse").search(
+  backends.get("clickhouse").query(
     `
     SELECT id, title
     FROM documents
@@ -145,7 +145,7 @@ export function clickhouseIngest() {
 
 // ==================== MongoDB ====================
 export function mongodbSimple() {
-  backends.get("mongodb").search(
+  backends.get("mongodb").query(
     JSON.stringify({
       text: { query: terms.next(), path: ["title", "content"] },
     }),

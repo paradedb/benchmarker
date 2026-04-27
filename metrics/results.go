@@ -13,8 +13,8 @@ import (
 
 var (
 	// Unified metrics - tagged by backend
-	searchDuration  *metrics.Metric
-	searchHits      *metrics.Metric
+	queryDuration  *metrics.Metric
+	queryHits      *metrics.Metric
 	ingestDuration  *metrics.Metric
 	ingestDocs      *metrics.Metric
 	updateDuration  *metrics.Metric
@@ -75,8 +75,8 @@ func RegisterMetrics(vu modules.VU) {
 	}
 	metricsRegOnce.Do(func() {
 		registry := vu.InitEnv().Registry
-		searchDuration, _ = registry.NewMetric("search_duration", metrics.Trend, metrics.Time)
-		searchHits, _ = registry.NewMetric("search_hits", metrics.Gauge)
+		queryDuration, _ = registry.NewMetric("query_duration", metrics.Trend, metrics.Time)
+		queryHits, _ = registry.NewMetric("query_hits", metrics.Gauge)
 		ingestDuration, _ = registry.NewMetric("ingest_duration", metrics.Trend, metrics.Time)
 		ingestDocs, _ = registry.NewMetric("ingest_docs", metrics.Counter)
 		updateDuration, _ = registry.NewMetric("update_duration", metrics.Trend, metrics.Time)
@@ -252,21 +252,21 @@ func getExecutorVUs(cfg lib.ExecutorConfig) int64 {
 	return 0
 }
 
-// SearchResult represents the result of a search operation.
-type SearchResult struct {
+// QueryResult represents the result of a query operation.
+type QueryResult struct {
 	Hits      int64
 	LatencyMs float64
 	Error     string
 }
 
-// Emit pushes search metrics to k6 with the backend tag.
-func (r *SearchResult) Emit(ctx context.Context, vu modules.VU, backend string) {
+// Emit pushes query metrics to k6 with the backend tag.
+func (r *QueryResult) Emit(ctx context.Context, vu modules.VU, backend string) {
 	if r.Error != "" {
 		return // Don't emit metrics on error
 	}
 
 	state := vu.State()
-	if state == nil || searchDuration == nil || searchHits == nil {
+	if state == nil || queryDuration == nil || queryHits == nil {
 		return
 	}
 
@@ -277,19 +277,19 @@ func (r *SearchResult) Emit(ctx context.Context, vu modules.VU, backend string) 
 	}
 
 	metrics.PushIfNotDone(ctx, state.Samples, metrics.Sample{
-		TimeSeries: metrics.TimeSeries{Metric: searchDuration, Tags: tags},
+		TimeSeries: metrics.TimeSeries{Metric: queryDuration, Tags: tags},
 		Time:       now,
 		Value:      r.LatencyMs,
 	})
 	metrics.PushIfNotDone(ctx, state.Samples, metrics.Sample{
-		TimeSeries: metrics.TimeSeries{Metric: searchHits, Tags: tags},
+		TimeSeries: metrics.TimeSeries{Metric: queryHits, Tags: tags},
 		Time:       now,
 		Value:      float64(r.Hits),
 	})
 }
 
 // ToMap converts the result to a map for JavaScript.
-func (r *SearchResult) ToMap() map[string]interface{} {
+func (r *QueryResult) ToMap() map[string]interface{} {
 	m := map[string]interface{}{
 		"hits":      r.Hits,
 		"latencyMs": r.LatencyMs,

@@ -8,8 +8,8 @@ The loader CLI handles bulk data loading with lifecycle scripts. It reads your d
 # Load data into all running backends
 ./bin/loader load ./datasets/sample
 
-# Load into specific backends
-./bin/loader load --backend paradedb --backend elasticsearch ./datasets/sample
+# Load into a specific backend
+./bin/loader load --backend paradedb ./datasets/sample
 
 # Load with parallel workers
 ./bin/loader load --backend paradedb --workers 4 --batch-size 10000 ./datasets/sample
@@ -19,6 +19,9 @@ The loader CLI handles bulk data loading with lifecycle scripts. It reads your d
 
 # Pull dataset from S3
 ./bin/loader pull --dataset large --source s3://fts-bench/datasets/large/
+
+# Pull from a public S3 bucket (no credentials needed)
+./bin/loader pull --dataset test --source s3://fts-bench/datasets/test/ --anonymous
 ```
 
 Build the loader with:
@@ -34,13 +37,15 @@ The loader reads connection strings from environment variables:
 ```bash
 export PARADEDB_URL="postgres://postgres:postgres@localhost:5432/benchmark"
 export POSTGRES_FTS_URL="postgres://postgres:postgres@localhost:5433/benchmark"
-export ELASTICSEARCH_URL="http://localhost:9200"
+export ELASTICSEARCH_URL="https://elastic:elastic@localhost:9200"
 export OPENSEARCH_URL="http://localhost:9201"
 export CLICKHOUSE_URL="clickhouse://default:clickhouse@localhost:9000/default"
 export MONGODB_URL="mongodb://localhost:27017"
 ```
 
 When using the Docker Compose profiles, the defaults work out of the box - no environment variables needed.
+
+For S3 pulls, the AWS SDK uses its standard credential chain (environment variables, `~/.aws/credentials`, IAM role, etc.). You can set `AWS_REGION` and `AWS_PROFILE` to control which region and profile are used. Use `--anonymous` for public buckets.
 
 ## Dataset Structure
 

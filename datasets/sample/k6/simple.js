@@ -20,7 +20,7 @@ export const collectMetrics = backends.addDockerMetricsCollector(scenarios, "500
 export const options = { scenarios };
 
 export function paradedbSimpleQuery() {
-  backends.get("paradedb").search(
+  backends.get("paradedb").query(
     `
     SELECT id, title
     FROM documents

@@ -19,12 +19,12 @@ const terms = db.terms(open("./search_terms.json"));
 const timer = db.timer({ duration: "30s", gap: "5s" });
 
 const scenarios = {
-  search_test: {
+  query_test: {
     executor: "constant-vus",
     vus: 5,
     duration: "30s",
     startTime: timer.get(),
-    exec: "searchQuery",
+    exec: "queryTest",
   },
 };
 
@@ -34,12 +34,12 @@ export function collectMetrics() { backends.collect(); }
 
 export const options = { scenarios };
 
-// 5. Execute search queries
-export function searchQuery() {
+// 5. Execute queries
+export function queryTest() {
   const term = terms.next();
   backends
     .get("paradedb")
-    .search(
+    .query(
       `SELECT id, title FROM documents WHERE content ||| $1 LIMIT 10`,
       term,
     );
@@ -53,6 +53,7 @@ The `db` module (`k6/x/database`) provides:
 | Function | Returns | Description |
 | --- | --- | --- |
 | `db.backends(config)` | `Backends` | Initializes backend drivers and Docker metrics collector from config |
+| `db.metrics(config)` | `Collector` | Creates a standalone Docker container metrics collector (use `backends.addDockerMetricsCollector()` instead for most cases) |
 | `db.timer({ duration, gap })` | `Timer` | Creates a phase timer for staggering scenarios |
 | `db.loader()` | `Loader` | Creates a CSV document reader for ingest or update benchmarks |
 | `db.terms(data)` | `Terms` | Loads a JSON array of query strings to avoid caching bias. `terms.next()` cycles sequentially, `terms.random()` picks randomly. Accepts a JSON string via `open()` or a k6 `SharedArray`. |
@@ -77,9 +78,9 @@ const backends = db.backends({
 });
 
 // Access backends by alias
-backends.get("paradedb").search(...);
-backends.get("paradedb-v2").search(...);
-backends.get("elasticsearch").search(...);
+backends.get("paradedb").query(...);
+backends.get("paradedb-v2").query(...);
+backends.get("elasticsearch").query(...);
 ```
 
 ## Available Backend Types
@@ -109,7 +110,7 @@ The framework is database-agnostic - the current backends and datasets are focus
 
 ## Benchmark Patterns
 
-[Scenarios](https://grafana.com/docs/k6/latest/using-k6/scenarios/) control how your test runs. Every benchmark needs at least one search/ingest scenario. Use `backends.addDockerMetricsCollector()` to add Docker CPU/memory monitoring - it adds the scenario and returns the collect function in one call.
+[Scenarios](https://grafana.com/docs/k6/latest/using-k6/scenarios/) control how your test runs. Every benchmark needs at least one query/ingest scenario. Use `backends.addDockerMetricsCollector()` to add Docker CPU/memory monitoring - it adds the scenario and returns the collect function in one call.
 
 ### Executors
 
@@ -117,7 +118,7 @@ k6 provides several executors that determine how virtual users are scheduled:
 
 | Executor                 | Description                                                    | Best for                             |
 | ------------------------ | -------------------------------------------------------------- | ------------------------------------ |
-| `constant-vus`           | Fixed number of VUs running for a set duration                 | Most search benchmarks               |
+| `constant-vus`           | Fixed number of VUs running for a set duration                 | Most query benchmarks                |
 | `constant-arrival-rate`  | Fixed iteration rate regardless of response time               | Rate-limited ingest, SLA testing     |
 | `ramping-vus`            | VUs increase/decrease over stages                              | Load ramp-up, finding breaking point |
 | `ramping-arrival-rate`   | Iteration rate increases/decreases over stages                 | Gradual load increase testing        |
@@ -145,11 +146,11 @@ The simplest benchmark - one backend, constant load. No timer needed:
 
 ```javascript
 const scenarios = {
-  pdb_search: {
+  pdb_query: {
     executor: "constant-vus",
     vus: 5,
     duration: "30s",
-    exec: "pdbSearch",
+    exec: "pdbQuery",
   },
 };
 backends.addDockerMetricsCollector(scenarios, "35s");
@@ -157,8 +158,8 @@ export function collectMetrics() { backends.collect(); }
 
 export const options = { scenarios };
 
-export function pdbSearch() {
-  backends.get("paradedb").search(
+export function pdbQuery() {
+  backends.get("paradedb").query(
     `SELECT id, title FROM documents WHERE content ||| $1 LIMIT 10`,
     terms.next(),
   );
@@ -174,12 +175,12 @@ const timer = db.timer({ duration: "30s", gap: "5s" });
 
 const scenarios = {
   // get() returns the current phase's startTime ("0s")
-  pdb_search: {
+  pdb_query: {
     executor: "constant-vus",
     vus: 5,
     duration: "30s",
     startTime: timer.get(),
-    exec: "pdbSearch",
+    exec: "pdbQuery",
   },
   // get() again - parallel scenario in the same phase
   pdb_count: {
@@ -190,12 +191,12 @@ const scenarios = {
     exec: "pdbCount",
   },
   // advanceAndGet() moves to the next phase ("35s")
-  es_search: {
+  es_query: {
     executor: "constant-vus",
     vus: 5,
     duration: "30s",
     startTime: timer.advanceAndGet(),
-    exec: "esSearch",
+    exec: "esQuery",
   },
   es_count: {
     executor: "constant-vus",
@@ -218,9 +219,9 @@ export const options = { scenarios };
 - `backends.addDockerMetricsCollector(scenarios, timer)` - adds a `metrics_collector` scenario covering the full test duration
 - Also accepts a duration string: `backends.addDockerMetricsCollector(scenarios, "500s")`
 
-### Pattern 3: Parallel Search + Ingest
+### Pattern 3: Parallel Query + Ingest
 
-Run search queries and ingest in parallel within each phase. Use `env` to share exec functions across backends, and `constant-arrival-rate` for ingest to maintain a predictable insertion rate:
+Run queries and ingest in parallel within each phase to measure how query latency holds up under concurrent write load. Each backend gets its own query function (since query syntax differs), while `env` shares the ingest function. Use `constant-arrival-rate` for ingest to maintain a predictable insertion rate:
 
 ```javascript
 import db from "k6/x/database";
@@ -234,14 +235,13 @@ const BATCH_SIZE = 1000;
 const timer = db.timer({ duration: "30s", gap: "5s" });
 
 const scenarios = {
-  // ParadeDB: search + ingest in parallel
-  pdb_search: {
+  // ParadeDB: query + ingest in parallel
+  pdb_query: {
     executor: "constant-vus",
     vus: 5,
     duration: "30s",
     startTime: timer.get(),
-    exec: "search",
-    env: { BACKEND: "paradedb" },
+    exec: "pdbQuery",
   },
   pdb_ingest: {
     executor: "constant-arrival-rate",
@@ -253,14 +253,13 @@ const scenarios = {
     exec: "ingest",
     env: { BACKEND: "paradedb" },
   },
-  // Elasticsearch: search + ingest in parallel
-  es_search: {
+  // Elasticsearch: query + ingest in parallel
+  es_query: {
     executor: "constant-vus",
     vus: 5,
     duration: "30s",
     startTime: timer.advanceAndGet(),
-    exec: "search",
-    env: { BACKEND: "elasticsearch" },
+    exec: "esQuery",
   },
   es_ingest: {
     executor: "constant-arrival-rate",
@@ -278,12 +277,18 @@ export function collectMetrics() { backends.collect(); }
 
 export const options = { scenarios };
 
-export function search() {
-  const backend = __ENV.BACKEND;
-  backends.get(backend).search(
+export function pdbQuery() {
+  backends.get("paradedb").query(
     `SELECT id, title FROM documents WHERE content ||| $1 LIMIT 10`,
     terms.next(),
   );
+}
+
+export function esQuery() {
+  backends.get("elasticsearch").query("documents", {
+    query: { match: { content: terms.next() } },
+    size: 10,
+  });
 }
 
 export function ingest() {
@@ -360,7 +365,7 @@ const scenarios = {
       { duration: "60s", target: 50 },   // Hold at 50
       { duration: "30s", target: 0 },    // Ramp down
     ],
-    exec: "searchQuery",
+    exec: "queryTest",
   },
 };
 backends.addDockerMetricsCollector(scenarios, "220s");
@@ -371,11 +376,15 @@ export const options = { scenarios };
 
 ## Ingest Benchmarks
 
-To benchmark ingest performance, use the loader to open a document file and insert batches. Use scenario `env` to pass the backend name so one function handles all backends. The second argument to `nextBatch()` is a pool key: each pool has its own atomic counter, so VUs within a backend get non-overlapping batches, while different backends independently walk through the same data from the start.
+The primary purpose of ingest scenarios is to put write pressure on the database while queries are running, simulating realistic mixed workloads where the index is being updated concurrently with queries. This is more useful for measuring how query latency degrades under write load than for comparing raw ingest throughput across backends, since each database handles write consistency, indexing, and flush semantics differently.
 
-See [Pattern 3](#pattern-3-parallel-search--ingest) for a complete example combining search and ingest.
+To run an ingest workload, use the loader to open a document file and insert batches. Use scenario `env` to pass the backend name so one function handles all backends. The second argument to `nextBatch()` is a pool key: each pool has its own atomic counter, so VUs within a backend get non-overlapping batches, while different backends independently walk through the same data from the start.
+
+See [Pattern 3](#pattern-3-parallel-query--ingest) for a complete example combining queries and ingest.
 
 ## Update Benchmarks
+
+Like ingest, update scenarios are primarily useful for stressing the database during query runs, measuring how query performance changes when existing documents are being modified concurrently. Direct comparison of update throughput across backends is not meaningful since each handles row versioning, re-indexing, and consistency differently.
 
 ```javascript
 export function updateTest() {
@@ -387,12 +396,49 @@ export function updateTest() {
 
 The `nextBatchSwapped()` method lazily builds a copy of all documents with adjacent values of the given field swapped, then paginates through them atomically. The optional third argument is a pool key, same as `nextBatch()`.
 
+## Additional Backend Methods
+
+Each backend returned by `backends.get()` also exposes:
+
+| Method | Description |
+| --- | --- |
+| `setTimeout(seconds)` | Set the query timeout for this backend |
+| `insert(table, doc)` | Insert a single document |
+| `update(table, doc)` | Update a single document (keyed by `id` or `_id`) |
+
+Call `backends.setTimeout(seconds)` to set the timeout on all backends at once, or `backends.close()` to close all connections.
+
+## Loading Data from k6 Scripts
+
+The loader can also bulk-load data directly from a k6 script (without the CLI). This is useful for setup functions or ingest benchmarks that need to pre-populate data:
+
+```javascript
+const loader = db.loader();
+
+// Generic: specify backend name and connection string
+loader.load("paradedb", "postgres://postgres:postgres@localhost:5432/benchmark", {
+  file: "../data.csv",
+  table: "documents",
+  dataset: "../",
+  batchSize: 10000,
+});
+
+// Backend-specific helpers
+loader.loadParadeDB("postgres://...", { file: "../data.csv", dataset: "../" });
+loader.loadPostgresFTS("postgres://...", { file: "../data.csv", dataset: "../" });
+loader.loadElasticsearch({ file: "../data.csv", dataset: "../" });
+loader.loadClickHouse("clickhouse://...", { file: "../data.csv", dataset: "../" });
+loader.loadMongoDB("mongodb://...", { file: "../data.csv", dataset: "../" });
+```
+
+Returns `{ loaded, loadTimeMs, indexTimeMs, totalTimeMs, error }`. The `dataset` path points to the dataset directory containing backend-specific `pre`/`post` scripts.
+
 ## Backend Query Reference
 
 ### ParadeDB (BM25)
 
 ```javascript
-backends.get("paradedb").search(
+backends.get("paradedb").query(
   `SELECT id, title, pdb.score(id) as score
    FROM documents
    WHERE content ||| $1
@@ -405,7 +451,7 @@ backends.get("paradedb").search(
 ### PostgreSQL FTS
 
 ```javascript
-backends.get("postgresfts").search(
+backends.get("postgresfts").query(
   `SELECT id, title, ts_rank(tsv, plainto_tsquery('english', $1)) as score
    FROM documents
    WHERE tsv @@ plainto_tsquery('english', $1)
@@ -418,7 +464,7 @@ backends.get("postgresfts").search(
 ### Elasticsearch / OpenSearch
 
 ```javascript
-backends.get("elasticsearch").search("documents", {
+backends.get("elasticsearch").query("documents", {
   query: { match: { content: "search term" } },
   size: 10,
 });
@@ -427,7 +473,7 @@ backends.get("elasticsearch").search("documents", {
 ### ClickHouse
 
 ```javascript
-backends.get("clickhouse").search(
+backends.get("clickhouse").query(
   `SELECT id, title
    FROM documents
    WHERE hasToken(content, 'term')
@@ -438,7 +484,7 @@ backends.get("clickhouse").search(
 ### MongoDB Atlas Search
 
 ```javascript
-backends.get("mongodb").search(
+backends.get("mongodb").query(
   JSON.stringify({
     text: { query: "search term", path: ["content"] },
   }),

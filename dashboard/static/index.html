@@ -2037,7 +2037,7 @@
             const run = runs[name];
             const color = getRunColor(name, run);
             // Use each run's own start time so ingest offset is relative to when
-            // the run began (same as search charts). This keeps second/third phases
+            // the run began (same as query charts). This keeps second/third phases
             // visible within the chart's x-axis range.
             const startTime = run.startTime || data.startTime || 0;
             return {

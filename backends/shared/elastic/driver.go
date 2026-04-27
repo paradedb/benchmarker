@@ -204,7 +204,7 @@ func aggregationHitCount(aggregations map[string]aggregationResult) (int, bool) 
 	return 0, false
 }
 
-// Query executes a search query and returns the hit count.
+// Query executes a query and returns the hit count.
 // Supports two call patterns:
 //   - Query(ctx, jsonQueryString) - query is a JSON string
 //   - Query(ctx, indexName, queryObject) - index name + query map (from JS)
