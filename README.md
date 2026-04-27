@@ -25,6 +25,8 @@ Compare performance across **ParadeDB**, **PostgreSQL FTS**, **Elasticsearch**, 
 
 We built this at [ParadeDB](https://paradedb.com) to drive our iterative performance improvement process. It's very early, but we hope it can help others get their TTFB (time to first benchmark) down. We'd ❤️ your help improving it, PRs welcome!
 
+![benchmarker](images/benchmarker.png)
+
 ## How It Works
 
 The benchmarker is built on [Grafana k6](https://grafana.com/docs/k6/latest/), an amazing load testing tool written in Go. You write a k6 JavaScript script that defines **scenarios** and **backends**. Each scenario specifies an executor (how load is generated), a duration, a number of virtual users (VUs), and which functions to run, using which backends. k6 spins up VUs as concurrent goroutines, each looping over your test function for the duration of the scenario.
