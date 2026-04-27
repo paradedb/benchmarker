@@ -67,7 +67,9 @@ make
 
 ### 2. Start backends
 
-The included `docker-compose.yml` uses profiles, which provide an easy way to only spin up a subset of containers.
+The included `docker-compose.yml` uses profiles, which provide an easy way to only spin up a subset of containers. 
+
+Please note the 'sample' dataset which is included does not provide a meaningful benchmark, it's designed to show how to use the system.
 
 ```bash
 docker compose --profile paradedb --profile postgresfts up -d
@@ -79,7 +81,6 @@ See [Docker Setup](docs/docker.md) for all available profiles and services.
 
 ```bash
 ./bin/loader load --backend paradedb ./datasets/sample
-./bin/loader load --backend postgresfts ./datasets/sample
 ```
 
 See [Data Loader](docs/loader.md) for advanced options like custom connection strings, parallel workers and S3 pulls.

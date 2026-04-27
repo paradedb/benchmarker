@@ -72,7 +72,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - postgres_fts_data:/var/lib/postgresql/data
+      - postgres_fts_data:/var/lib/postgresql/docker
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -90,8 +90,6 @@ services:
     mem_limit: 8g
     command:
       - "postgres"
-      - "-c"
-      - "shared_preload_libraries=pg_search"
       - "-c"
       - "shared_buffers=2GB"
       - "-c"
@@ -135,7 +133,6 @@ services:
       - "9200:9200"
     volumes:
       - es_data:/usr/share/elasticsearch/data
-      - es_certs:/usr/share/elasticsearch/config/certs
     healthcheck:
       test:
         [
@@ -260,7 +257,6 @@ volumes:
   paradedb_data:
   postgres_fts_data:
   es_data:
-  es_certs:
   opensearch_data:
   clickhouse_data:
   mongodb_data:
