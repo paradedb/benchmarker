@@ -27,11 +27,11 @@ make deps    # Install Go modules + xk6
 make         # Build k6 and loader
 ```
 
-To verify your setup, start the backends and run a benchmark:
+To verify your setup, start the backend you're working on and run a benchmark:
 
 ```bash
-docker compose --profile all up -d
-./bin/loader load ./datasets/sample
+docker compose --profile paradedb up -d
+./bin/loader load --backend paradedb ./datasets/sample
 ./k6 run --out dashboard datasets/sample/k6/simple.js
 ```
 
