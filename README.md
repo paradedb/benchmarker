@@ -17,12 +17,6 @@
   <a href="CONTRIBUTING.md">Contributing</a>
 </h3>
 
-<p align="center">
-  <a href="https://github.com/paradedb/benchmarks/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/paradedb/benchmarks/ci.yml?branch=main&label=CI" alt="CI"></a>&nbsp;
-  <a href="https://github.com/paradedb/benchmarks?tab=MIT-1-ov-file#readme"><img src="https://img.shields.io/github/license/paradedb/benchmarks?color=blue" alt="License"></a>&nbsp;
-  <a href="https://paradedb.com/slack"><img src="https://img.shields.io/badge/Community-Join%20Slack-purple?logo=slack" alt="Community"></a>
-</p>
-
 ---
 
 A [k6](https://grafana.com/docs/k6/latest/) extension for benchmarking databases with a unified API, real-time dashboard, and comprehensive data loading tools. While the included datasets focus on full-text search, the framework works for any query workload. You write the SQL or API calls, it handles timing, metrics, and visualization.
