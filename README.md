@@ -23,7 +23,7 @@ A [k6](https://grafana.com/docs/k6/latest/) extension for benchmarking databases
 
 Compare performance across **ParadeDB**, **PostgreSQL FTS**, **Elasticsearch**, **OpenSearch**, **ClickHouse**, and **MongoDB Atlas Search** with consistent metrics and visualization. Docker Compose profiles are included for single-node benchmarking, but you can point at any database: local installs, remote servers, or cloud services.
 
-We built this at [ParadeDB](https://paradedb.com) to drive our iterative performance improvement process. It's very early, but we hope it can help others get their TTFB (time to first benchmark) down. We'd ❤️ your help improving it, PRs welcome!
+We built this at [ParadeDB](https://paradedb.com) to drive our iterative performance improvement process and power our benchmarks. It's very early, but we hope it can help others get their TTFB (time to first benchmark) down. We'd ❤️ your help improving it, PRs welcome!
 
 ![benchmarker](images/benchmarker.png)
 
