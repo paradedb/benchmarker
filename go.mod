@@ -1,4 +1,4 @@
-module github.com/paradedb/benchmarks
+module github.com/paradedb/benchmarker
 
 go 1.25.0
 

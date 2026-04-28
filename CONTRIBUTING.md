@@ -21,8 +21,8 @@ Ideal issues for external contributors include well-scoped, individual features 
 ### Getting Started
 
 ```bash
-git clone https://github.com/paradedb/benchmarks.git
-cd benchmarks
+git clone https://github.com/paradedb/benchmarker.git
+cd benchmarker
 make deps    # Install Go modules + xk6
 make         # Build k6 and loader
 ```
@@ -82,7 +82,7 @@ benchmarks/
 Backends use a **registry pattern** with factory functions:
 
 1. Each backend package calls `backends.Register()` in an `init()` function, providing a `BackendConfig` with a factory, file type, env var, default connection, and container name.
-2. `backends.go` imports each backend package for side-effect registration (e.g., `_ "github.com/paradedb/benchmarks/backends/paradedb"`).
+2. `backends.go` imports each backend package for side-effect registration (e.g., `_ "github.com/paradedb/benchmarker/backends/paradedb"`).
 3. At runtime, `newBackends()` reads the JS config, looks up registered factories, creates drivers, and wraps each in a `K6Client`.
 4. `K6Client` (in `backends/driver.go`) wraps every `Driver` to add k6 metric emission — timing, tagging, and sample pushing.
 
@@ -129,8 +129,8 @@ If your backend is PostgreSQL-based, use the shared postgres driver:
 package mybackend
 
 import (
-    "github.com/paradedb/benchmarks/backends"
-    "github.com/paradedb/benchmarks/backends/shared/postgres"
+    "github.com/paradedb/benchmarker/backends"
+    "github.com/paradedb/benchmarker/backends/shared/postgres"
 )
 
 func init() {
@@ -148,7 +148,7 @@ func New(connString string) (backends.Driver, error) {
 }
 ```
 
-If your backend is Elasticsearch-compatible, use the shared elastic driver similarly.
+If your backend is Elasticsearch-compatible, use the shared elasticsearch driver similarly.
 
 For a completely new backend type, implement the `Driver` interface directly. See `backends/clickhouse/` or `backends/mongodb/` for examples of standalone drivers.
 
@@ -159,7 +159,7 @@ Add a blank import in `backends.go` so the `init()` function runs:
 ```go
 import (
     // ...existing imports...
-    _ "github.com/paradedb/benchmarks/backends/mybackend"
+    _ "github.com/paradedb/benchmarker/backends/mybackend"
 )
 ```
 
@@ -244,7 +244,7 @@ SQL backends use `.sql` files, HTTP backends (Elasticsearch, OpenSearch, MongoDB
 
 ## Reporting Issues
 
-File issues at [GitHub Issues](https://github.com/paradedb/benchmarks/issues) with:
+File issues at [GitHub Issues](https://github.com/paradedb/benchmarker/issues) with:
 
 - A clear description of the problem or feature request
 - Steps to reproduce (for bugs)

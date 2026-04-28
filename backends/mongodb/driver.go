@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paradedb/benchmarks/backends"
-	"github.com/paradedb/benchmarks/metrics"
+	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/metrics"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"

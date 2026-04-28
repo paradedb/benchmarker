@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/paradedb/benchmarks/backends"
+	"github.com/paradedb/benchmarker/backends"
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 )

@@ -9,7 +9,7 @@ body:
   - type: markdown
     attributes:
       value: >
-        Please report security vulnerabilities using GitHub's [report vulnerability form](https://github.com/paradedb/benchmarks/security/advisories/new).
+        Please report security vulnerabilities using GitHub's [report vulnerability form](https://github.com/paradedb/benchmarker/security/advisories/new).
   - type: textarea
     attributes:
       label: What happens?

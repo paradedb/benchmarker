@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/paradedb/benchmarks/metrics"
+	"github.com/paradedb/benchmarker/metrics"
 	"go.k6.io/k6/output"
 )
 

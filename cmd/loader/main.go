@@ -21,8 +21,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	_ "github.com/paradedb/benchmarks" // triggers backend init() via backends.go imports
-	"github.com/paradedb/benchmarks/backends"
+	_ "github.com/paradedb/benchmarker" // triggers backend init() via backends.go imports
+	"github.com/paradedb/benchmarker/backends"
 	"gopkg.in/yaml.v3"
 )
 

@@ -2,8 +2,8 @@
 package postgresfts
 
 import (
-	"github.com/paradedb/benchmarks/backends"
-	"github.com/paradedb/benchmarks/backends/shared/postgres"
+	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/backends/shared/postgres"
 )
 
 func init() {

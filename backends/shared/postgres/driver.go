@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nickbruun/pgsplit"
-	"github.com/paradedb/benchmarks/backends"
-	"github.com/paradedb/benchmarks/metrics"
+	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/metrics"
 )
 
 // ConfigQuery is a custom SQL query whose scalar result is captured during CaptureConfig.

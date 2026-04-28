@@ -1,6 +1,6 @@
-// Package elastic provides the shared Elasticsearch/OpenSearch driver implementation.
+// Package elasticsearch provides the shared Elasticsearch/OpenSearch driver implementation.
 // Individual backends (elasticsearch, opensearch) import this package and register themselves.
-package elastic
+package elasticsearch
 
 import (
 	"bytes"
@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paradedb/benchmarks/backends"
-	"github.com/paradedb/benchmarks/metrics"
+	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/metrics"
 )
 
 // DriverConfig holds backend-specific configuration.

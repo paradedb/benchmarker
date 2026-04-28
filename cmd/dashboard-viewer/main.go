@@ -11,7 +11,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/paradedb/benchmarks/dashboard"
+	"github.com/paradedb/benchmarker/dashboard"
 )
 
 func main() {

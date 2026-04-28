@@ -6,18 +6,18 @@ import (
 	"time"
 
 	"github.com/grafana/sobek"
-	"github.com/paradedb/benchmarks/backends"
-	"github.com/paradedb/benchmarks/metrics"
+	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/metrics"
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 
 	// Import backends to register them via init()
-	_ "github.com/paradedb/benchmarks/backends/clickhouse"
-	_ "github.com/paradedb/benchmarks/backends/elasticsearch"
-	_ "github.com/paradedb/benchmarks/backends/mongodb"
-	_ "github.com/paradedb/benchmarks/backends/opensearch"
-	_ "github.com/paradedb/benchmarks/backends/paradedb"
-_ "github.com/paradedb/benchmarks/backends/postgresfts"
+	_ "github.com/paradedb/benchmarker/backends/clickhouse"
+	_ "github.com/paradedb/benchmarker/backends/elasticsearch"
+	_ "github.com/paradedb/benchmarker/backends/mongodb"
+	_ "github.com/paradedb/benchmarker/backends/opensearch"
+	_ "github.com/paradedb/benchmarker/backends/paradedb"
+_ "github.com/paradedb/benchmarker/backends/postgresfts"
 )
 
 // Backends holds all configured backend clients.

@@ -435,7 +435,7 @@ Returns `{ loaded, loadTimeMs, indexTimeMs, totalTimeMs, error }`. The `dataset`
 
 ## Backend Query Reference
 
-### ParadeDB (BM25)
+### ParadeDB
 
 ```javascript
 backends.get("paradedb").query(

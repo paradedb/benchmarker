@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paradedb/benchmarks/backends"
-	"github.com/paradedb/benchmarks/backends/shared/elastic"
+	"github.com/paradedb/benchmarker/backends"
+	elastic "github.com/paradedb/benchmarker/backends/shared/elasticsearch"
 )
 
 const skipTLSVerifyEnv = "OPENSEARCH_SKIP_TLS_VERIFY"

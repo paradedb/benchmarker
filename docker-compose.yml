@@ -1,7 +1,7 @@
 services:
   paradedb:
     profiles: [paradedb, all]
-    image: paradedb/paradedb:v0.21.6-pg18
+    image: paradedb/paradedb:v0.23.1-pg18
     container_name: paradedb
     privileged: true
     cap_add:
@@ -132,7 +132,7 @@ services:
     ports:
       - "9200:9200"
     volumes:
-      - es_data:/usr/share/elasticsearch/data
+      - elasticsearch_data:/usr/share/elasticsearch/data
     healthcheck:
       test:
         [
@@ -256,7 +256,7 @@ services:
 volumes:
   paradedb_data:
   postgres_fts_data:
-  es_data:
+  elasticsearch_data:
   opensearch_data:
   clickhouse_data:
   mongodb_data:

@@ -2,9 +2,9 @@
 package search
 
 import (
-	_ "github.com/paradedb/benchmarks/dashboard"
-	"github.com/paradedb/benchmarks/loader"
-	"github.com/paradedb/benchmarks/metrics"
+	_ "github.com/paradedb/benchmarker/dashboard"
+	"github.com/paradedb/benchmarker/loader"
+	"github.com/paradedb/benchmarker/metrics"
 	"go.k6.io/k6/js/modules"
 )
 

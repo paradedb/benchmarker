@@ -10,8 +10,8 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/nickbruun/pgsplit"
-	"github.com/paradedb/benchmarks/backends"
-	"github.com/paradedb/benchmarks/metrics"
+	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/metrics"
 )
 
 func init() {
