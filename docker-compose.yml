@@ -121,7 +121,8 @@ services:
     container_name: elasticsearch
     environment:
       - discovery.type=single-node
-      - ELASTIC_PASSWORD=elastic
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
       - "ES_JAVA_OPTS=-Xms2g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=50"
       - bootstrap.memory_lock=true
       - thread_pool.search.size=4
@@ -137,7 +138,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "curl -sk https://elastic:elastic@localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'",
+          "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'",
         ]
       interval: 10s
       timeout: 5s
