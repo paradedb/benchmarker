@@ -229,7 +229,7 @@ import db from "k6/x/database";
 const backends = db.backends({ backends: ["paradedb", "elasticsearch"] });
 const terms = db.terms(open("./search_terms.json"));
 const loader = db.loader();
-const docs = loader.openDocuments("../data.csv");
+const docs = loader.openDocuments("../ingest_data.csv");
 const BATCH_SIZE = 1000;
 
 const timer = db.timer({ duration: "30s", gap: "5s" });
@@ -378,13 +378,15 @@ export const options = { scenarios };
 
 The primary purpose of ingest scenarios is to put write pressure on the database while queries are running, simulating realistic mixed workloads where the index is being updated concurrently with queries. This is more useful for measuring how query latency degrades under write load than for comparing raw ingest throughput across backends, since each database handles write consistency, indexing, and flush semantics differently.
 
-To run an ingest workload, use the loader to open a document file and insert batches. Use scenario `env` to pass the backend name so one function handles all backends. The second argument to `nextBatch()` is a pool key: each pool has its own atomic counter, so VUs within a backend get non-overlapping batches, while different backends independently walk through the same data from the start.
+To run an ingest workload, use the loader to open a document file and insert batches. The data file used for ingest must contain documents that are not already in the database. If you pre-loaded a dataset with the loader CLI or a setup function, you will need a separate CSV file (e.g. `ingest_data.csv`) with different document IDs for insert scenarios, otherwise you will get duplicate key errors. Note that you can only run an ingest benchmark once per file, since subsequent runs will fail with duplicates after the documents have been inserted. Use scenario `env` to pass the backend name so one function handles all backends. The second argument to `nextBatch()` is a pool key: each pool has its own atomic counter, so VUs within a backend get non-overlapping batches, while different backends independently walk through the same data from the start.
 
 See [Pattern 3](#pattern-3-parallel-query--ingest) for a complete example combining queries and ingest.
 
 ## Update Benchmarks
 
 Like ingest, update scenarios are primarily useful for stressing the database during query runs, measuring how query performance changes when existing documents are being modified concurrently. Direct comparison of update throughput across backends is not meaningful since each handles row versioning, re-indexing, and consistency differently.
+
+The data file you open for updates must contain documents that already exist in the database. You can use the same file you loaded originally, or a cut-down version of it if the full dataset is large. Like ingest, this is a run-once operation; after the swapped documents have been written, running the same benchmark again will produce no meaningful changes since the values are already swapped.
 
 ```javascript
 export function updateTest() {
