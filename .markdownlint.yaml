@@ -1,2 +1,4 @@
 MD013: false # Line length
 MD034: false # Bare URLs (used for local dashboard examples)
+MD033: false # Inline HTML (README uses centered HTML headings/badges)
+MD060: false # Table column style (pipe alignment is cosmetic, renderers ignore it)

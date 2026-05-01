@@ -111,14 +111,14 @@ type Driver interface {
 }
 ```
 
-| Method          | Purpose |
-| --------------- | ------- |
-| `Close`         | Clean up connections |
-| `Exec`          | Run setup/teardown statements (pre/post scripts) |
-| `Query`         | Execute a search query and return the hit count |
-| `Insert`        | Bulk insert rows, return count inserted |
+| Method          | Purpose                                               |
+| --------------- | ----------------------------------------------------- |
+| `Close`         | Clean up connections                                  |
+| `Exec`          | Run setup/teardown statements (pre/post scripts)      |
+| `Query`         | Execute a search query and return the hit count       |
+| `Insert`        | Bulk insert rows, return count inserted               |
 | `Update`        | Bulk upsert rows by key columns, return count updated |
-| `CaptureConfig` | Capture backend version/settings for the dashboard |
+| `CaptureConfig` | Capture backend version/settings for the dashboard    |
 
 ### 2. Use a Shared Driver or Write Your Own
 
@@ -198,13 +198,13 @@ datasets/sample/mybackend/
 
 ### BackendConfig Fields
 
-| Field         | Description |
-| ------------- | ----------- |
+| Field         | Description                                                           |
+| ------------- | --------------------------------------------------------------------- |
 | `Factory`     | `func(connString string) (Driver, error)` — creates a driver instance |
-| `FileType`    | `"sql"` or `"json"` — determines pre/post script file extension |
-| `EnvVar`      | Environment variable name for the connection string |
-| `DefaultConn` | Fallback connection string when env var is unset |
-| `Container`   | Docker container name for metrics collection |
+| `FileType`    | `"sql"` or `"json"` — determines pre/post script file extension       |
+| `EnvVar`      | Environment variable name for the connection string                   |
+| `DefaultConn` | Fallback connection string when env var is unset                      |
+| `Container`   | Docker container name for metrics collection                          |
 
 ## Datasets
 

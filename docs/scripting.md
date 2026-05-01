@@ -30,7 +30,9 @@ const scenarios = {
 
 // 4. Add Docker metrics collector
 backends.addDockerMetricsCollector(scenarios, timer);
-export function collectMetrics() { backends.collect(); }
+export function collectMetrics() {
+  backends.collect();
+}
 
 export const options = { scenarios };
 
@@ -50,13 +52,13 @@ export function queryTest() {
 
 The `db` module (`k6/x/database`) provides:
 
-| Function | Returns | Description |
-| --- | --- | --- |
-| `db.backends(config)` | `Backends` | Initializes backend drivers and Docker metrics collector from config |
-| `db.metrics(config)` | `Collector` | Creates a standalone Docker container metrics collector (use `backends.addDockerMetricsCollector()` instead for most cases) |
-| `db.timer({ duration, gap })` | `Timer` | Creates a phase timer for staggering scenarios |
-| `db.loader()` | `Loader` | Creates a CSV document reader for ingest or update benchmarks |
-| `db.terms(data)` | `Terms` | Loads a JSON array of query strings to avoid caching bias. `terms.next()` cycles sequentially, `terms.random()` picks randomly. Accepts a JSON string via `open()` or a k6 `SharedArray`. |
+| Function                      | Returns     | Description                                                                                                                                                                               |
+| ----------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `db.backends(config)`         | `Backends`  | Initializes backend drivers and Docker metrics collector from config                                                                                                                      |
+| `db.metrics(config)`          | `Collector` | Creates a standalone Docker container metrics collector (use `backends.addDockerMetricsCollector()` instead for most cases)                                                               |
+| `db.timer({ duration, gap })` | `Timer`     | Creates a phase timer for staggering scenarios                                                                                                                                            |
+| `db.loader()`                 | `Loader`    | Creates a CSV document reader for ingest or update benchmarks                                                                                                                             |
+| `db.terms(data)`              | `Terms`     | Loads a JSON array of query strings to avoid caching bias. `terms.next()` cycles sequentially, `terms.random()` picks randomly. Accepts a JSON string via `open()` or a k6 `SharedArray`. |
 
 ## Backend Configuration
 
@@ -89,24 +91,24 @@ The framework is database-agnostic - the current backends and datasets are focus
 
 **PostgreSQL-based** (shared driver, different extensions):
 
-| Type            | Description                              |
-| --------------- | ---------------------------------------- |
-| `paradedb`      | ParadeDB with pg_search (BM25)           |
-| `postgresfts`   | PostgreSQL native FTS (tsvector/tsquery) |
+| Type          | Description                              |
+| ------------- | ---------------------------------------- |
+| `paradedb`    | ParadeDB with pg_search (BM25)           |
+| `postgresfts` | PostgreSQL native FTS (tsvector/tsquery) |
 
 **Elasticsearch-based** (shared driver):
 
-| Type            | Description |
-| --------------- | ----------- |
+| Type            | Description   |
+| --------------- | ------------- |
 | `elasticsearch` | Elasticsearch |
 | `opensearch`    | OpenSearch    |
 
 **Other**:
 
-| Type            | Description               |
-| --------------- | ------------------------- |
-| `clickhouse`    | ClickHouse                |
-| `mongodb`       | MongoDB with Atlas Search |
+| Type         | Description               |
+| ------------ | ------------------------- |
+| `clickhouse` | ClickHouse                |
+| `mongodb`    | MongoDB with Atlas Search |
 
 ## Benchmark Patterns
 
@@ -116,29 +118,29 @@ The framework is database-agnostic - the current backends and datasets are focus
 
 k6 provides several executors that determine how virtual users are scheduled:
 
-| Executor                 | Description                                                    | Best for                             |
-| ------------------------ | -------------------------------------------------------------- | ------------------------------------ |
-| `constant-vus`           | Fixed number of VUs running for a set duration                 | Most query benchmarks                |
-| `constant-arrival-rate`  | Fixed iteration rate regardless of response time               | Rate-limited ingest, SLA testing     |
-| `ramping-vus`            | VUs increase/decrease over stages                              | Load ramp-up, finding breaking point |
-| `ramping-arrival-rate`   | Iteration rate increases/decreases over stages                 | Gradual load increase testing        |
+| Executor                | Description                                      | Best for                             |
+| ----------------------- | ------------------------------------------------ | ------------------------------------ |
+| `constant-vus`          | Fixed number of VUs running for a set duration   | Most query benchmarks                |
+| `constant-arrival-rate` | Fixed iteration rate regardless of response time | Rate-limited ingest, SLA testing     |
+| `ramping-vus`           | VUs increase/decrease over stages                | Load ramp-up, finding breaking point |
+| `ramping-arrival-rate`  | Iteration rate increases/decreases over stages   | Gradual load increase testing        |
 
 k6 provides [additional executors](https://grafana.com/docs/k6/latest/using-k6/scenarios/executors/) for other use cases.
 
 Each scenario specifies:
 
-| Option            | Description                                                   |
-| ----------------- | ------------------------------------------------------------- |
-| `executor`        | How VUs are scheduled (see table above)                       |
-| `vus`             | Number of virtual users (for VU-based executors)              |
-| `duration`        | How long the scenario runs                                    |
-| `startTime`       | When to start (for sequential phases)                         |
-| `exec`            | Which exported function to run                                |
-| `tags`            | Custom tags for grouping metrics in charts                    |
-| `env`             | Per-scenario environment variables (readable via `__ENV`)     |
-| `rate`            | Iterations per `timeUnit` (arrival-rate executors)            |
-| `timeUnit`        | Time unit for `rate` (e.g., `"1s"`)                           |
-| `preAllocatedVUs` | VUs pre-allocated for arrival-rate executors                  |
+| Option            | Description                                               |
+| ----------------- | --------------------------------------------------------- |
+| `executor`        | How VUs are scheduled (see table above)                   |
+| `vus`             | Number of virtual users (for VU-based executors)          |
+| `duration`        | How long the scenario runs                                |
+| `startTime`       | When to start (for sequential phases)                     |
+| `exec`            | Which exported function to run                            |
+| `tags`            | Custom tags for grouping metrics in charts                |
+| `env`             | Per-scenario environment variables (readable via `__ENV`) |
+| `rate`            | Iterations per `timeUnit` (arrival-rate executors)        |
+| `timeUnit`        | Time unit for `rate` (e.g., `"1s"`)                       |
+| `preAllocatedVUs` | VUs pre-allocated for arrival-rate executors              |
 
 ### Pattern 1: Single Backend
 
@@ -154,15 +156,19 @@ const scenarios = {
   },
 };
 backends.addDockerMetricsCollector(scenarios, "35s");
-export function collectMetrics() { backends.collect(); }
+export function collectMetrics() {
+  backends.collect();
+}
 
 export const options = { scenarios };
 
 export function pdbQuery() {
-  backends.get("paradedb").query(
-    `SELECT id, title FROM documents WHERE content ||| $1 LIMIT 10`,
-    terms.next(),
-  );
+  backends
+    .get("paradedb")
+    .query(
+      `SELECT id, title FROM documents WHERE content ||| $1 LIMIT 10`,
+      terms.next(),
+    );
 }
 ```
 
@@ -209,7 +215,9 @@ const scenarios = {
 
 // Adds a metrics_collector scenario covering the full test duration
 backends.addDockerMetricsCollector(scenarios, timer);
-export function collectMetrics() { backends.collect(); }
+export function collectMetrics() {
+  backends.collect();
+}
 
 export const options = { scenarios };
 ```
@@ -273,15 +281,19 @@ const scenarios = {
   },
 };
 backends.addDockerMetricsCollector(scenarios, timer);
-export function collectMetrics() { backends.collect(); }
+export function collectMetrics() {
+  backends.collect();
+}
 
 export const options = { scenarios };
 
 export function pdbQuery() {
-  backends.get("paradedb").query(
-    `SELECT id, title FROM documents WHERE content ||| $1 LIMIT 10`,
-    terms.next(),
-  );
+  backends
+    .get("paradedb")
+    .query(
+      `SELECT id, title FROM documents WHERE content ||| $1 LIMIT 10`,
+      terms.next(),
+    );
 }
 
 export function esQuery() {
@@ -342,7 +354,9 @@ const scenarios = {
   },
 };
 backends.addDockerMetricsCollector(scenarios, timer);
-export function collectMetrics() { backends.collect(); }
+export function collectMetrics() {
+  backends.collect();
+}
 
 export const options = { scenarios };
 ```
@@ -359,17 +373,19 @@ const scenarios = {
     executor: "ramping-vus",
     startVUs: 1,
     stages: [
-      { duration: "30s", target: 10 },   // Ramp up to 10 VUs
-      { duration: "60s", target: 10 },   // Hold at 10
-      { duration: "30s", target: 50 },   // Ramp up to 50 VUs
-      { duration: "60s", target: 50 },   // Hold at 50
-      { duration: "30s", target: 0 },    // Ramp down
+      { duration: "30s", target: 10 }, // Ramp up to 10 VUs
+      { duration: "60s", target: 10 }, // Hold at 10
+      { duration: "30s", target: 50 }, // Ramp up to 50 VUs
+      { duration: "60s", target: 50 }, // Hold at 50
+      { duration: "30s", target: 0 }, // Ramp down
     ],
     exec: "queryTest",
   },
 };
 backends.addDockerMetricsCollector(scenarios, "220s");
-export function collectMetrics() { backends.collect(); }
+export function collectMetrics() {
+  backends.collect();
+}
 
 export const options = { scenarios };
 ```
@@ -402,11 +418,11 @@ The `nextBatchSwapped()` method lazily builds a copy of all documents with adjac
 
 Each backend returned by `backends.get()` also exposes:
 
-| Method | Description |
-| --- | --- |
-| `setTimeout(seconds)` | Set the query timeout for this backend |
-| `insert(table, doc)` | Insert a single document |
-| `update(table, doc)` | Update a single document (keyed by `id` or `_id`) |
+| Method                | Description                                       |
+| --------------------- | ------------------------------------------------- |
+| `setTimeout(seconds)` | Set the query timeout for this backend            |
+| `insert(table, doc)`  | Insert a single document                          |
+| `update(table, doc)`  | Update a single document (keyed by `id` or `_id`) |
 
 Call `backends.setTimeout(seconds)` to set the timeout on all backends at once, or `backends.close()` to close all connections.
 
@@ -418,18 +434,28 @@ The loader can also bulk-load data directly from a k6 script (without the CLI). 
 const loader = db.loader();
 
 // Generic: specify backend name and connection string
-loader.load("paradedb", "postgres://postgres:postgres@localhost:5432/benchmark", {
-  file: "../data.csv",
-  table: "documents",
-  dataset: "../",
-  batchSize: 10000,
-});
+loader.load(
+  "paradedb",
+  "postgres://postgres:postgres@localhost:5432/benchmark",
+  {
+    file: "../data.csv",
+    table: "documents",
+    dataset: "../",
+    batchSize: 10000,
+  },
+);
 
 // Backend-specific helpers
 loader.loadParadeDB("postgres://...", { file: "../data.csv", dataset: "../" });
-loader.loadPostgresFTS("postgres://...", { file: "../data.csv", dataset: "../" });
+loader.loadPostgresFTS("postgres://...", {
+  file: "../data.csv",
+  dataset: "../",
+});
 loader.loadElasticsearch({ file: "../data.csv", dataset: "../" });
-loader.loadClickHouse("clickhouse://...", { file: "../data.csv", dataset: "../" });
+loader.loadClickHouse("clickhouse://...", {
+  file: "../data.csv",
+  dataset: "../",
+});
 loader.loadMongoDB("mongodb://...", { file: "../data.csv", dataset: "../" });
 ```
 
