@@ -37,7 +37,7 @@ This project extends k6 with the `k6/x/database` module, adding backend drivers,
 
 A single script can compose multiple scenarios across multiple backends. You might run queries against ParadeDB for 30 seconds, then against Elasticsearch for 30 seconds, with a built-in phase timer staggering them so they don't compete for system resources. Within each phase you can layer different workloads: a full-text search at 200 QPS, an aggregation query at 100 QPS, and a 1,000 row/s ingest stream, all running concurrently. The framework times every operation, tags it with the backend name, and pushes metrics to the dashboard automatically.
 
-While the framework exposes many backends, it's up to the user to write the queries to test (in JSON or SQL). A user can expect that the *way* the queries are run is optimal, but must still make sure the content of the queries is sane.
+While the framework exposes many backends, it's up to the user to write the queries to test (in JSON or SQL). A user can expect that the _way_ the queries are run is optimal, but must still make sure the content of the queries is sane.
 
 ### Ingest & update workloads
 
@@ -67,7 +67,7 @@ make
 
 ### 2. Start backends
 
-The included `docker-compose.yml` uses profiles, which provide an easy way to only spin up a subset of containers. 
+The included `docker-compose.yml` uses profiles, which provide an easy way to only spin up a subset of containers.
 
 Please note the 'sample' dataset which is included does not provide a meaningful benchmark, it's designed to show how to use the system.
 
@@ -118,18 +118,21 @@ const scenarios = {
 
 // Add docker based metric collection
 backends.addDockerMetricsCollector(scenarios, "35s");
-export function collectMetrics() { backends.collect(); }
+export function collectMetrics() {
+  backends.collect();
+}
 
 export const options = { scenarios };
 
 // Create the function which k6 will call on each iteration
 export function paradedbQuery() {
-
-// Activate the paradedb backend and run the query, cycling through the items in terms
-  backends.get("paradedb").query(
-    `SELECT id, title FROM documents WHERE content ||| $1 LIMIT 10`,
-    terms.next(),
-  );
+  // Activate the paradedb backend and run the query, cycling through the items in terms
+  backends
+    .get("paradedb")
+    .query(
+      `SELECT id, title FROM documents WHERE content ||| $1 LIMIT 10`,
+      terms.next(),
+    );
 }
 ```
 
@@ -139,14 +142,14 @@ The [Scripting Guide](docs/scripting.md) covers the full module API, backend con
 
 ## Documentation
 
-| Guide | Description |
-| --- | --- |
+| Guide                                | Description                                                     |
+| ------------------------------------ | --------------------------------------------------------------- |
 | [Scripting Guide](docs/scripting.md) | Module API, backend config, benchmark patterns, query reference |
-| [Dashboard](docs/dashboard.md) | Real-time UI, metrics reference, export & replay |
-| [Datasets](docs/datasets.md) | Directory structure, schema format, pre/post scripts |
-| [Data Loader](docs/loader.md) | CLI usage, connection strings, S3 pulls |
-| [Docker Setup](docs/docker.md) | Compose profiles, service ports, TLS |
-| [Contributing](CONTRIBUTING.md) | Adding backends, development setup, PR workflow |
+| [Dashboard](docs/dashboard.md)       | Real-time UI, metrics reference, export & replay                |
+| [Datasets](docs/datasets.md)         | Directory structure, schema format, pre/post scripts            |
+| [Data Loader](docs/loader.md)        | CLI usage, connection strings, S3 pulls                         |
+| [Docker Setup](docs/docker.md)       | Compose profiles, service ports, TLS                            |
+| [Contributing](CONTRIBUTING.md)      | Adding backends, development setup, PR workflow                 |
 
 ## License
 

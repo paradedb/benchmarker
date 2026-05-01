@@ -17,7 +17,7 @@ import (
 	_ "github.com/paradedb/benchmarker/backends/mongodb"
 	_ "github.com/paradedb/benchmarker/backends/opensearch"
 	_ "github.com/paradedb/benchmarker/backends/paradedb"
-_ "github.com/paradedb/benchmarker/backends/postgresfts"
+	_ "github.com/paradedb/benchmarker/backends/postgresfts"
 )
 
 // Backends holds all configured backend clients.
@@ -200,12 +200,14 @@ func (b *Backends) AddDockerMetricsCollector(call sobek.FunctionCall) sobek.Valu
 		}
 	}
 
-	scenarios.Set("metrics_collector", rt.ToValue(map[string]interface{}{
+	if err := scenarios.Set("metrics_collector", rt.ToValue(map[string]interface{}{
 		"executor": "constant-vus",
 		"vus":      1,
 		"duration": dur,
 		"exec":     "collectMetrics",
-	}))
+	})); err != nil {
+		common.Throw(rt, fmt.Errorf("failed to set metrics_collector scenario: %w", err))
+	}
 
 	return rt.ToValue(func() map[string]interface{} {
 		return b.Collect()
