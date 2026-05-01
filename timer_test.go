@@ -87,9 +87,9 @@ func TestTotalDurationSinglePhase(t *testing.T) {
 
 func TestTotalDurationMultiplePhases(t *testing.T) {
 	timer := newTestTimer(30, 5)
-	timer.Get()            // "0s"
-	timer.AdvanceAndGet()  // "35s"
-	timer.AdvanceAndGet()  // "70s"
+	timer.Get()           // "0s"
+	timer.AdvanceAndGet() // "35s"
+	timer.AdvanceAndGet() // "70s"
 	if got := timer.TotalDuration(); got != "105s" {
 		t.Fatalf("TotalDuration() = %q, want %q", got, "105s")
 	}

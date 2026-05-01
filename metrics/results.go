@@ -13,8 +13,8 @@ import (
 
 var (
 	// Unified metrics - tagged by backend
-	queryDuration  *metrics.Metric
-	queryHits      *metrics.Metric
+	queryDuration   *metrics.Metric
+	queryHits       *metrics.Metric
 	ingestDuration  *metrics.Metric
 	ingestDocs      *metrics.Metric
 	updateDuration  *metrics.Metric

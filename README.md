@@ -67,7 +67,7 @@ make
 
 ### 2. Start backends
 
-The included `docker-compose.yml` uses profiles, which provide an easy way to only spin up a subset of containers. 
+The included `docker-compose.yml` uses profiles, which provide an easy way to only spin up a subset of containers.
 
 Please note the 'sample' dataset which is included does not provide a meaningful benchmark, it's designed to show how to use the system.
 
