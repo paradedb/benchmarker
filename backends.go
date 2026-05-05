@@ -32,6 +32,11 @@ func (b *Backends) Get(alias string) *backends.K6Client {
 	return b.clients[alias]
 }
 
+// GetAll returns all backend clients keyed by alias.
+func (b *Backends) GetAll() map[string]*backends.K6Client {
+	return b.clients
+}
+
 func (m *ModuleInstance) configErrorf(format string, args ...interface{}) {
 	err := fmt.Errorf(format, args...)
 	if m.vu != nil {
