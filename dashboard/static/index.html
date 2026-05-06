@@ -1940,7 +1940,12 @@
           return matchingRun?.startTime > 0;
         }).sort();
 
-        if (activeContainerNames.length > 0) {
+        const hasMetricsData = activeContainerNames.some(name => {
+          const c = containers[name];
+          return (c.cpu && c.cpu.length > 0) || (c.memory && c.memory.length > 0);
+        });
+
+        if (activeContainerNames.length > 0 && hasMetricsData) {
           document.getElementById("metrics-container").style.display = "grid";
 
           // Find start time for each container based on its associated run
