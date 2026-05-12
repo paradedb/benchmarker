@@ -142,7 +142,7 @@ Options:
 
 Environment Variables:
   PARADEDB_URL       ParadeDB connection string
-  POSTGRES_FTS_URL   PostgreSQL FTS connection string
+  POSTGRES_URL       PostgreSQL connection string
   ELASTICSEARCH_URL  Elasticsearch address
   OPENSEARCH_URL     OpenSearch address
   CLICKHOUSE_URL     ClickHouse connection string
@@ -168,12 +168,6 @@ func getConnection(name string) string {
 	}
 	if val := os.Getenv(cfg.EnvVar); val != "" {
 		return val
-	}
-	// Backward-compatibility for prior postgresfts env var name.
-	if name == "postgresfts" {
-		if val := os.Getenv("POSTGRESFTS_URL"); val != "" {
-			return val
-		}
 	}
 	return cfg.DefaultConn
 }

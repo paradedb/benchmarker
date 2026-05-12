@@ -11,7 +11,7 @@ datasets/sample/
 ├── paradedb/
 │   ├── pre.sql              # Create tables, set up schema
 │   └── post.sql             # Create indexes, VACUUM ANALYZE
-├── postgresfts/
+├── postgres/
 │   ├── pre.sql
 │   └── post.sql
 ├── elasticsearch/

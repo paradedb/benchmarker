@@ -72,7 +72,7 @@ The included `docker-compose.yml` uses profiles, which provide an easy way to on
 Please note the 'sample' dataset which is included does not provide a meaningful benchmark, it's designed to show how to use the system.
 
 ```bash
-docker compose --profile paradedb --profile postgresfts up -d
+docker compose --profile paradedb --profile postgres up -d
 ```
 
 See [Docker Setup](docs/docker.md) for all available profiles and services.

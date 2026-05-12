@@ -61,10 +61,10 @@ services:
       - "-c"
       - "jit=off"
 
-  postgresfts:
-    profiles: [postgresfts, all]
+  postgres:
+    profiles: [postgres, all]
     image: postgres:18
-    container_name: postgresfts
+    container_name: postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -72,7 +72,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - postgres_fts_data:/var/lib/postgresql/docker
+      - postgres_data:/var/lib/postgresql/docker
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -256,7 +256,7 @@ services:
 
 volumes:
   paradedb_data:
-  postgres_fts_data:
+  postgres_data:
   elasticsearch_data:
   opensearch_data:
   clickhouse_data:

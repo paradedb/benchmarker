@@ -504,9 +504,9 @@ func (l *Loader) LoadParadeDB(connectionString string, config map[string]interfa
 	return l.Load("paradedb", connectionString, config)
 }
 
-// LoadPostgresFTS loads CSV data into vanilla PostgreSQL with tsquery/tsvector.
-func (l *Loader) LoadPostgresFTS(connectionString string, config map[string]interface{}) map[string]interface{} {
-	return l.Load("postgresfts", connectionString, config)
+// LoadPostgres loads CSV data into PostgreSQL.
+func (l *Loader) LoadPostgres(connectionString string, config map[string]interface{}) map[string]interface{} {
+	return l.Load("postgres", connectionString, config)
 }
 
 // LoadElasticsearch loads CSV data into Elasticsearch.

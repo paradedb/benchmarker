@@ -36,7 +36,7 @@ The loader reads connection strings from environment variables:
 
 ```bash
 export PARADEDB_URL="postgres://postgres:postgres@localhost:5432/benchmark"
-export POSTGRES_FTS_URL="postgres://postgres:postgres@localhost:5433/benchmark"
+export POSTGRES_URL="postgres://postgres:postgres@localhost:5433/benchmark"
 export ELASTICSEARCH_URL="https://elastic:elastic@localhost:9200"
 export OPENSEARCH_URL="http://localhost:9201"
 export CLICKHOUSE_URL="clickhouse://default:clickhouse@localhost:9000/default"

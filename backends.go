@@ -17,7 +17,7 @@ import (
 	_ "github.com/paradedb/benchmarker/backends/mongodb"
 	_ "github.com/paradedb/benchmarker/backends/opensearch"
 	_ "github.com/paradedb/benchmarker/backends/paradedb"
-	_ "github.com/paradedb/benchmarker/backends/postgresfts"
+	_ "github.com/paradedb/benchmarker/backends/postgres"
 )
 
 // Backends holds all configured backend clients.
