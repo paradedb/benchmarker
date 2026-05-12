@@ -91,10 +91,10 @@ The framework is database-agnostic - the current backends and datasets are focus
 
 **PostgreSQL-based** (shared driver, different extensions):
 
-| Type          | Description                              |
-| ------------- | ---------------------------------------- |
-| `paradedb`    | ParadeDB with pg_search (BM25)           |
-| `postgresfts` | PostgreSQL native FTS (tsvector/tsquery) |
+| Type       | Description                              |
+| ---------- | ---------------------------------------- |
+| `paradedb` | ParadeDB with pg_search (BM25)           |
+| `postgres` | PostgreSQL                               |
 
 **Elasticsearch-based** (shared driver):
 
@@ -447,10 +447,7 @@ loader.load(
 
 // Backend-specific helpers
 loader.loadParadeDB("postgres://...", { file: "../data.csv", dataset: "../" });
-loader.loadPostgresFTS("postgres://...", {
-  file: "../data.csv",
-  dataset: "../",
-});
+loader.loadPostgres("postgres://...", { file: "../data.csv", dataset: "../" });
 loader.loadElasticsearch({ file: "../data.csv", dataset: "../" });
 loader.loadClickHouse("clickhouse://...", {
   file: "../data.csv",
@@ -476,10 +473,10 @@ backends.get("paradedb").query(
 );
 ```
 
-### PostgreSQL FTS
+### PostgreSQL (FTS)
 
 ```javascript
-backends.get("postgresfts").query(
+backends.get("postgres").query(
   `SELECT id, title, ts_rank(tsv, plainto_tsquery('english', $1)) as score
    FROM documents
    WHERE tsv @@ plainto_tsquery('english', $1)

@@ -22,7 +22,7 @@ docker compose --profile all up -d
 | Service       | Profile         | Port(s)    |
 | ------------- | --------------- | ---------- |
 | paradedb      | `paradedb`      | 5432       |
-| postgresfts   | `postgresfts`   | 5433       |
+| postgres      | `postgres`      | 5433       |
 | elasticsearch | `elasticsearch` | 9200       |
 | opensearch    | `opensearch`    | 9201, 9600 |
 | clickhouse    | `clickhouse`    | 9000, 8123 |
