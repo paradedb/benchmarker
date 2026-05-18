@@ -14,7 +14,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -179,9 +178,9 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int) 
 		os.Exit(1)
 	}
 
-	csvPath, err := findCSV(datasetDir)
-	if err != nil {
-		fmt.Printf("Error locating CSV file: %v\n", err)
+	csvPath := filepath.Join(datasetDir, "data.csv")
+	if _, err := os.Stat(csvPath); err != nil {
+		fmt.Printf("Error locating data.csv: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -315,31 +314,6 @@ func loadSchema(datasetDir string) (*backends.Schema, error) {
 	}
 
 	return &schema, nil
-}
-
-func findCSV(datasetDir string) (string, error) {
-	entries, err := os.ReadDir(datasetDir)
-	if err != nil {
-		return "", err
-	}
-
-	var csvFiles []string
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if strings.EqualFold(filepath.Ext(e.Name()), ".csv") {
-			csvFiles = append(csvFiles, e.Name())
-		}
-	}
-	if len(csvFiles) == 0 {
-		return "", fmt.Errorf("no CSV file found in dataset directory")
-	}
-	if len(csvFiles) > 1 {
-		sort.Strings(csvFiles)
-		return "", fmt.Errorf("expected exactly one CSV file, found %d: %s", len(csvFiles), strings.Join(csvFiles, ", "))
-	}
-	return filepath.Join(datasetDir, csvFiles[0]), nil
 }
 
 // ============================================================================
