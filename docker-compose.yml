@@ -35,7 +35,7 @@ services:
     command:
       - "postgres"
       - "-c"
-      - "shared_preload_libraries=pg_search"
+      - "shared_preload_libraries=pg_search,pg_cron"
       - "-c"
       - "shared_buffers=2GB"
       - "-c"
