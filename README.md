@@ -117,10 +117,7 @@ const scenarios = {
 };
 
 // Add docker based metric collection
-backends.addDockerMetricsCollector(scenarios, "35s");
-export function collectMetrics() {
-  backends.collect();
-}
+export const collectMetrics = backends.addDockerMetricsCollector(scenarios, "35s");
 
 export const options = { scenarios };
 
