@@ -8,6 +8,8 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"flag"
 	"fmt"
@@ -125,7 +127,7 @@ Usage:
 Commands:
   load    Run pre.sql/json, bulk load CSV, run post.sql/json
   drop    Drop tables/indexes for the dataset
-  pull    Download dataset from S3 to ./datasets/<name>/
+  pull    Download dataset from S3 to ./datasets/<name>/ (auto-extracts .tar.gz/.tgz)
   help    Show this help message
 
 Backends:
@@ -156,6 +158,7 @@ Examples:
   loader drop --backend paradedb ./datasets/sample
   loader pull --dataset large --source s3://mybucket/datasets/large/
   loader pull --dataset test --source s3://fts-bench/datasets/test/ --anonymous
+  loader pull --dataset hn --source s3://fts-bench/datasets/hn.tar.gz --anonymous
   PARADEDB_URL=postgres://user:pass@host:5432/db loader load --backend paradedb ./datasets/sample`)
 }
 
@@ -328,6 +331,10 @@ func runPull(datasetName, sourceURL string, anonymous bool) {
 	}
 
 	destDir := filepath.Join("datasets", datasetName)
+	if err := prepareDestDir(destDir); err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Printf("Pulling from s3://%s/%s to %s\n", bucket, prefix, destDir)
 	if anonymous {
 		fmt.Println("Using anonymous access (public bucket)")
@@ -350,6 +357,14 @@ func runPull(datasetName, sourceURL string, anonymous bool) {
 	}
 
 	client := s3.NewFromConfig(cfg)
+
+	if isTarGzKey(prefix) {
+		if err := pullTarGz(ctx, client, bucket, prefix, destDir); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	var objects []string
 	paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
@@ -437,6 +452,116 @@ func runPull(datasetName, sourceURL string, anonymous bool) {
 	if failed > 0 {
 		os.Exit(1)
 	}
+}
+
+// prepareDestDir ensures destDir is a real, empty directory we can safely
+// write into. It rejects symlinks and non-empty directories so that tar/S3
+// entries can't be written through a pre-existing symlinked subpath.
+func prepareDestDir(destDir string) error {
+	info, err := os.Lstat(destDir)
+	if os.IsNotExist(err) {
+		return os.MkdirAll(destDir, 0755)
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("destination %q is a symlink; refusing to extract into it", destDir)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("destination %q exists and is not a directory", destDir)
+	}
+	entries, err := os.ReadDir(destDir)
+	if err != nil {
+		return err
+	}
+	if len(entries) > 0 {
+		return fmt.Errorf("destination %q is not empty; remove it before pulling", destDir)
+	}
+	return nil
+}
+
+func isTarGzKey(key string) bool {
+	lower := strings.ToLower(key)
+	return strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz")
+}
+
+func pullTarGz(ctx context.Context, client *s3.Client, bucket, key, destDir string) error {
+	resp, err := client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("downloading %s: %w", key, err)
+	}
+	defer resp.Body.Close()
+
+	gz, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return fmt.Errorf("opening gzip stream: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	var extracted, skipped int
+	var totalBytes int64
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("reading tar: %w", err)
+		}
+
+		switch hdr.Typeflag {
+		case tar.TypeReg, tar.TypeRegA, tar.TypeDir:
+		default:
+			fmt.Printf("  Skipping %s (unsupported tar entry type %c)\n", hdr.Name, hdr.Typeflag)
+			skipped++
+			continue
+		}
+
+		relPath, localPath, err := resolveDownloadPath(destDir, "", hdr.Name)
+		if err != nil {
+			fmt.Printf("  Skipping %s: %v\n", hdr.Name, err)
+			skipped++
+			continue
+		}
+
+		if hdr.Typeflag == tar.TypeDir {
+			if err := os.MkdirAll(localPath, 0755); err != nil {
+				return fmt.Errorf("creating dir %s: %w", relPath, err)
+			}
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+			return fmt.Errorf("creating dir for %s: %w", relPath, err)
+		}
+
+		f, err := os.Create(localPath)
+		if err != nil {
+			return fmt.Errorf("creating %s: %w", localPath, err)
+		}
+		n, err := io.Copy(f, tr)
+		f.Close()
+		if err != nil {
+			return fmt.Errorf("writing %s: %w", localPath, err)
+		}
+
+		totalBytes += n
+		extracted++
+		fmt.Printf("  %s (%s)\n", relPath, formatBytes(n))
+	}
+
+	fmt.Printf("\nComplete: %d files extracted (%.2f MB)", extracted, float64(totalBytes)/1024/1024)
+	if skipped > 0 {
+		fmt.Printf(", %d skipped", skipped)
+	}
+	fmt.Println()
+	return nil
 }
 
 func resolveDownloadPath(destDir, prefix, key string) (string, string, error) {

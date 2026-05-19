@@ -643,7 +643,7 @@
       let runColors = {};
       let selectedMetric = "p95";
       let lastMetric = "p95";
-      let chartType = "latency"; // 'latency' or 'hits'
+      let chartType = "latency"; // 'latency' | 'hits' | 'throughput'
       let lastChartType = "latency";
       let colorIndex = 0;
       let lastElapsed = 0;
@@ -997,12 +997,13 @@
             <h2>${chartTitle}<select class="chart-type-select" data-chart="${safeGroupId}">
               <option value="latency" selected>Latency</option>
               <option value="hits">Hits</option>
+              <option value="throughput">Throughput</option>
             </select> <span class="metric-wrapper"><select class="metric-select" data-chart="${safeGroupId}">
               <option value="p50">P50</option>
               <option value="p90">P90</option>
               <option value="p95" selected>P95</option>
               <option value="p99">P99</option>
-            </select> (ms)</span><span class="hits-unit" style="display:none;">(avg)</span></h2>
+            </select> (ms)</span><span class="hits-unit" style="display:none;">(avg)</span><span class="throughput-unit" style="display:none;">(qps)</span></h2>
             <div class="chart-controls">
               <button class="reset-zoom" onclick="resetZoom()" title="Double-click chart to reset">Reset Zoom</button>
               <div class="legend" id="legend-${safeGroupId}"></div>
@@ -1038,13 +1039,10 @@
         // Sync metric wrapper visibility based on chart type
         const metricWrapper = section.querySelector('.metric-wrapper');
         const hitsUnit = section.querySelector('.hits-unit');
-        if (chartType === 'hits') {
-          if (metricWrapper) metricWrapper.style.display = 'none';
-          if (hitsUnit) hitsUnit.style.display = 'inline';
-        } else {
-          if (metricWrapper) metricWrapper.style.display = 'inline';
-          if (hitsUnit) hitsUnit.style.display = 'none';
-        }
+        const throughputUnit = section.querySelector('.throughput-unit');
+        if (metricWrapper) metricWrapper.style.display = chartType === 'latency' ? 'inline' : 'none';
+        if (hitsUnit) hitsUnit.style.display = chartType === 'hits' ? 'inline' : 'none';
+        if (throughputUnit) throughputUnit.style.display = chartType === 'throughput' ? 'inline' : 'none';
 
         // Create chart instance
         const canvas = document.getElementById(`chart-${safeGroupId}`);
@@ -1082,10 +1080,13 @@
         });
         // Update metric wrapper visibility for all charts
         document.querySelectorAll('.metric-wrapper').forEach(mw => {
-          mw.style.display = chartType === "hits" ? "none" : "inline";
+          mw.style.display = chartType === "latency" ? "inline" : "none";
         });
         document.querySelectorAll('.hits-unit').forEach(hu => {
           hu.style.display = chartType === "hits" ? "inline" : "none";
+        });
+        document.querySelectorAll('.throughput-unit').forEach(tu => {
+          tu.style.display = chartType === "throughput" ? "inline" : "none";
         });
         if (lastData) update(lastData);
       }
@@ -1840,6 +1841,14 @@
           if (aTime === bTime) return a.localeCompare(b);
           return aTime - bTime;
         });
+        // Throughput conversion: count of samples in window → qps.
+        // Sliding window uses timelineWindow; non-overlapping mode uses broadcastInterval.
+        const throughputWindowMs =
+          data.timelineWindow && data.timelineWindow > 0
+            ? data.timelineWindow
+            : data.broadcastInterval || 1000;
+        const throughputDivisor = throughputWindowMs / 1000;
+
         chartGroupsSorted.forEach((chartGroup) => {
             const chart = getOrCreateChartGroup(
               chartGroup === "default" ? "" : chartGroup,
@@ -1870,10 +1879,17 @@
                   // Slightly vary color for multiple queries in same run
                   const color =
                     idx === 0 ? baseColor : shadeColor(baseColor, idx * 15);
-                  const timelineData = (q.timeline || []).map((p) => ({
-                    x: (p.time - startTime) / 1000,
-                    y: chartType === "hits" ? p.hits || 0 : p[selectedMetric],
-                  }));
+                  const timelineData = (q.timeline || []).map((p) => {
+                    let y;
+                    if (chartType === "hits") {
+                      y = p.hits || 0;
+                    } else if (chartType === "throughput") {
+                      y = (p.count || 0) / throughputDivisor;
+                    } else {
+                      y = p[selectedMetric];
+                    }
+                    return { x: (p.time - startTime) / 1000, y };
+                  });
                   datasets.push({
                     datasetKey: `${name}::${qName}`,
                     label: qName,
@@ -1900,6 +1916,11 @@
                 formatNumber(Math.round(v));
               chart.options.plugins.tooltip.callbacks.label = (ctx) =>
                 `${ctx.dataset.label}: ${formatNumber(ctx.parsed.y)}`;
+            } else if (chartType === "throughput") {
+              chart.options.scales.y.ticks.callback = (v) =>
+                formatNumber(Math.round(v)) + " qps";
+              chart.options.plugins.tooltip.callbacks.label = (ctx) =>
+                `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} qps`;
             } else {
               chart.options.scales.y.ticks.callback = (v) =>
                 Math.round(v) + "ms";
