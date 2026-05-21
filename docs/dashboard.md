@@ -43,19 +43,37 @@ Enable with the `--out dashboard` flag:
 
 Then open http://localhost:5665/static/ in your browser.
 
-## Export & Replay
+### Output modes
 
-Save benchmark results and view them later, or export as standalone HTML to share.
+`--out dashboard` accepts a comma-separated list of outputs. Each keyword toggles one output independently — order doesn't matter, unknown keywords error out.
+
+| Keyword | Effect                                                  |
+| ------- | ------------------------------------------------------- |
+| `live`  | Serve the real-time dashboard at http://localhost:5665/ |
+| `json`  | Write a raw `dashboard_<timestamp>.json` snapshot on exit |
+| `html`  | Write a standalone `dashboard_<timestamp>.html` viewer on exit |
 
 ```bash
-# Export dashboard data during run
-DASHBOARD_EXPORT=true ./k6 run --out dashboard benchmark.js
+# Default — live dashboard only
+./k6 run --out dashboard script.js
 
-# View saved data later (use generated dashboard_<timestamp>.json file)
+# Standalone HTML file only (no server)
+./k6 run --out dashboard=html script.js
+
+# Live dashboard + both export files
+./k6 run --out dashboard=live,html,json script.js
+```
+
+## Export & Replay
+
+The saved JSON keeps raw latency samples so you can re-aggregate with different timeline settings; the HTML is a single-file viewer with the same data embedded.
+
+```bash
+# View saved JSON later
 ./bin/dashboard-viewer ./dashboard_2026-02-28_12-00-00.json
 
-# Save as a standalone HTML file
-./bin/dashboard-viewer --html report.html ./dashboard_2026-02-28_12-00-00.json
+# Re-export a saved JSON to a standalone HTML file
+./bin/dashboard-viewer --export report.html ./dashboard_2026-02-28_12-00-00.json
 ```
 
 Build the viewer with:
@@ -85,6 +103,5 @@ The extension emits standard k6 metrics with backend tags:
 
 | Variable                 | Default | Description                                                                        |
 | ------------------------ | ------- | ---------------------------------------------------------------------------------- |
-| `DASHBOARD_EXPORT`       | `false` | Set to `true` to save a JSON snapshot when the test ends                           |
 | `DASHBOARD_BROADCAST_MS` | `200`   | SSE broadcast interval in milliseconds                                             |
 | `DASHBOARD_WINDOW_MS`    | `1000`  | Sliding window for timeline percentile aggregation (0 for non-overlapping buckets) |

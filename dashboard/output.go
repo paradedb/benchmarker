@@ -44,6 +44,11 @@ type Output struct {
 	// Timeline controls (resolved from env vars or defaults)
 	broadcastInterval time.Duration
 	timelineWindow    time.Duration
+
+	// Output toggles parsed from --out dashboard=<live,json,html>
+	liveEnabled bool
+	exportJSON  bool
+	exportHTML  bool
 }
 
 // DashboardData holds all metrics for the dashboard.
@@ -163,6 +168,28 @@ func (o *Output) getOrCreateRun(runName, backend string, tags map[string]string)
 	return rm
 }
 
+// parseOutputModes parses the comma-separated keyword list from
+// --out dashboard=<modes>. Empty arg defaults to live only. Recognized
+// keywords are "live", "json", "html"; anything else is an error.
+func parseOutputModes(arg string) (live, exportJSON, exportHTML bool, err error) {
+	if strings.TrimSpace(arg) == "" {
+		return true, false, false, nil
+	}
+	for _, raw := range strings.Split(arg, ",") {
+		switch strings.TrimSpace(raw) {
+		case "live":
+			live = true
+		case "json":
+			exportJSON = true
+		case "html":
+			exportHTML = true
+		default:
+			return false, false, false, fmt.Errorf("unknown dashboard output mode %q (expected live, json, or html)", raw)
+		}
+	}
+	return live, exportJSON, exportHTML, nil
+}
+
 // New creates a new dashboard output.
 func New(params output.Params) (output.Output, error) {
 	broadcast := defaultBroadcastInterval
@@ -177,6 +204,11 @@ func New(params output.Params) (output.Output, error) {
 		}
 	}
 
+	live, exportJSON, exportHTML, err := parseOutputModes(params.ConfigArgument)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Output{
 		params:            params,
 		stopCh:            make(chan struct{}),
@@ -184,6 +216,9 @@ func New(params output.Params) (output.Output, error) {
 		clients:           make(map[chan []byte]struct{}),
 		broadcastInterval: broadcast,
 		timelineWindow:    window,
+		liveEnabled:       live,
+		exportJSON:        exportJSON,
+		exportHTML:        exportHTML,
 		data: &DashboardData{
 			StartTime:  time.Now(),
 			Runs:       make(map[string]*RunMetrics),
@@ -194,35 +229,51 @@ func New(params output.Params) (output.Output, error) {
 
 // Description returns a human-readable description.
 func (o *Output) Description() string {
-	return "Web Dashboard (http://localhost:5665/static/)"
+	var parts []string
+	if o.liveEnabled {
+		parts = append(parts, "live http://localhost:5665/static/")
+	}
+	if o.exportJSON {
+		parts = append(parts, "json export")
+	}
+	if o.exportHTML {
+		parts = append(parts, "html export")
+	}
+	if len(parts) == 0 {
+		return "Dashboard (no outputs enabled)"
+	}
+	return "Dashboard (" + strings.Join(parts, ", ") + ")"
 }
 
-// Start starts the HTTP server.
+// Start starts the HTTP server (when live mode is enabled) and the flush loop.
 func (o *Output) Start() error {
-	mux := http.NewServeMux()
-	mux.Handle("/", http.FileServer(http.FS(staticFiles)))
-	mux.HandleFunc("/events", o.handleSSE)
-	mux.HandleFunc("/data", o.handleData)
+	if o.liveEnabled {
+		mux := http.NewServeMux()
+		mux.Handle("/", http.FileServer(http.FS(staticFiles)))
+		mux.HandleFunc("/events", o.handleSSE)
+		mux.HandleFunc("/data", o.handleData)
 
-	o.server = &http.Server{
-		Addr:    ":5665",
-		Handler: mux,
+		o.server = &http.Server{
+			Addr:    ":5665",
+			Handler: mux,
+		}
+
+		go func() {
+			if err := o.server.ListenAndServe(); err != http.ErrServerClosed {
+				fmt.Printf("Dashboard server error: %v\n", err)
+			}
+		}()
+
+		fmt.Println("\n📊 Dashboard: http://localhost:5665/static/")
 	}
 
-	go func() {
-		if err := o.server.ListenAndServe(); err != http.ErrServerClosed {
-			fmt.Printf("Dashboard server error: %v\n", err)
-		}
-	}()
-
 	go o.loop()
-
-	fmt.Println("\n📊 Dashboard: http://localhost:5665/static/")
 
 	return nil
 }
 
-// Stop shuts down the server and optionally saves results to JSON.
+// Stop shuts down the server and writes export files for whichever
+// formats were requested via --out dashboard=<modes>.
 func (o *Output) Stop() error {
 	close(o.stopCh)
 	<-o.doneCh
@@ -241,28 +292,43 @@ func (o *Output) Stop() error {
 	o.mu.Unlock()
 
 	// One final broadcast so SSE clients get the corrected QPS
-	o.broadcast()
+	if o.liveEnabled {
+		o.broadcast()
+	}
 
-	// Save dashboard state to JSON file if DASHBOARD_EXPORT=true
-	if os.Getenv("DASHBOARD_EXPORT") == "true" {
+	if o.exportJSON || o.exportHTML {
 		o.mu.RLock()
 		data := o.getExportData()
 		o.mu.RUnlock()
 
-		jsonData, err := json.MarshalIndent(data, "", "  ")
-		if err == nil {
-			filename := fmt.Sprintf("dashboard_%s.json", time.Now().Format("2006-01-02_15-04-05"))
-			if err := os.WriteFile(filename, jsonData, 0644); err == nil {
-				fmt.Printf("\n📊 Dashboard results saved to: %s\n", filename)
-				fmt.Printf("   View with: dashboard-viewer %s\n\n", filename)
+		base := fmt.Sprintf("dashboard_%s", time.Now().Format("2006-01-02_15-04-05"))
+
+		if o.exportJSON {
+			jsonData, err := json.MarshalIndent(data, "", "  ")
+			if err == nil {
+				filename := base + ".json"
+				if err := os.WriteFile(filename, jsonData, 0644); err == nil {
+					fmt.Printf("\n📊 Dashboard JSON saved to: %s\n", filename)
+					fmt.Printf("   View with: dashboard-viewer %s\n", filename)
+				}
 			}
 		}
+
+		if o.exportHTML {
+			filename := base + ".html"
+			if err := emitStandaloneHTML(data, filename, o.broadcastInterval, o.timelineWindow); err == nil {
+				fmt.Printf("\n📊 Dashboard HTML saved to: %s\n", filename)
+			}
+		}
+		fmt.Println()
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := o.server.Shutdown(ctx); err != nil && err != http.ErrServerClosed {
-		return err
+	if o.server != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := o.server.Shutdown(ctx); err != nil && err != http.ErrServerClosed {
+			return err
+		}
 	}
 
 	return nil
@@ -1313,12 +1379,18 @@ func ExportStandalone(jsonFile, outputFile string, notes ...string) error {
 		}
 	}
 
+	return emitStandaloneHTML(rawData, outputFile, broadcast, window)
+}
+
+// emitStandaloneHTML re-aggregates raw export data and writes a standalone HTML
+// viewer with the result embedded as JSON. The frontend prefers this embedded
+// payload over the SSE stream when present.
+func emitStandaloneHTML(rawData map[string]interface{}, outputFile string, broadcast, window time.Duration) error {
 	aggregated := aggregateExportData(rawData, broadcast, window)
 	compactJSON, _ := json.Marshal(aggregated)
 	var escapedJSON bytes.Buffer
 	json.HTMLEscape(&escapedJSON, compactJSON)
 
-	// Read the embedded HTML template
 	htmlData, err := staticFiles.ReadFile("static/index.html")
 	if err != nil {
 		return fmt.Errorf("failed to read HTML template: %w", err)
@@ -1327,17 +1399,13 @@ func ExportStandalone(jsonFile, outputFile string, notes ...string) error {
 	html := string(htmlData)
 	dataScript := fmt.Sprintf("<script>window.__DASHBOARD_EMBEDDED_DATA = %s;</script>", escapedJSON.String())
 	// Inject before </head> so the data is defined before the main script runs.
-	// Injecting before </body> puts it AFTER the main script block, by which time
-	// the embedded-data check has already run and fallen back to EventSource.
 	if !strings.Contains(html, "</head>") {
 		return fmt.Errorf("failed to inject embedded data: missing </head> tag")
 	}
 	html = strings.Replace(html, "</head>", dataScript+"\n</head>", 1)
 
-	// Write the output file
 	if err := os.WriteFile(outputFile, []byte(html), 0644); err != nil {
 		return fmt.Errorf("failed to write output file: %w", err)
 	}
-
 	return nil
 }
