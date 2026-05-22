@@ -1344,6 +1344,7 @@
               return getAvgMetric(runA) - getAvgMetric(runB);
             });
 
+            const backendsBlock = data.backends || {};
             sortedBackends.forEach((name, idx) => {
               const run = runs[name];
               const color = getRunColor(name, run);
@@ -1351,9 +1352,12 @@
               const statId = `stat-${safeNameId}`;
               const queryContainerId = `${safeNameId}-queries`;
 
-              // Store config if available
-              if (run.config && Object.keys(run.config).length > 0) {
-                runConfigs[name] = run.config;
+              // Look up the deduplicated backend snapshot for this run.
+              const backendSnapshot = backendsBlock[run.backend] || {};
+              const backendConfig = backendSnapshot.config || {};
+              const containerInfo = backendSnapshot.container_info || null;
+              if (Object.keys(backendConfig).length > 0 || containerInfo) {
+                runConfigs[name] = backendSnapshot;
               }
 
               const labelId = `label-${safeNameId}`;
@@ -1365,14 +1369,14 @@
                 el.className = "stat-group expanded";
                 el.style.borderLeftColor = color;
 
-                // Build limits string
+                // Build limits string from container_info on the backend snapshot.
                 let limitsStr = "";
-                if (run.containerLimits) {
+                if (containerInfo) {
                   const parts = [];
-                  if (run.containerLimits.cpu_limit)
-                    parts.push(escapeHtml(run.containerLimits.cpu_limit));
-                  if (run.containerLimits.memory_limit)
-                    parts.push(escapeHtml(run.containerLimits.memory_limit));
+                  if (containerInfo.cpu_limit)
+                    parts.push(escapeHtml(containerInfo.cpu_limit));
+                  if (containerInfo.memory_limit)
+                    parts.push(escapeHtml(containerInfo.memory_limit));
                   if (parts.length > 0)
                     limitsStr = `<span style="color: var(--text-dim); font-size: 9px; margin-left: 8px;">${parts.join(" / ")}</span>`;
                 }
@@ -1388,7 +1392,8 @@
 
               // Set up config click handler after element is in the DOM.
               // Runs on every update so it works even if config arrives later.
-              const hasConfig = run.config && Object.keys(run.config).length > 0;
+              const hasConfig =
+                Object.keys(backendConfig).length > 0 || containerInfo;
               if (hasConfig) {
                 const labelEl = document.getElementById(labelId);
                 if (labelEl && !labelEl.dataset.configHandler) {
@@ -1618,18 +1623,17 @@
       }
 
       function showConfigModal(runName) {
-        const config = runConfigs[runName];
-        if (!config || Object.keys(config).length === 0) {
-          return; // No config available
-        }
+        const snapshot = runConfigs[runName];
+        if (!snapshot) return;
+        const config = snapshot.config || {};
+        const containerInfo = snapshot.container_info || null;
+        if (Object.keys(config).length === 0 && !containerInfo) return;
 
         document.getElementById("config-modal-title").textContent = runName;
 
-        // Separate config into tabs
         const preScript = config.pre_script;
         const postScript = config.post_script;
 
-        // Build tabs
         let tabsHtml = '<div class="config-tabs">';
         tabsHtml +=
           '<button class="config-tab active" onclick="switchConfigTab(\'config\')">Config</button>';
@@ -1641,20 +1645,22 @@
           tabsHtml +=
             '<button class="config-tab" onclick="switchConfigTab(\'post\')">Post</button>';
         }
+        if (containerInfo) {
+          tabsHtml +=
+            '<button class="config-tab" onclick="switchConfigTab(\'container\')">Container</button>';
+        }
         tabsHtml += "</div>";
 
-        // Helper to format config values
         function formatConfigValue(val) {
           if (val === null || val === undefined) return "-";
           if (typeof val === "object") return JSON.stringify(val);
           return String(val);
         }
 
-        // Config tab content
+        // Config tab — DB GUCs etc.
         let configHtml =
           '<div id="tab-config" class="config-tab-content active">';
         for (const [section, value] of Object.entries(config)) {
-          // Skip sections that have their own tabs
           if (["pre_script", "post_script"].includes(section)) continue;
 
           if (
@@ -1680,24 +1686,130 @@
         }
         configHtml += "</div>";
 
-        // Pre script tab content
+        // Pre / Post tabs.
+        const codeBlock = (text) =>
+          `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 0; background: var(--bg); padding: 12px; border-radius: 4px;">${escapeHtml(text)}</pre>`;
         let preHtml = '<div id="tab-pre" class="config-tab-content">';
-        if (preScript) {
-          preHtml += `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 0; background: var(--bg); padding: 12px; border-radius: 4px;">${escapeHtml(preScript)}</pre>`;
-        }
+        if (preScript) preHtml += codeBlock(preScript);
         preHtml += "</div>";
 
-        // Post script tab content
         let postHtml = '<div id="tab-post" class="config-tab-content">';
-        if (postScript) {
-          postHtml += `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 0; background: var(--bg); padding: 12px; border-radius: 4px;">${escapeHtml(postScript)}</pre>`;
-        }
+        if (postScript) postHtml += codeBlock(postScript);
         postHtml += "</div>";
 
+        // Container tab — docker inspect subset.
+        let containerHtml = '<div id="tab-container" class="config-tab-content">';
+        if (containerInfo) {
+          containerHtml += renderContainerInfo(containerInfo);
+        }
+        containerHtml += "</div>";
+
         document.getElementById("config-modal-content").innerHTML =
-          tabsHtml + configHtml + preHtml + postHtml;
+          tabsHtml + configHtml + preHtml + postHtml + containerHtml;
         document.getElementById("modal-backdrop").classList.add("visible");
         document.getElementById("config-modal").classList.add("visible");
+      }
+
+      // renderContainerInfo turns the docker-inspect subset into the same
+      // sections/items layout used by the Config tab.
+      function renderContainerInfo(info) {
+        const items = (kvs) =>
+          kvs
+            .map(
+              ([k, v]) =>
+                `<div class="config-item">
+                  <span class="config-key">${escapeHtml(k)}</span>
+                  <span class="config-value">${escapeHtml(v)}</span>
+                </div>`,
+            )
+            .join("");
+        const section = (title, body) =>
+          `<div class="config-section">
+            <div class="config-section-title">${escapeHtml(title)}</div>
+            ${body}
+          </div>`;
+
+        let html = "";
+
+        // Image + identity
+        const idRows = [];
+        if (info.image) idRows.push(["image", info.image]);
+        if (info.image_id) idRows.push(["image_id", info.image_id]);
+        if (info.network_mode) idRows.push(["network_mode", info.network_mode]);
+        if (info.cpu_limit) idRows.push(["cpu_limit", info.cpu_limit]);
+        if (info.memory_limit) idRows.push(["memory_limit", info.memory_limit]);
+        if (idRows.length) html += section("identity", items(idRows));
+
+        // Command
+        if (Array.isArray(info.cmd) && info.cmd.length) {
+          html +=
+            section(
+              "cmd",
+              `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 0;">${escapeHtml(info.cmd.join(" "))}</pre>`,
+            );
+        }
+
+        // Env
+        if (Array.isArray(info.env) && info.env.length) {
+          html += section(
+            "env",
+            items(
+              info.env.map((e) => {
+                const idx = e.indexOf("=");
+                return idx >= 0
+                  ? [e.slice(0, idx), e.slice(idx + 1)]
+                  : [e, ""];
+              }),
+            ),
+          );
+        }
+
+        // Host config raw fields
+        if (info.host_config) {
+          const hc = info.host_config;
+          const rows = [];
+          if (hc.nano_cpus) rows.push(["nano_cpus", String(hc.nano_cpus)]);
+          if (hc.memory) rows.push(["memory", String(hc.memory)]);
+          if (hc.cpu_quota) rows.push(["cpu_quota", String(hc.cpu_quota)]);
+          if (Array.isArray(hc.cap_add) && hc.cap_add.length)
+            rows.push(["cap_add", hc.cap_add.join(", ")]);
+          if (Array.isArray(hc.security_opt) && hc.security_opt.length)
+            rows.push(["security_opt", hc.security_opt.join(", ")]);
+          if (rows.length) html += section("host_config", items(rows));
+        }
+
+        // Mounts
+        if (Array.isArray(info.mounts) && info.mounts.length) {
+          const rows = info.mounts.map((m) => [
+            m.destination || "?",
+            `${m.type || ""} ${m.source || ""}${m.rw === false ? " (ro)" : ""}`.trim(),
+          ]);
+          html += section("mounts", items(rows));
+        }
+
+        // Ports
+        if (info.ports && Object.keys(info.ports).length) {
+          const rows = [];
+          for (const [containerPort, bindings] of Object.entries(info.ports)) {
+            const value = Array.isArray(bindings)
+              ? bindings
+                  .map((b) => `${b.host_ip || "0.0.0.0"}:${b.host_port || ""}`)
+                  .join(", ")
+              : "";
+            rows.push([containerPort, value]);
+          }
+          html += section("ports", items(rows));
+        }
+
+        // Labels
+        if (info.labels && Object.keys(info.labels).length) {
+          html += section(
+            "labels",
+            items(Object.entries(info.labels).map(([k, v]) => [k, String(v)])),
+          );
+        }
+
+        return html;
       }
 
       function switchConfigTab(tabName) {

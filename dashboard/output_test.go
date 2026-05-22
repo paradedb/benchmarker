@@ -2,8 +2,12 @@ package dashboard
 
 import (
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/paradedb/benchmarker/metrics"
 )
 
 func TestUpdateIngestRateSkipsInitialPoint(t *testing.T) {
@@ -87,5 +91,95 @@ func TestGetSummaryUsesQueryWindowForQPS(t *testing.T) {
 	got := query["qps"].(float64)
 	if math.Abs(got-2.0) > 0.001 {
 		t.Fatalf("expected query qps of 2.0, got %.3f", got)
+	}
+}
+
+func TestGetSummaryEmitsTopLevelBackendsBlock(t *testing.T) {
+	metrics.RegisterBackendOptions("paradedb", &metrics.BackendOptions{
+		Container: "paradedb",
+		Alias:     "paradedb",
+		Color:     "#7c3aed",
+	})
+	metrics.RegisterBackendConfig("paradedb", map[string]interface{}{
+		"version": "PostgreSQL 18.0",
+	})
+	t.Cleanup(func() {
+		metrics.RegisterBackendConfig("paradedb", nil)
+	})
+
+	o := &Output{
+		data: &DashboardData{
+			StartTime: time.Unix(0, 0),
+			Runs: map[string]*RunMetrics{
+				"paradedb_simple": {
+					Name:    "paradedb_simple",
+					Backend: "paradedb",
+					Queries: map[string]*QueryMetrics{},
+				},
+			},
+		},
+	}
+
+	summary := o.getSummary()
+
+	// Top-level backends block exists and carries the deduplicated config.
+	backends, ok := summary["backends"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected top-level backends block, got %T", summary["backends"])
+	}
+	paradedb, ok := backends["paradedb"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected backends[paradedb], got %T", backends["paradedb"])
+	}
+	cfg, ok := paradedb["config"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected backends[paradedb].config map")
+	}
+	if cfg["version"] != "PostgreSQL 18.0" {
+		t.Fatalf("expected version in config, got %v", cfg["version"])
+	}
+
+	// Per-run entries no longer carry config / containerLimits.
+	run := summary["runs"].(map[string]interface{})["paradedb_simple"].(map[string]interface{})
+	if _, present := run["config"]; present {
+		t.Fatalf("expected run.config to be stripped (now top-level)")
+	}
+	if _, present := run["containerLimits"]; present {
+		t.Fatalf("expected run.containerLimits to be stripped (now under container_info)")
+	}
+}
+
+func TestReadMetaEnvInline(t *testing.T) {
+	t.Setenv("BENCHMARKER_META", `{"commit":"abc123","version":"v0.23.1"}`)
+	m := readMetaEnv()
+	if m["commit"] != "abc123" {
+		t.Fatalf("expected commit=abc123, got %v", m["commit"])
+	}
+	if m["version"] != "v0.23.1" {
+		t.Fatalf("expected version=v0.23.1, got %v", m["version"])
+	}
+}
+
+func TestReadMetaEnvFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "meta.json")
+	if err := os.WriteFile(path, []byte(`{"commit":"xyz","links":["https://example.com"]}`), 0644); err != nil {
+		t.Fatalf("write meta file: %v", err)
+	}
+	t.Setenv("BENCHMARKER_META", "@"+path)
+	m := readMetaEnv()
+	if m["commit"] != "xyz" {
+		t.Fatalf("expected commit=xyz, got %v", m["commit"])
+	}
+	links, ok := m["links"].([]interface{})
+	if !ok || len(links) != 1 || links[0] != "https://example.com" {
+		t.Fatalf("expected links=[example.com], got %v", m["links"])
+	}
+}
+
+func TestReadMetaEnvUnsetReturnsNil(t *testing.T) {
+	t.Setenv("BENCHMARKER_META", "")
+	if m := readMetaEnv(); m != nil {
+		t.Fatalf("expected nil for unset env, got %v", m)
 	}
 }

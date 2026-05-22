@@ -709,23 +709,18 @@ func (o *Output) getSummary() map[string]interface{} {
 			}
 		}
 
-		// Add database config based on backend tag
-		config, containerLimits := getBackendConfig(rm.Backend, rm.Container)
-
 		runs[name] = map[string]interface{}{
-			"name":            rm.Name,
-			"backend":         rm.Backend,
-			"container":       rm.Container,
-			"alias":           rm.Alias,
-			"color":           rm.Color,
-			"chart":           rm.Chart,
-			"ingestRate":      rm.IngestRate,
-			"totalIngested":   rm.TotalIngested,
-			"avgIngestRate":   ingestRate,
-			"queries":         queries,
-			"startTime":       rm.StartTime,
-			"config":          config,
-			"containerLimits": containerLimits,
+			"name":          rm.Name,
+			"backend":       rm.Backend,
+			"container":     rm.Container,
+			"alias":         rm.Alias,
+			"color":         rm.Color,
+			"chart":         rm.Chart,
+			"ingestRate":    rm.IngestRate,
+			"totalIngested": rm.TotalIngested,
+			"avgIngestRate": ingestRate,
+			"queries":       queries,
+			"startTime":     rm.StartTime,
 		}
 	}
 
@@ -742,15 +737,20 @@ func (o *Output) getSummary() map[string]interface{} {
 		}
 	}
 
-	return map[string]interface{}{
+	out := map[string]interface{}{
 		"elapsed":           elapsed,
 		"chartDuration":     chartDuration,
 		"runs":              runs,
+		"backends":          buildBackendsBlock(),
 		"containers":        containers,
 		"startTime":         o.data.StartTime.UnixMilli(),
 		"broadcastInterval": o.broadcastInterval.Milliseconds(),
 		"timelineWindow":    o.timelineWindow.Milliseconds(),
 	}
+	if meta := readMetaEnv(); meta != nil {
+		out["meta"] = meta
+	}
+	return out
 }
 
 // getExportData returns raw data for JSON export — no pre-aggregated timeline,
@@ -775,8 +775,6 @@ func (o *Output) getExportData() map[string]interface{} {
 			}
 		}
 
-		config, containerLimits := getBackendConfig(rm.Backend, rm.Container)
-
 		var endTime int64
 		if rm.EndTime > 0 {
 			endTime = rm.EndTime
@@ -787,19 +785,17 @@ func (o *Output) getExportData() map[string]interface{} {
 		}
 
 		runs[name] = map[string]interface{}{
-			"name":            rm.Name,
-			"backend":         rm.Backend,
-			"container":       rm.Container,
-			"alias":           rm.Alias,
-			"color":           rm.Color,
-			"chart":           rm.Chart,
-			"ingestRate":      rm.IngestRate,
-			"totalIngested":   rm.TotalIngested,
-			"startTime":       rm.StartTime,
-			"endTime":         endTime,
-			"config":          config,
-			"containerLimits": containerLimits,
-			"queries":         queries,
+			"name":          rm.Name,
+			"backend":       rm.Backend,
+			"container":     rm.Container,
+			"alias":         rm.Alias,
+			"color":         rm.Color,
+			"chart":         rm.Chart,
+			"ingestRate":    rm.IngestRate,
+			"totalIngested": rm.TotalIngested,
+			"startTime":     rm.StartTime,
+			"endTime":       endTime,
+			"queries":       queries,
 		}
 	}
 
@@ -815,11 +811,16 @@ func (o *Output) getExportData() map[string]interface{} {
 		}
 	}
 
-	return map[string]interface{}{
+	out := map[string]interface{}{
 		"startTime":  o.data.StartTime.UnixMilli(),
 		"runs":       runs,
+		"backends":   buildBackendsBlock(),
 		"containers": containers,
 	}
+	if meta := readMetaEnv(); meta != nil {
+		out["meta"] = meta
+	}
+	return out
 }
 
 // aggregateExportData takes raw export JSON (with latencies/timestamps per query)
@@ -1142,19 +1143,52 @@ func getQueryPattern(backend, chart, qName string) string {
 	return metrics.GetQueryPattern(backend, chart, qName)
 }
 
-// getBackendConfig returns the database config and container limits for a backend type.
-// Container limits are looked up by container name, not backend name.
-func getBackendConfig(backend, container string) (map[string]interface{}, map[string]interface{}) {
-	if backend == "" {
-		return nil, nil
+// buildBackendsBlock returns the deduplicated per-backend snapshot for the
+// dashboard JSON. Each entry combines the backend's database config (postgres
+// GUCs, version, pre/post scripts), the docker-inspect data for its container,
+// and display options (alias, color). The frontend looks up by backend alias.
+func buildBackendsBlock() map[string]interface{} {
+	options := metrics.GetAllBackendOptions()
+	backends := make(map[string]interface{}, len(options))
+	for alias, opt := range options {
+		entry := map[string]interface{}{
+			"alias":     opt.Alias,
+			"container": opt.Container,
+			"color":     opt.Color,
+		}
+		if cfg := metrics.GetBackendConfig(alias); cfg != nil {
+			entry["config"] = cfg
+		}
+		if opt.Container != "" {
+			if info := metrics.GetContainerInfo(opt.Container); info != nil {
+				entry["container_info"] = info
+			}
+		}
+		backends[alias] = entry
 	}
-	// Look up limits by container name (which may be alias or custom container name)
-	limits := metrics.GetContainerLimits(container)
-	if limits == nil && container != backend {
-		// Fall back to backend name for backwards compatibility
-		limits = metrics.GetContainerLimits(backend)
+	return backends
+}
+
+// readMetaEnv returns the parsed BENCHMARKER_META env var, or nil if unset.
+// Supports either inline JSON ('{"commit":"abc"}') or '@path/to/file.json'.
+func readMetaEnv() map[string]interface{} {
+	raw := os.Getenv("BENCHMARKER_META")
+	if raw == "" {
+		return nil
 	}
-	return metrics.GetBackendConfig(backend), limits
+	data := []byte(raw)
+	if strings.HasPrefix(raw, "@") {
+		b, err := os.ReadFile(raw[1:])
+		if err != nil {
+			return nil
+		}
+		data = b
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil
+	}
+	return m
 }
 
 // ServeFile starts a server to view a saved dashboard JSON file.

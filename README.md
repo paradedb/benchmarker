@@ -67,13 +67,24 @@ make
 
 ### 2. Start backends
 
-The included `docker-compose.yml` uses profiles, which provide an easy way to only spin up a subset of containers.
-
-Please note the 'sample' dataset which is included does not provide a meaningful benchmark, it's designed to show how to use the system.
+Each dataset under `datasets/` ships with its own `docker-compose.yml` that pins
+the exact images and tuning used for that benchmark. Run compose from the
+dataset directory so the captured `Container` tab in the dashboard reflects the
+real configuration:
 
 ```bash
-docker compose --profile paradedb --profile postgres up -d
+docker compose -f datasets/sample/docker-compose.yml up -d
 ```
+
+The repo-root `docker-compose.yml` is a kitchen-sink template containing every
+supported backend with profiles; it's intended as a starting point when
+authoring a new dataset, not for running an existing one.
+
+For backends running off-host (e.g. AWS RDS, managed Elasticsearch), pass
+`{ type: "paradedb", container: "" }` in the backend config to skip docker
+metrics for that backend.
+
+Please note the 'sample' dataset which is included does not provide a meaningful benchmark, it's designed to show how to use the system.
 
 See [Docker Setup](docs/docker.md) for all available profiles and services.
 

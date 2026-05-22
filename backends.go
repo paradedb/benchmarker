@@ -74,6 +74,10 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 
 	for _, item := range backendsArray {
 		var backendType, alias, container, color, conn string
+		// containerExplicit tracks whether the user set the container field at all
+		// (including to ""). An explicit empty string opts the backend out of
+		// docker metrics — used for off-host services like AWS RDS.
+		var containerExplicit bool
 
 		switch v := item.(type) {
 		case string:
@@ -92,8 +96,11 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 			if a, ok := v["alias"].(string); ok {
 				alias = a
 			}
-			if c, ok := v["container"].(string); ok {
-				container = c
+			if raw, ok := v["container"]; ok {
+				containerExplicit = true
+				if c, ok := raw.(string); ok {
+					container = c
+				}
 			}
 			if c, ok := v["color"].(string); ok {
 				color = c
@@ -118,7 +125,9 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 		if conn == "" {
 			conn = defaults[backendType]
 		}
-		if container == "" {
+		// Only default the container name if the user didn't explicitly set it.
+		// An explicit "" opts out of docker capture (off-host backends).
+		if !containerExplicit {
 			if alias != backendType {
 				container = alias // default container to alias if alias is set
 			} else {
@@ -147,7 +156,9 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 
 		client := backends.NewK6Client(m.vu, driver, alias)
 		b.clients[alias] = client
-		enabledContainers = append(enabledContainers, container)
+		if container != "" {
+			enabledContainers = append(enabledContainers, container)
+		}
 
 		driver.CaptureConfig(ctx, alias)
 		metrics.CapturePrePostScripts(alias, backendType, datasetPath, backendCfg.FileType)

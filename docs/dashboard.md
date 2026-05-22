@@ -10,7 +10,28 @@ The real-time dashboard streams benchmark results to a browser-based UI as the t
 - **Container resources** - CPU and memory usage from Docker
 - **Backend configuration** - Database settings and version info
 - **Pre/Post scripts** - Full SQL/JSON scripts used for setup (for reproducibility)
+- **Container** - Curated `docker inspect` output (image, command, env, mounts, ports, host config) for each backend container, captured at run start
 - **Query patterns** - Actual queries executed per scenario
+
+## Run metadata
+
+Stamp arbitrary metadata into the exported JSON via the `BENCHMARKER_META` env
+var. It's written verbatim to a top-level `meta` field — useful for the
+commit / version / machine / link details that aren't observable from the
+running stack:
+
+```bash
+# Inline JSON
+BENCHMARKER_META='{"commit":"abc123","version":"v0.23.1"}' \
+  ./k6 run --out dashboard script.js
+
+# Or from a file
+BENCHMARKER_META=@./run-meta.json \
+  ./k6 run --out dashboard script.js
+```
+
+The dashboard frontend doesn't render `meta` directly today — it's there for
+downstream consumers (publishing tooling, reports) to read out of the JSON.
 
 ## Usage
 
