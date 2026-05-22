@@ -3,6 +3,8 @@ package search
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/grafana/sobek"
@@ -64,6 +66,20 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	datasetPath := parseDatasetPath(config, m.vu)
 	defaults := backends.DefaultConnections()
 	defaultContainers := backends.DefaultContainers()
+
+	// Capture dataset.yaml (written by `loader pull`) if present.
+	if datasetPath != "" {
+		if data, err := os.ReadFile(filepath.Join(datasetPath, "dataset.yaml")); err == nil {
+			metrics.RegisterRunCapture("dataset_yaml", string(data))
+		}
+	}
+
+	// Capture the running k6 script's source. k6 is invoked as
+	// `./k6 run [flags] <script.js>` — the script path is in os.Args.
+	if src, path := readRunningScript(); src != "" {
+		metrics.RegisterRunCapture("script", src)
+		metrics.RegisterRunCapture("script_path", path)
+	}
 
 	// Parse backends array
 	backendsArray, ok := config["backends"].([]interface{})
@@ -248,6 +264,37 @@ func (b *Backends) SetTimeout(seconds int) {
 	for _, client := range b.clients {
 		client.SetTimeout(seconds)
 	}
+}
+
+// readRunningScript locates the currently-running k6 script via os.Args and
+// returns its source text plus absolute path. The xk6 extension runs inside
+// the k6 process so the script path is reachable from argv directly; k6's
+// public extension API doesn't expose it as cleanly. Returns ("", "") if no
+// candidate is found.
+func readRunningScript() (source, path string) {
+	for _, arg := range os.Args[1:] {
+		if !looksLikeScript(arg) {
+			continue
+		}
+		abs, err := filepath.Abs(arg)
+		if err != nil {
+			continue
+		}
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			continue
+		}
+		return string(data), abs
+	}
+	return "", ""
+}
+
+func looksLikeScript(arg string) bool {
+	switch filepath.Ext(arg) {
+	case ".js", ".ts", ".mjs", ".cjs":
+		return true
+	}
+	return false
 }
 
 // parseDatasetPath extracts dataset path from config.

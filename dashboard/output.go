@@ -750,6 +750,7 @@ func (o *Output) getSummary() map[string]interface{} {
 	if meta := readMetaEnv(); meta != nil {
 		out["meta"] = meta
 	}
+	addRunCaptures(out)
 	return out
 }
 
@@ -820,6 +821,7 @@ func (o *Output) getExportData() map[string]interface{} {
 	if meta := readMetaEnv(); meta != nil {
 		out["meta"] = meta
 	}
+	addRunCaptures(out)
 	return out
 }
 
@@ -1167,6 +1169,21 @@ func buildBackendsBlock() map[string]interface{} {
 		backends[alias] = entry
 	}
 	return backends
+}
+
+// addRunCaptures stamps any registered run-level captures (dataset.yaml text,
+// k6 script source) onto the given dashboard output map under top-level keys.
+// Absent captures are not stamped — the frontend hides their tabs.
+func addRunCaptures(out map[string]interface{}) {
+	if s := metrics.GetRunCapture("dataset_yaml"); s != "" {
+		out["dataset_yaml"] = s
+	}
+	if s := metrics.GetRunCapture("script"); s != "" {
+		out["script"] = s
+	}
+	if s := metrics.GetRunCapture("script_path"); s != "" {
+		out["script_path"] = s
+	}
 }
 
 // readMetaEnv returns the parsed BENCHMARKER_META env var, or nil if unset.

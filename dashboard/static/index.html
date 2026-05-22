@@ -1285,7 +1285,8 @@
         );
       }
 
-      function updateStats(runs) {
+      function updateStats(runs, backendsBlock) {
+        backendsBlock = backendsBlock || {};
         // Group runs by chart (show runs with queries even before timeline data)
         const runsByChart = {};
         Object.keys(runs)
@@ -1344,7 +1345,6 @@
               return getAvgMetric(runA) - getAvgMetric(runB);
             });
 
-            const backendsBlock = data.backends || {};
             sortedBackends.forEach((name, idx) => {
               const run = runs[name];
               const color = getRunColor(name, run);
@@ -1356,9 +1356,7 @@
               const backendSnapshot = backendsBlock[run.backend] || {};
               const backendConfig = backendSnapshot.config || {};
               const containerInfo = backendSnapshot.container_info || null;
-              if (Object.keys(backendConfig).length > 0 || containerInfo) {
-                runConfigs[name] = backendSnapshot;
-              }
+              runConfigs[name] = backendSnapshot;
 
               const labelId = `label-${safeNameId}`;
               let el = document.getElementById(statId);
@@ -1392,8 +1390,12 @@
 
               // Set up config click handler after element is in the DOM.
               // Runs on every update so it works even if config arrives later.
+              const hasGlobalCapture =
+                (lastData && (lastData.dataset_yaml || lastData.script)) || false;
               const hasConfig =
-                Object.keys(backendConfig).length > 0 || containerInfo;
+                Object.keys(backendConfig).length > 0 ||
+                containerInfo ||
+                hasGlobalCapture;
               if (hasConfig) {
                 const labelEl = document.getElementById(labelId);
                 if (labelEl && !labelEl.dataset.configHandler) {
@@ -1623,11 +1625,18 @@
       }
 
       function showConfigModal(runName) {
-        const snapshot = runConfigs[runName];
-        if (!snapshot) return;
+        const snapshot = runConfigs[runName] || {};
         const config = snapshot.config || {};
         const containerInfo = snapshot.container_info || null;
-        if (Object.keys(config).length === 0 && !containerInfo) return;
+        const hasGlobalCapture =
+          (lastData && (lastData.dataset_yaml || lastData.script)) || false;
+        if (
+          Object.keys(config).length === 0 &&
+          !containerInfo &&
+          !hasGlobalCapture
+        ) {
+          return;
+        }
 
         document.getElementById("config-modal-title").textContent = runName;
 
@@ -1648,6 +1657,16 @@
         if (containerInfo) {
           tabsHtml +=
             '<button class="config-tab" onclick="switchConfigTab(\'container\')">Container</button>';
+        }
+        const datasetYaml = (lastData && lastData.dataset_yaml) || "";
+        const scriptSource = (lastData && lastData.script) || "";
+        if (datasetYaml) {
+          tabsHtml +=
+            '<button class="config-tab" onclick="switchConfigTab(\'dataset\')">Dataset</button>';
+        }
+        if (scriptSource) {
+          tabsHtml +=
+            '<button class="config-tab" onclick="switchConfigTab(\'script\')">Script</button>';
         }
         tabsHtml += "</div>";
 
@@ -1704,8 +1723,18 @@
         }
         containerHtml += "</div>";
 
+        // Dataset / Script tabs — global to the run, hidden when absent.
+        const sourceBlock = (text) =>
+          `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 0; background: var(--bg); padding: 12px; border-radius: 4px;">${escapeHtml(text)}</pre>`;
+        let datasetHtml = '<div id="tab-dataset" class="config-tab-content">';
+        if (datasetYaml) datasetHtml += sourceBlock(datasetYaml);
+        datasetHtml += "</div>";
+        let scriptHtml = '<div id="tab-script" class="config-tab-content">';
+        if (scriptSource) scriptHtml += sourceBlock(scriptSource);
+        scriptHtml += "</div>";
+
         document.getElementById("config-modal-content").innerHTML =
-          tabsHtml + configHtml + preHtml + postHtml + containerHtml;
+          tabsHtml + configHtml + preHtml + postHtml + containerHtml + datasetHtml + scriptHtml;
         document.getElementById("modal-backdrop").classList.add("visible");
         document.getElementById("config-modal").classList.add("visible");
       }
@@ -1731,25 +1760,24 @@
 
         let html = "";
 
-        // Image + identity
         const idRows = [];
         if (info.image) idRows.push(["image", info.image]);
         if (info.image_id) idRows.push(["image_id", info.image_id]);
-        if (info.network_mode) idRows.push(["network_mode", info.network_mode]);
         if (info.cpu_limit) idRows.push(["cpu_limit", info.cpu_limit]);
         if (info.memory_limit) idRows.push(["memory_limit", info.memory_limit]);
+        if (Array.isArray(info.cap_add) && info.cap_add.length)
+          idRows.push(["cap_add", info.cap_add.join(", ")]);
+        if (Array.isArray(info.security_opt) && info.security_opt.length)
+          idRows.push(["security_opt", info.security_opt.join(", ")]);
         if (idRows.length) html += section("identity", items(idRows));
 
-        // Command
         if (Array.isArray(info.cmd) && info.cmd.length) {
-          html +=
-            section(
-              "cmd",
-              `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 0;">${escapeHtml(info.cmd.join(" "))}</pre>`,
-            );
+          html += section(
+            "cmd",
+            `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 0;">${escapeHtml(info.cmd.join(" "))}</pre>`,
+          );
         }
 
-        // Env
         if (Array.isArray(info.env) && info.env.length) {
           html += section(
             "env",
@@ -1761,51 +1789,6 @@
                   : [e, ""];
               }),
             ),
-          );
-        }
-
-        // Host config raw fields
-        if (info.host_config) {
-          const hc = info.host_config;
-          const rows = [];
-          if (hc.nano_cpus) rows.push(["nano_cpus", String(hc.nano_cpus)]);
-          if (hc.memory) rows.push(["memory", String(hc.memory)]);
-          if (hc.cpu_quota) rows.push(["cpu_quota", String(hc.cpu_quota)]);
-          if (Array.isArray(hc.cap_add) && hc.cap_add.length)
-            rows.push(["cap_add", hc.cap_add.join(", ")]);
-          if (Array.isArray(hc.security_opt) && hc.security_opt.length)
-            rows.push(["security_opt", hc.security_opt.join(", ")]);
-          if (rows.length) html += section("host_config", items(rows));
-        }
-
-        // Mounts
-        if (Array.isArray(info.mounts) && info.mounts.length) {
-          const rows = info.mounts.map((m) => [
-            m.destination || "?",
-            `${m.type || ""} ${m.source || ""}${m.rw === false ? " (ro)" : ""}`.trim(),
-          ]);
-          html += section("mounts", items(rows));
-        }
-
-        // Ports
-        if (info.ports && Object.keys(info.ports).length) {
-          const rows = [];
-          for (const [containerPort, bindings] of Object.entries(info.ports)) {
-            const value = Array.isArray(bindings)
-              ? bindings
-                  .map((b) => `${b.host_ip || "0.0.0.0"}:${b.host_port || ""}`)
-                  .join(", ")
-              : "";
-            rows.push([containerPort, value]);
-          }
-          html += section("ports", items(rows));
-        }
-
-        // Labels
-        if (info.labels && Object.keys(info.labels).length) {
-          html += section(
-            "labels",
-            items(Object.entries(info.labels).map(([k, v]) => [k, String(v)])),
           );
         }
 
@@ -1920,7 +1903,7 @@
           .sort();
 
         updateQueryFilters(runs); // Initialize selected queries first
-        updateStats(runs);
+        updateStats(runs, data.backends);
         updateLegend(runs);
 
         // Group runs by chart and track earliest start time per chart

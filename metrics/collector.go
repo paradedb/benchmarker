@@ -35,7 +35,32 @@ var (
 	// Backend options (registered once at init - container, alias, color)
 	backendOptions   = make(map[string]*BackendOptions)
 	backendOptionsMu sync.RWMutex
+
+	// Per-run capture: dataset.yaml contents (if present) and the k6 script source.
+	// These are set once during db.backends() init and surfaced verbatim in the
+	// dashboard JSON. The frontend renders them as Dataset / Script tabs.
+	runCapture   = make(map[string]string)
+	runCaptureMu sync.RWMutex
 )
+
+// RegisterRunCapture stores a run-level text artifact (e.g. "dataset.yaml" or
+// "script.js") for later inclusion in the dashboard JSON. Empty values are
+// ignored — call with "" to leave the slot unset.
+func RegisterRunCapture(key, text string) {
+	if text == "" {
+		return
+	}
+	runCaptureMu.Lock()
+	defer runCaptureMu.Unlock()
+	runCapture[key] = text
+}
+
+// GetRunCapture returns the text registered under key, or "" if unset.
+func GetRunCapture(key string) string {
+	runCaptureMu.RLock()
+	defer runCaptureMu.RUnlock()
+	return runCapture[key]
+}
 
 // BackendOptions holds user-specified options for a backend.
 type BackendOptions struct {
@@ -404,10 +429,9 @@ func (c *Collector) fetchAndCalculateStats(container string) (*ContainerStats, e
 type dockerInspect struct {
 	Image  string `json:"Image"` // image SHA, e.g. "sha256:abc..."
 	Config struct {
-		Image  string            `json:"Image"` // image tag, e.g. "paradedb/paradedb:v0.23.1"
-		Cmd    []string          `json:"Cmd"`
-		Env    []string          `json:"Env"`
-		Labels map[string]string `json:"Labels"`
+		Image string   `json:"Image"` // image tag, e.g. "paradedb/paradedb:v0.23.1"
+		Cmd   []string `json:"Cmd"`
+		Env   []string `json:"Env"`
 	} `json:"Config"`
 	HostConfig struct {
 		NanoCPUs    int64    `json:"NanoCpus"`
@@ -415,21 +439,7 @@ type dockerInspect struct {
 		CPUQuota    int64    `json:"CpuQuota"`
 		CapAdd      []string `json:"CapAdd"`
 		SecurityOpt []string `json:"SecurityOpt"`
-		NetworkMode string   `json:"NetworkMode"`
 	} `json:"HostConfig"`
-	Mounts []struct {
-		Type        string `json:"Type"`
-		Source      string `json:"Source"`
-		Destination string `json:"Destination"`
-		Mode        string `json:"Mode"`
-		RW          bool   `json:"RW"`
-	} `json:"Mounts"`
-	NetworkSettings struct {
-		Ports map[string][]struct {
-			HostIP   string `json:"HostIp"`
-			HostPort string `json:"HostPort"`
-		} `json:"Ports"`
-	} `json:"NetworkSettings"`
 }
 
 // captureContainerInfo fetches the docker inspect output and stores a curated
@@ -462,17 +472,8 @@ func (c *Collector) captureContainerInfo(container string) bool {
 		"image_id":     inspect.Image,
 		"cmd":          inspect.Config.Cmd,
 		"env":          inspect.Config.Env,
-		"labels":       inspect.Config.Labels,
-		"mounts":       inspect.Mounts,
-		"network_mode": inspect.HostConfig.NetworkMode,
-		"ports":        inspect.NetworkSettings.Ports,
-		"host_config": map[string]interface{}{
-			"nano_cpus":    inspect.HostConfig.NanoCPUs,
-			"memory":       inspect.HostConfig.Memory,
-			"cpu_quota":    inspect.HostConfig.CPUQuota,
-			"cap_add":      inspect.HostConfig.CapAdd,
-			"security_opt": inspect.HostConfig.SecurityOpt,
-		},
+		"cap_add":      inspect.HostConfig.CapAdd,
+		"security_opt": inspect.HostConfig.SecurityOpt,
 	}
 
 	// Display-friendly limit strings for the existing UI.
