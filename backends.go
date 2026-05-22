@@ -3,6 +3,8 @@ package search
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/grafana/sobek"
@@ -65,6 +67,20 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	defaults := backends.DefaultConnections()
 	defaultContainers := backends.DefaultContainers()
 
+	// Capture dataset.yaml (written by `loader pull`) if present.
+	if datasetPath != "" {
+		if data, err := os.ReadFile(filepath.Join(datasetPath, "dataset.yaml")); err == nil {
+			metrics.RegisterRunCapture("dataset_yaml", string(data))
+		}
+	}
+
+	// Capture the running k6 script's source. k6 is invoked as
+	// `./k6 run [flags] <script.js>` — the script path is in os.Args.
+	if src, path := readRunningScript(); src != "" {
+		metrics.RegisterRunCapture("script", src)
+		metrics.RegisterRunCapture("script_path", path)
+	}
+
 	// Parse backends array
 	backendsArray, ok := config["backends"].([]interface{})
 	if !ok {
@@ -74,6 +90,10 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 
 	for _, item := range backendsArray {
 		var backendType, alias, container, color, conn string
+		// containerExplicit tracks whether the user set the container field at all
+		// (including to ""). An explicit empty string opts the backend out of
+		// docker metrics — used for off-host services like AWS RDS.
+		var containerExplicit bool
 
 		switch v := item.(type) {
 		case string:
@@ -92,8 +112,11 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 			if a, ok := v["alias"].(string); ok {
 				alias = a
 			}
-			if c, ok := v["container"].(string); ok {
-				container = c
+			if raw, ok := v["container"]; ok {
+				containerExplicit = true
+				if c, ok := raw.(string); ok {
+					container = c
+				}
 			}
 			if c, ok := v["color"].(string); ok {
 				color = c
@@ -118,7 +141,9 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 		if conn == "" {
 			conn = defaults[backendType]
 		}
-		if container == "" {
+		// Only default the container name if the user didn't explicitly set it.
+		// An explicit "" opts out of docker capture (off-host backends).
+		if !containerExplicit {
 			if alias != backendType {
 				container = alias // default container to alias if alias is set
 			} else {
@@ -147,7 +172,9 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 
 		client := backends.NewK6Client(m.vu, driver, alias)
 		b.clients[alias] = client
-		enabledContainers = append(enabledContainers, container)
+		if container != "" {
+			enabledContainers = append(enabledContainers, container)
+		}
 
 		driver.CaptureConfig(ctx, alias)
 		metrics.CapturePrePostScripts(alias, backendType, datasetPath, backendCfg.FileType)
@@ -237,6 +264,37 @@ func (b *Backends) SetTimeout(seconds int) {
 	for _, client := range b.clients {
 		client.SetTimeout(seconds)
 	}
+}
+
+// readRunningScript locates the currently-running k6 script via os.Args and
+// returns its source text plus absolute path. The xk6 extension runs inside
+// the k6 process so the script path is reachable from argv directly; k6's
+// public extension API doesn't expose it as cleanly. Returns ("", "") if no
+// candidate is found.
+func readRunningScript() (source, path string) {
+	for _, arg := range os.Args[1:] {
+		if !looksLikeScript(arg) {
+			continue
+		}
+		abs, err := filepath.Abs(arg)
+		if err != nil {
+			continue
+		}
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			continue
+		}
+		return string(data), abs
+	}
+	return "", ""
+}
+
+func looksLikeScript(arg string) bool {
+	switch filepath.Ext(arg) {
+	case ".js", ".ts", ".mjs", ".cjs":
+		return true
+	}
+	return false
 }
 
 // parseDatasetPath extracts dataset path from config.

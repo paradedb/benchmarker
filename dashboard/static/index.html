@@ -1285,7 +1285,8 @@
         );
       }
 
-      function updateStats(runs) {
+      function updateStats(runs, backendsBlock) {
+        backendsBlock = backendsBlock || {};
         // Group runs by chart (show runs with queries even before timeline data)
         const runsByChart = {};
         Object.keys(runs)
@@ -1351,10 +1352,11 @@
               const statId = `stat-${safeNameId}`;
               const queryContainerId = `${safeNameId}-queries`;
 
-              // Store config if available
-              if (run.config && Object.keys(run.config).length > 0) {
-                runConfigs[name] = run.config;
-              }
+              // Look up the deduplicated backend snapshot for this run.
+              const backendSnapshot = backendsBlock[run.backend] || {};
+              const backendConfig = backendSnapshot.config || {};
+              const containerInfo = backendSnapshot.container_info || null;
+              runConfigs[name] = backendSnapshot;
 
               const labelId = `label-${safeNameId}`;
               let el = document.getElementById(statId);
@@ -1365,14 +1367,14 @@
                 el.className = "stat-group expanded";
                 el.style.borderLeftColor = color;
 
-                // Build limits string
+                // Build limits string from container_info on the backend snapshot.
                 let limitsStr = "";
-                if (run.containerLimits) {
+                if (containerInfo) {
                   const parts = [];
-                  if (run.containerLimits.cpu_limit)
-                    parts.push(escapeHtml(run.containerLimits.cpu_limit));
-                  if (run.containerLimits.memory_limit)
-                    parts.push(escapeHtml(run.containerLimits.memory_limit));
+                  if (containerInfo.cpu_limit)
+                    parts.push(escapeHtml(containerInfo.cpu_limit));
+                  if (containerInfo.memory_limit)
+                    parts.push(escapeHtml(containerInfo.memory_limit));
                   if (parts.length > 0)
                     limitsStr = `<span style="color: var(--text-dim); font-size: 9px; margin-left: 8px;">${parts.join(" / ")}</span>`;
                 }
@@ -1388,7 +1390,12 @@
 
               // Set up config click handler after element is in the DOM.
               // Runs on every update so it works even if config arrives later.
-              const hasConfig = run.config && Object.keys(run.config).length > 0;
+              const hasGlobalCapture =
+                (lastData && (lastData.dataset_yaml || lastData.script)) || false;
+              const hasConfig =
+                Object.keys(backendConfig).length > 0 ||
+                containerInfo ||
+                hasGlobalCapture;
               if (hasConfig) {
                 const labelEl = document.getElementById(labelId);
                 if (labelEl && !labelEl.dataset.configHandler) {
@@ -1618,18 +1625,24 @@
       }
 
       function showConfigModal(runName) {
-        const config = runConfigs[runName];
-        if (!config || Object.keys(config).length === 0) {
-          return; // No config available
+        const snapshot = runConfigs[runName] || {};
+        const config = snapshot.config || {};
+        const containerInfo = snapshot.container_info || null;
+        const hasGlobalCapture =
+          (lastData && (lastData.dataset_yaml || lastData.script)) || false;
+        if (
+          Object.keys(config).length === 0 &&
+          !containerInfo &&
+          !hasGlobalCapture
+        ) {
+          return;
         }
 
         document.getElementById("config-modal-title").textContent = runName;
 
-        // Separate config into tabs
         const preScript = config.pre_script;
         const postScript = config.post_script;
 
-        // Build tabs
         let tabsHtml = '<div class="config-tabs">';
         tabsHtml +=
           '<button class="config-tab active" onclick="switchConfigTab(\'config\')">Config</button>';
@@ -1641,20 +1654,32 @@
           tabsHtml +=
             '<button class="config-tab" onclick="switchConfigTab(\'post\')">Post</button>';
         }
+        if (containerInfo) {
+          tabsHtml +=
+            '<button class="config-tab" onclick="switchConfigTab(\'container\')">Container</button>';
+        }
+        const datasetYaml = (lastData && lastData.dataset_yaml) || "";
+        const scriptSource = (lastData && lastData.script) || "";
+        if (datasetYaml) {
+          tabsHtml +=
+            '<button class="config-tab" onclick="switchConfigTab(\'dataset\')">Dataset</button>';
+        }
+        if (scriptSource) {
+          tabsHtml +=
+            '<button class="config-tab" onclick="switchConfigTab(\'script\')">Script</button>';
+        }
         tabsHtml += "</div>";
 
-        // Helper to format config values
         function formatConfigValue(val) {
           if (val === null || val === undefined) return "-";
           if (typeof val === "object") return JSON.stringify(val);
           return String(val);
         }
 
-        // Config tab content
+        // Config tab — DB GUCs etc.
         let configHtml =
           '<div id="tab-config" class="config-tab-content active">';
         for (const [section, value] of Object.entries(config)) {
-          // Skip sections that have their own tabs
           if (["pre_script", "post_script"].includes(section)) continue;
 
           if (
@@ -1680,24 +1705,94 @@
         }
         configHtml += "</div>";
 
-        // Pre script tab content
+        // Pre / Post tabs.
+        const codeBlock = (text) =>
+          `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 0; background: var(--bg); padding: 12px; border-radius: 4px;">${escapeHtml(text)}</pre>`;
         let preHtml = '<div id="tab-pre" class="config-tab-content">';
-        if (preScript) {
-          preHtml += `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 0; background: var(--bg); padding: 12px; border-radius: 4px;">${escapeHtml(preScript)}</pre>`;
-        }
+        if (preScript) preHtml += codeBlock(preScript);
         preHtml += "</div>";
 
-        // Post script tab content
         let postHtml = '<div id="tab-post" class="config-tab-content">';
-        if (postScript) {
-          postHtml += `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 0; background: var(--bg); padding: 12px; border-radius: 4px;">${escapeHtml(postScript)}</pre>`;
-        }
+        if (postScript) postHtml += codeBlock(postScript);
         postHtml += "</div>";
 
+        // Container tab — docker inspect subset.
+        let containerHtml = '<div id="tab-container" class="config-tab-content">';
+        if (containerInfo) {
+          containerHtml += renderContainerInfo(containerInfo);
+        }
+        containerHtml += "</div>";
+
+        // Dataset / Script tabs — global to the run, hidden when absent.
+        const sourceBlock = (text) =>
+          `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 0; background: var(--bg); padding: 12px; border-radius: 4px;">${escapeHtml(text)}</pre>`;
+        let datasetHtml = '<div id="tab-dataset" class="config-tab-content">';
+        if (datasetYaml) datasetHtml += sourceBlock(datasetYaml);
+        datasetHtml += "</div>";
+        let scriptHtml = '<div id="tab-script" class="config-tab-content">';
+        if (scriptSource) scriptHtml += sourceBlock(scriptSource);
+        scriptHtml += "</div>";
+
         document.getElementById("config-modal-content").innerHTML =
-          tabsHtml + configHtml + preHtml + postHtml;
+          tabsHtml + configHtml + preHtml + postHtml + containerHtml + datasetHtml + scriptHtml;
         document.getElementById("modal-backdrop").classList.add("visible");
         document.getElementById("config-modal").classList.add("visible");
+      }
+
+      // renderContainerInfo turns the docker-inspect subset into the same
+      // sections/items layout used by the Config tab.
+      function renderContainerInfo(info) {
+        const items = (kvs) =>
+          kvs
+            .map(
+              ([k, v]) =>
+                `<div class="config-item">
+                  <span class="config-key">${escapeHtml(k)}</span>
+                  <span class="config-value">${escapeHtml(v)}</span>
+                </div>`,
+            )
+            .join("");
+        const section = (title, body) =>
+          `<div class="config-section">
+            <div class="config-section-title">${escapeHtml(title)}</div>
+            ${body}
+          </div>`;
+
+        let html = "";
+
+        const idRows = [];
+        if (info.image) idRows.push(["image", info.image]);
+        if (info.image_id) idRows.push(["image_id", info.image_id]);
+        if (info.cpu_limit) idRows.push(["cpu_limit", info.cpu_limit]);
+        if (info.memory_limit) idRows.push(["memory_limit", info.memory_limit]);
+        if (Array.isArray(info.cap_add) && info.cap_add.length)
+          idRows.push(["cap_add", info.cap_add.join(", ")]);
+        if (Array.isArray(info.security_opt) && info.security_opt.length)
+          idRows.push(["security_opt", info.security_opt.join(", ")]);
+        if (idRows.length) html += section("identity", items(idRows));
+
+        if (Array.isArray(info.cmd) && info.cmd.length) {
+          html += section(
+            "cmd",
+            `<pre style="white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 0;">${escapeHtml(info.cmd.join(" "))}</pre>`,
+          );
+        }
+
+        if (Array.isArray(info.env) && info.env.length) {
+          html += section(
+            "env",
+            items(
+              info.env.map((e) => {
+                const idx = e.indexOf("=");
+                return idx >= 0
+                  ? [e.slice(0, idx), e.slice(idx + 1)]
+                  : [e, ""];
+              }),
+            ),
+          );
+        }
+
+        return html;
       }
 
       function switchConfigTab(tabName) {
@@ -1808,7 +1903,7 @@
           .sort();
 
         updateQueryFilters(runs); // Initialize selected queries first
-        updateStats(runs);
+        updateStats(runs, data.backends);
         updateLegend(runs);
 
         // Group runs by chart and track earliest start time per chart

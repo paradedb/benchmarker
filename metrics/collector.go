@@ -23,10 +23,10 @@ var (
 	containerMemory *metrics.Metric
 	metricsOnce     sync.Once
 
-	// Container resource limits (captured once)
-	ContainerLimits   = make(map[string]map[string]interface{})
-	containerLimitsMu sync.RWMutex
-	limitsCapture     = make(map[string]bool)
+	// Captured docker-inspect data per container (captured once at first stats collection).
+	containerInfo   = make(map[string]map[string]interface{})
+	containerInfoMu sync.RWMutex
+	infoCapture     = make(map[string]bool)
 
 	// Backend configs (registered by each backend - database settings etc)
 	backendConfigs   = make(map[string]map[string]interface{})
@@ -35,7 +35,32 @@ var (
 	// Backend options (registered once at init - container, alias, color)
 	backendOptions   = make(map[string]*BackendOptions)
 	backendOptionsMu sync.RWMutex
+
+	// Per-run capture: dataset.yaml contents (if present) and the k6 script source.
+	// These are set once during db.backends() init and surfaced verbatim in the
+	// dashboard JSON. The frontend renders them as Dataset / Script tabs.
+	runCapture   = make(map[string]string)
+	runCaptureMu sync.RWMutex
 )
+
+// RegisterRunCapture stores a run-level text artifact (e.g. "dataset.yaml" or
+// "script.js") for later inclusion in the dashboard JSON. Empty values are
+// ignored — call with "" to leave the slot unset.
+func RegisterRunCapture(key, text string) {
+	if text == "" {
+		return
+	}
+	runCaptureMu.Lock()
+	defer runCaptureMu.Unlock()
+	runCapture[key] = text
+}
+
+// GetRunCapture returns the text registered under key, or "" if unset.
+func GetRunCapture(key string) string {
+	runCaptureMu.RLock()
+	defer runCaptureMu.RUnlock()
+	return runCapture[key]
+}
 
 // BackendOptions holds user-specified options for a backend.
 type BackendOptions struct {
@@ -67,21 +92,44 @@ func GetBackendConfig(backend string) map[string]interface{} {
 	return result
 }
 
-// GetContainerLimits returns captured container limits by container name.
-func GetContainerLimits(container string) map[string]interface{} {
-	containerLimitsMu.RLock()
-	defer containerLimitsMu.RUnlock()
+// GetContainerInfo returns the captured docker-inspect subset for a container.
+// The returned map contains keys like image, image_id, cmd, env, host_config,
+// mounts, labels, network_mode, ports, plus display-friendly cpu_limit and
+// memory_limit strings.
+func GetContainerInfo(container string) map[string]interface{} {
+	containerInfoMu.RLock()
+	defer containerInfoMu.RUnlock()
 
-	limits := ContainerLimits[container]
-	if limits == nil {
+	info := containerInfo[container]
+	if info == nil {
 		return nil
 	}
 
-	result := make(map[string]interface{}, len(limits))
-	for k, v := range limits {
+	result := make(map[string]interface{}, len(info))
+	for k, v := range info {
 		result[k] = v
 	}
 	return result
+}
+
+// GetContainerLimits returns just the CPU/memory limit strings from the captured
+// container info. Retained for legacy callers; new code should use GetContainerInfo.
+func GetContainerLimits(container string) map[string]interface{} {
+	info := GetContainerInfo(container)
+	if info == nil {
+		return nil
+	}
+	limits := make(map[string]interface{})
+	if v, ok := info["cpu_limit"]; ok {
+		limits["cpu_limit"] = v
+	}
+	if v, ok := info["memory_limit"]; ok {
+		limits["memory_limit"] = v
+	}
+	if len(limits) == 0 {
+		return nil
+	}
+	return limits
 }
 
 // CapturePrePostScripts reads pre/post scripts from the dataset directory
@@ -256,26 +304,26 @@ func (c *Collector) Collect() map[string]interface{} {
 	baseTags := state.Tags.GetCurrentValues()
 	results := make(map[string]interface{})
 
-	// Capture container limits once (in parallel)
-	var limitsWg sync.WaitGroup
+	// Capture docker inspect info once per container (in parallel).
+	var infoWg sync.WaitGroup
 	for _, container := range c.containers {
-		containerLimitsMu.Lock()
-		needsCapture := !limitsCapture[container]
-		containerLimitsMu.Unlock()
+		containerInfoMu.Lock()
+		needsCapture := !infoCapture[container]
+		containerInfoMu.Unlock()
 
 		if needsCapture {
-			limitsWg.Add(1)
+			infoWg.Add(1)
 			go func(cont string) {
-				defer limitsWg.Done()
-				if c.captureContainerLimits(cont) {
-					containerLimitsMu.Lock()
-					limitsCapture[cont] = true
-					containerLimitsMu.Unlock()
+				defer infoWg.Done()
+				if c.captureContainerInfo(cont) {
+					containerInfoMu.Lock()
+					infoCapture[cont] = true
+					containerInfoMu.Unlock()
 				}
 			}(container)
 		}
 	}
-	limitsWg.Wait()
+	infoWg.Wait()
 
 	// Fetch stats for all containers in parallel
 	resultChan := make(chan containerResult, len(c.containers))
@@ -377,16 +425,26 @@ func (c *Collector) fetchAndCalculateStats(container string) (*ContainerStats, e
 }
 
 // dockerInspect matches the Docker API inspect response (partial).
+// Only the subset needed for the dashboard's "Container" tab is decoded.
 type dockerInspect struct {
+	Image  string `json:"Image"` // image SHA, e.g. "sha256:abc..."
+	Config struct {
+		Image string   `json:"Image"` // image tag, e.g. "paradedb/paradedb:v0.23.1"
+		Cmd   []string `json:"Cmd"`
+		Env   []string `json:"Env"`
+	} `json:"Config"`
 	HostConfig struct {
-		NanoCPUs int64 `json:"NanoCpus"`
-		Memory   int64 `json:"Memory"`
-		CPUQuota int64 `json:"CpuQuota"`
+		NanoCPUs    int64    `json:"NanoCpus"`
+		Memory      int64    `json:"Memory"`
+		CPUQuota    int64    `json:"CpuQuota"`
+		CapAdd      []string `json:"CapAdd"`
+		SecurityOpt []string `json:"SecurityOpt"`
 	} `json:"HostConfig"`
 }
 
-// captureContainerLimits fetches container resource limits from Docker API.
-func (c *Collector) captureContainerLimits(container string) bool {
+// captureContainerInfo fetches the docker inspect output and stores a curated
+// subset for the dashboard. Returns true on success.
+func (c *Collector) captureContainerInfo(container string) bool {
 	url := fmt.Sprintf("http://localhost/containers/%s/json", container)
 
 	req, err := http.NewRequest("GET", url, nil)
@@ -409,28 +467,30 @@ func (c *Collector) captureContainerLimits(container string) bool {
 		return false
 	}
 
-	limits := make(map[string]interface{})
+	info := map[string]interface{}{
+		"image":        inspect.Config.Image,
+		"image_id":     inspect.Image,
+		"cmd":          inspect.Config.Cmd,
+		"env":          inspect.Config.Env,
+		"cap_add":      inspect.HostConfig.CapAdd,
+		"security_opt": inspect.HostConfig.SecurityOpt,
+	}
 
-	// CPU limit (NanoCPUs is CPU limit * 1e9, or use CpuQuota/100000)
+	// Display-friendly limit strings for the existing UI.
 	if inspect.HostConfig.NanoCPUs > 0 {
 		cpuLimit := float64(inspect.HostConfig.NanoCPUs) / 1e9
-		limits["cpu_limit"] = fmt.Sprintf("%.1f cores", cpuLimit)
+		info["cpu_limit"] = fmt.Sprintf("%.1f cores", cpuLimit)
 	} else if inspect.HostConfig.CPUQuota > 0 {
 		cpuLimit := float64(inspect.HostConfig.CPUQuota) / 100000
-		limits["cpu_limit"] = fmt.Sprintf("%.1f cores", cpuLimit)
+		info["cpu_limit"] = fmt.Sprintf("%.1f cores", cpuLimit)
 	}
-
-	// Memory limit
 	if inspect.HostConfig.Memory > 0 {
 		memGB := float64(inspect.HostConfig.Memory) / (1024 * 1024 * 1024)
-		limits["memory_limit"] = fmt.Sprintf("%.1f GB", memGB)
+		info["memory_limit"] = fmt.Sprintf("%.1f GB", memGB)
 	}
 
-	if len(limits) > 0 {
-		containerLimitsMu.Lock()
-		ContainerLimits[container] = limits
-		containerLimitsMu.Unlock()
-		return true
-	}
-	return false
+	containerInfoMu.Lock()
+	containerInfo[container] = info
+	containerInfoMu.Unlock()
+	return true
 }

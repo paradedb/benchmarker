@@ -363,6 +363,7 @@ func runPull(datasetName, sourceURL string, anonymous bool) {
 			fmt.Printf("Error: %v\n", err)
 			os.Exit(1)
 		}
+		writeDatasetManifest(destDir, sourceURL)
 		return
 	}
 
@@ -452,6 +453,23 @@ func runPull(datasetName, sourceURL string, anonymous bool) {
 	if failed > 0 {
 		os.Exit(1)
 	}
+	writeDatasetManifest(destDir, sourceURL)
+}
+
+// writeDatasetManifest records where the dataset was pulled from. The k6
+// extension reads this file at run time and embeds it in the dashboard JSON
+// so the run record carries the canonical S3 location.
+func writeDatasetManifest(destDir, sourceURL string) {
+	manifest := fmt.Sprintf("s3: %s\npulled_at: %s\n",
+		sourceURL,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	path := filepath.Join(destDir, "dataset.yaml")
+	if err := os.WriteFile(path, []byte(manifest), 0644); err != nil {
+		fmt.Printf("Warning: failed to write %s: %v\n", path, err)
+		return
+	}
+	fmt.Printf("Wrote %s\n", path)
 }
 
 // prepareDestDir ensures destDir is a real, empty directory we can safely
