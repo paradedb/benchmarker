@@ -534,7 +534,7 @@ func pullTarGz(ctx context.Context, client *s3.Client, bucket, key, destDir stri
 		}
 
 		switch hdr.Typeflag {
-		case tar.TypeReg, tar.TypeRegA, tar.TypeDir:
+		case tar.TypeReg, tar.TypeDir:
 		default:
 			fmt.Printf("  Skipping %s (unsupported tar entry type %c)\n", hdr.Name, hdr.Typeflag)
 			skipped++
