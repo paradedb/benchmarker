@@ -138,4 +138,3 @@ func TestResolveDownloadPath(t *testing.T) {
 		})
 	}
 }
-
