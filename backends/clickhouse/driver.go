@@ -103,9 +103,19 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 	return count, rows.Err()
 }
 
+// quoteClickHouseIdentifier returns a safely backtick-quoted ClickHouse identifier.
+// Backticks inside the name are escaped by doubling them.
+func quoteClickHouseIdentifier(name string) string {
+	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+}
+
 // Insert bulk inserts rows using batch API.
 func (d *Driver) Insert(ctx context.Context, table string, cols []string, rows [][]any) (int, error) {
-	query := fmt.Sprintf("INSERT INTO %s (%s)", table, strings.Join(cols, ", "))
+	quotedCols := make([]string, len(cols))
+	for i, c := range cols {
+		quotedCols[i] = quoteClickHouseIdentifier(c)
+	}
+	query := fmt.Sprintf("INSERT INTO %s (%s)", quoteClickHouseIdentifier(table), strings.Join(quotedCols, ", "))
 
 	batch, err := d.conn.PrepareBatch(ctx, query)
 	if err != nil {

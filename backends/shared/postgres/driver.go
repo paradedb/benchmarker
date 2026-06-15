@@ -136,12 +136,22 @@ func (d *Driver) Update(ctx context.Context, table string, keyCols []string, col
 		}
 	}
 
-	// Build: INSERT INTO t (cols) VALUES ($1,$2,...), ($3,$4,...) ON CONFLICT (keyCols) DO UPDATE SET col=EXCLUDED.col, ...
+	// Build: INSERT INTO "t" ("cols") VALUES ($1,$2,...), ($3,$4,...) ON CONFLICT ("keyCols") DO UPDATE SET "col"=EXCLUDED."col", ...
+	// Use pgx.Identifier.Sanitize() to safely quote each identifier, matching the pattern used by Insert().
+	quotedCols := make([]string, len(cols))
+	for i, c := range cols {
+		quotedCols[i] = pgx.Identifier{c}.Sanitize()
+	}
+	quotedKeyCols := make([]string, len(keyCols))
+	for i, c := range keyCols {
+		quotedKeyCols[i] = pgx.Identifier{c}.Sanitize()
+	}
+
 	var b strings.Builder
 	b.WriteString("INSERT INTO ")
-	b.WriteString(table)
+	b.WriteString(pgx.Identifier{table}.Sanitize())
 	b.WriteString(" (")
-	b.WriteString(strings.Join(cols, ", "))
+	b.WriteString(strings.Join(quotedCols, ", "))
 	b.WriteString(") VALUES ")
 
 	paramIdx := 1
@@ -163,15 +173,16 @@ func (d *Driver) Update(ctx context.Context, table string, keyCols []string, col
 	}
 
 	b.WriteString(" ON CONFLICT (")
-	b.WriteString(strings.Join(keyCols, ", "))
+	b.WriteString(strings.Join(quotedKeyCols, ", "))
 	b.WriteString(") DO UPDATE SET ")
 	for i, col := range valCols {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(col)
+		quotedCol := pgx.Identifier{col}.Sanitize()
+		b.WriteString(quotedCol)
 		b.WriteString(" = EXCLUDED.")
-		b.WriteString(col)
+		b.WriteString(quotedCol)
 	}
 
 	tag, err := d.pool.Exec(ctx, b.String(), args...)
