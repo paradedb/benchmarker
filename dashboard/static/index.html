@@ -547,15 +547,36 @@
   </head>
   <body>
     <div class="header">
-      <h1><a href="https://github.com/paradedb/benchmarker" style="color: inherit; text-decoration: none;">ParadeDB Benchmarker</a></h1>
+      <h1>
+        <a
+          href="https://github.com/paradedb/benchmarker"
+          style="color: inherit; text-decoration: none"
+          >ParadeDB Benchmarker</a
+        >
+      </h1>
       <div style="display: flex; align-items: center; gap: 16px">
-        <div id="timeline-settings" style="font-size: 11px; color: var(--text-dim)"></div>
+        <div
+          id="timeline-settings"
+          style="font-size: 11px; color: var(--text-dim)"
+        ></div>
         <div class="elapsed" id="elapsed">00:00</div>
         <button class="theme-toggle" onclick="toggleTheme()">◐ Theme</button>
       </div>
     </div>
 
-    <div id="notes-container" style="display: none; padding: 12px 16px; margin-bottom: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim); font-size: 13px;"></div>
+    <div
+      id="notes-container"
+      style="
+        display: none;
+        padding: 12px 16px;
+        margin-bottom: 16px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text-dim);
+        font-size: 13px;
+      "
+    ></div>
 
     <div id="chart-groups-container"></div>
 
@@ -724,7 +745,11 @@
             }
           }
           // Then check for backend-specific color
-          if (!runColors[baseName] && runData?.backend && BACKEND_COLORS[runData.backend]) {
+          if (
+            !runColors[baseName] &&
+            runData?.backend &&
+            BACKEND_COLORS[runData.backend]
+          ) {
             runColors[baseName] = BACKEND_COLORS[runData.backend];
           }
           // Fall back to cycling colors
@@ -752,7 +777,10 @@
         // Try to match with a run's color for consistency across panels
         if (lastData?.runs) {
           for (const [runName, runData] of Object.entries(lastData.runs)) {
-            if (runData.backend === container?.backend || runData.container === name) {
+            if (
+              runData.backend === container?.backend ||
+              runData.container === name
+            ) {
               return getRunColor(runName, runData);
             }
           }
@@ -990,7 +1018,9 @@
         const section = document.createElement("div");
         section.id = `chart-group-${safeGroupId}`;
         section.className = "main-row";
-        const chartTitle = chartName ? `<span style="color: var(--text); margin-right: 8px;">${escapeHtml(chartName)}</span>` : '';
+        const chartTitle = chartName
+          ? `<span style="color: var(--text); margin-right: 8px;">${escapeHtml(chartName)}</span>`
+          : "";
         section.innerHTML = `
         <div class="chart-container">
           <div class="chart-header">
@@ -1037,12 +1067,17 @@
           );
         }
         // Sync metric wrapper visibility based on chart type
-        const metricWrapper = section.querySelector('.metric-wrapper');
-        const hitsUnit = section.querySelector('.hits-unit');
-        const throughputUnit = section.querySelector('.throughput-unit');
-        if (metricWrapper) metricWrapper.style.display = chartType === 'latency' ? 'inline' : 'none';
-        if (hitsUnit) hitsUnit.style.display = chartType === 'hits' ? 'inline' : 'none';
-        if (throughputUnit) throughputUnit.style.display = chartType === 'throughput' ? 'inline' : 'none';
+        const metricWrapper = section.querySelector(".metric-wrapper");
+        const hitsUnit = section.querySelector(".hits-unit");
+        const throughputUnit = section.querySelector(".throughput-unit");
+        if (metricWrapper)
+          metricWrapper.style.display =
+            chartType === "latency" ? "inline" : "none";
+        if (hitsUnit)
+          hitsUnit.style.display = chartType === "hits" ? "inline" : "none";
+        if (throughputUnit)
+          throughputUnit.style.display =
+            chartType === "throughput" ? "inline" : "none";
 
         // Create chart instance
         const canvas = document.getElementById(`chart-${safeGroupId}`);
@@ -1065,7 +1100,7 @@
         if (!value) return;
         selectedMetric = value;
         // Sync all metric selects to the same value
-        document.querySelectorAll('.metric-select').forEach(s => {
+        document.querySelectorAll(".metric-select").forEach((s) => {
           s.value = selectedMetric;
         });
         if (lastData) update(lastData);
@@ -1075,17 +1110,17 @@
         if (!value) return;
         chartType = value;
         // Sync all chart type selects and visibility
-        document.querySelectorAll('.chart-type-select').forEach(s => {
+        document.querySelectorAll(".chart-type-select").forEach((s) => {
           s.value = chartType;
         });
         // Update metric wrapper visibility for all charts
-        document.querySelectorAll('.metric-wrapper').forEach(mw => {
+        document.querySelectorAll(".metric-wrapper").forEach((mw) => {
           mw.style.display = chartType === "latency" ? "inline" : "none";
         });
-        document.querySelectorAll('.hits-unit').forEach(hu => {
+        document.querySelectorAll(".hits-unit").forEach((hu) => {
           hu.style.display = chartType === "hits" ? "inline" : "none";
         });
-        document.querySelectorAll('.throughput-unit').forEach(tu => {
+        document.querySelectorAll(".throughput-unit").forEach((tu) => {
           tu.style.display = chartType === "throughput" ? "inline" : "none";
         });
         if (lastData) update(lastData);
@@ -1206,7 +1241,9 @@
         // Update existing datasets
         chart.data.datasets.forEach((ds) => {
           const datasetKey = getDatasetKey(ds);
-          const newDs = newDatasets.find((n) => getDatasetKey(n) === datasetKey);
+          const newDs = newDatasets.find(
+            (n) => getDatasetKey(n) === datasetKey,
+          );
           if (newDs) {
             if (forceReplace) {
               // Full replace when metric changes
@@ -1321,125 +1358,129 @@
           return aTime - bTime;
         });
         sortedChartGroups.forEach((chartGroup) => {
-            const safeChartId = (chartGroup || "default").replace(
-              /[^a-zA-Z0-9]/g,
-              "_",
-            );
-            // Ensure chart group exists
-            getOrCreateChartGroup(chartGroup === "default" ? "" : chartGroup);
-            const container = document.getElementById(`stats-${safeChartId}`);
-            if (!container) return;
+          const safeChartId = (chartGroup || "default").replace(
+            /[^a-zA-Z0-9]/g,
+            "_",
+          );
+          // Ensure chart group exists
+          getOrCreateChartGroup(chartGroup === "default" ? "" : chartGroup);
+          const container = document.getElementById(`stats-${safeChartId}`);
+          if (!container) return;
 
-            // Sort backends by selected metric (fastest first)
-            const sortedBackends = runsByChart[chartGroup].slice().sort((a, b) => {
+          // Sort backends by selected metric (fastest first)
+          const sortedBackends = runsByChart[chartGroup]
+            .slice()
+            .sort((a, b) => {
               const runA = runs[a];
               const runB = runs[b];
               // Get average metric across all queries for each backend
               const getAvgMetric = (run) => {
                 const queries = run.queries || {};
                 const values = Object.values(queries)
-                  .map(q => q[selectedMetric])
-                  .filter(v => v != null && v > 0);
-                return values.length > 0 ? values.reduce((s, v) => s + v, 0) / values.length : Infinity;
+                  .map((q) => q[selectedMetric])
+                  .filter((v) => v != null && v > 0);
+                return values.length > 0
+                  ? values.reduce((s, v) => s + v, 0) / values.length
+                  : Infinity;
               };
               return getAvgMetric(runA) - getAvgMetric(runB);
             });
 
-            sortedBackends.forEach((name, idx) => {
-              const run = runs[name];
-              const color = getRunColor(name, run);
-              const safeNameId = safeId(name);
-              const statId = `stat-${safeNameId}`;
-              const queryContainerId = `${safeNameId}-queries`;
+          sortedBackends.forEach((name, idx) => {
+            const run = runs[name];
+            const color = getRunColor(name, run);
+            const safeNameId = safeId(name);
+            const statId = `stat-${safeNameId}`;
+            const queryContainerId = `${safeNameId}-queries`;
 
-              // Look up the deduplicated backend snapshot for this run.
-              const backendSnapshot = backendsBlock[run.backend] || {};
-              const backendConfig = backendSnapshot.config || {};
-              const containerInfo = backendSnapshot.container_info || null;
-              runConfigs[name] = backendSnapshot;
+            // Look up the deduplicated backend snapshot for this run.
+            const backendSnapshot = backendsBlock[run.backend] || {};
+            const backendConfig = backendSnapshot.config || {};
+            const containerInfo = backendSnapshot.container_info || null;
+            runConfigs[name] = backendSnapshot;
 
-              const labelId = `label-${safeNameId}`;
-              let el = document.getElementById(statId);
+            const labelId = `label-${safeNameId}`;
+            let el = document.getElementById(statId);
 
-              if (!el) {
-                el = document.createElement("div");
-                el.id = statId;
-                el.className = "stat-group expanded";
-                el.style.borderLeftColor = color;
+            if (!el) {
+              el = document.createElement("div");
+              el.id = statId;
+              el.className = "stat-group expanded";
+              el.style.borderLeftColor = color;
 
-                // Build limits string from container_info on the backend snapshot.
-                let limitsStr = "";
-                if (containerInfo) {
-                  const parts = [];
-                  if (containerInfo.cpu_limit)
-                    parts.push(escapeHtml(containerInfo.cpu_limit));
-                  if (containerInfo.memory_limit)
-                    parts.push(escapeHtml(containerInfo.memory_limit));
-                  if (parts.length > 0)
-                    limitsStr = `<span style="color: var(--text-dim); font-size: 9px; margin-left: 8px;">${parts.join(" / ")}</span>`;
-                }
+              // Build limits string from container_info on the backend snapshot.
+              let limitsStr = "";
+              if (containerInfo) {
+                const parts = [];
+                if (containerInfo.cpu_limit)
+                  parts.push(escapeHtml(containerInfo.cpu_limit));
+                if (containerInfo.memory_limit)
+                  parts.push(escapeHtml(containerInfo.memory_limit));
+                if (parts.length > 0)
+                  limitsStr = `<span style="color: var(--text-dim); font-size: 9px; margin-left: 8px;">${parts.join(" / ")}</span>`;
+              }
 
-                el.innerHTML = `
+              el.innerHTML = `
               <div class="stat-group-header">
                 <div id="${labelId}" class="stat-group-label" style="color: ${color};">${escapeHtml(getBaseName(name))}</div>${limitsStr}
               </div>
               <div class="query-details" id="${queryContainerId}"></div>
             `;
-                container.appendChild(el);
+              container.appendChild(el);
+            }
+
+            // Set up config click handler after element is in the DOM.
+            // Runs on every update so it works even if config arrives later.
+            const hasGlobalCapture =
+              (lastData && (lastData.dataset_yaml || lastData.script)) || false;
+            const hasConfig =
+              Object.keys(backendConfig).length > 0 ||
+              containerInfo ||
+              hasGlobalCapture;
+            if (hasConfig) {
+              const labelEl = document.getElementById(labelId);
+              if (labelEl && !labelEl.dataset.configHandler) {
+                labelEl.style.cursor = "pointer";
+                labelEl.style.textDecoration = "underline";
+                labelEl.style.textDecorationStyle = "dotted";
+                labelEl.addEventListener("click", () => showConfigModal(name));
+                labelEl.dataset.configHandler = "1";
+              }
+            }
+
+            // Update query details - only create if not exists, then just update values
+            const queriesEl = document.getElementById(queryContainerId);
+            const queries = run.queries || {};
+            const queryNames = Object.keys(queries).sort();
+
+            queryNames.forEach((qName) => {
+              const q = queries[qName];
+              const queryKey = `${name}::${qName}`;
+              const queryId = `${safeNameId}-${safeId(qName)}`;
+              let queryEl = document.getElementById(queryId);
+
+              // Store query text if available
+              if (q.query) {
+                queryTexts[queryKey] = q.query;
               }
 
-              // Set up config click handler after element is in the DOM.
-              // Runs on every update so it works even if config arrives later.
-              const hasGlobalCapture =
-                (lastData && (lastData.dataset_yaml || lastData.script)) || false;
-              const hasConfig =
-                Object.keys(backendConfig).length > 0 ||
-                containerInfo ||
-                hasGlobalCapture;
-              if (hasConfig) {
-                const labelEl = document.getElementById(labelId);
-                if (labelEl && !labelEl.dataset.configHandler) {
-                  labelEl.style.cursor = "pointer";
-                  labelEl.style.textDecoration = "underline";
-                  labelEl.style.textDecorationStyle = "dotted";
-                  labelEl.addEventListener("click", () => showConfigModal(name));
-                  labelEl.dataset.configHandler = "1";
-                }
-              }
+              if (!queryEl) {
+                // Create new query item
+                queryEl = document.createElement("div");
+                queryEl.id = queryId;
+                queryEl.className = "query-item";
+                queryEl.dataset.query = qName;
 
-              // Update query details - only create if not exists, then just update values
-              const queriesEl = document.getElementById(queryContainerId);
-              const queries = run.queries || {};
-              const queryNames = Object.keys(queries).sort();
+                // Build info string with VUs and executor if available
+                const infoParts = [];
+                if (q.vus) infoParts.push(`${q.vus} VUs`);
+                if (q.executor) infoParts.push(q.executor);
+                const infoStr =
+                  infoParts.length > 0
+                    ? `<span class="query-info">${infoParts.map(escapeHtml).join(" · ")}</span>`
+                    : "";
 
-              queryNames.forEach((qName) => {
-                const q = queries[qName];
-                const queryKey = `${name}::${qName}`;
-                const queryId = `${safeNameId}-${safeId(qName)}`;
-                let queryEl = document.getElementById(queryId);
-
-                // Store query text if available
-                if (q.query) {
-                  queryTexts[queryKey] = q.query;
-                }
-
-                if (!queryEl) {
-                  // Create new query item
-                  queryEl = document.createElement("div");
-                  queryEl.id = queryId;
-                  queryEl.className = "query-item";
-                  queryEl.dataset.query = qName;
-
-                  // Build info string with VUs and executor if available
-                  const infoParts = [];
-                  if (q.vus) infoParts.push(`${q.vus} VUs`);
-                  if (q.executor) infoParts.push(q.executor);
-                  const infoStr =
-                    infoParts.length > 0
-                      ? `<span class="query-info">${infoParts.map(escapeHtml).join(" · ")}</span>`
-                      : "";
-
-                  queryEl.innerHTML = `
+                queryEl.innerHTML = `
                 <div class="query-header">
                   <div class="query-name">${escapeHtml(qName)}${infoStr}</div>
                 </div>
@@ -1452,28 +1493,28 @@
                   <div><div class="query-stat-value" id="${queryId}-max">0</div><div class="query-stat-label">Max</div></div>
                 </div>
               `;
-                  queryEl.addEventListener("click", () =>
-                    showQueryModal(queryKey, qName),
-                  );
-                  queriesEl.appendChild(queryEl);
-                }
+                queryEl.addEventListener("click", () =>
+                  showQueryModal(queryKey, qName),
+                );
+                queriesEl.appendChild(queryEl);
+              }
 
-                // Update values only
-                document.getElementById(`${queryId}-qps`).textContent =
-                  formatNumber(q.qps || 0);
-                document.getElementById(`${queryId}-min`).textContent =
-                  formatLatency(q.min);
-                document.getElementById(`${queryId}-p50`).textContent =
-                  formatLatency(q.p50);
-                document.getElementById(`${queryId}-p95`).textContent =
-                  formatLatency(q.p95);
-                document.getElementById(`${queryId}-p99`).textContent =
-                  formatLatency(q.p99);
-                document.getElementById(`${queryId}-max`).textContent =
-                  formatLatency(q.max);
-              });
+              // Update values only
+              document.getElementById(`${queryId}-qps`).textContent =
+                formatNumber(q.qps || 0);
+              document.getElementById(`${queryId}-min`).textContent =
+                formatLatency(q.min);
+              document.getElementById(`${queryId}-p50`).textContent =
+                formatLatency(q.p50);
+              document.getElementById(`${queryId}-p95`).textContent =
+                formatLatency(q.p95);
+              document.getElementById(`${queryId}-p99`).textContent =
+                formatLatency(q.p99);
+              document.getElementById(`${queryId}-max`).textContent =
+                formatLatency(q.max);
             });
           });
+        });
       }
 
       function updateLegend(runs) {
@@ -1511,56 +1552,56 @@
           return aTime - bTime;
         });
         sortedChartGroups.forEach((chartGroup) => {
-            const safeChartId = (chartGroup || "default").replace(
-              /[^a-zA-Z0-9]/g,
-              "_",
-            );
-            const legend = document.getElementById(`legend-${safeChartId}`);
-            if (!legend) return;
+          const safeChartId = (chartGroup || "default").replace(
+            /[^a-zA-Z0-9]/g,
+            "_",
+          );
+          const legend = document.getElementById(`legend-${safeChartId}`);
+          if (!legend) return;
 
-            const runNames = runsByChart[chartGroup].slice().sort();
+          const runNames = runsByChart[chartGroup].slice().sort();
 
-            // Build a key to detect if legend structure changed
-            const queryList = [];
-            runNames.forEach((name) => {
-              const queries = runs[name].queries || {};
-              Object.keys(queries)
-                .sort()
-                .forEach((qName) => queryList.push(qName));
-            });
-            const legendKey =
-              queryList.join(",") +
-              "|" +
-              Array.from(selectedQueries).sort().join(",");
+          // Build a key to detect if legend structure changed
+          const queryList = [];
+          runNames.forEach((name) => {
+            const queries = runs[name].queries || {};
+            Object.keys(queries)
+              .sort()
+              .forEach((qName) => queryList.push(qName));
+          });
+          const legendKey =
+            queryList.join(",") +
+            "|" +
+            Array.from(selectedQueries).sort().join(",");
 
-            // Only rebuild if structure changed
-            if (legendKey === chartLegendKeys[chartGroup]) return;
-            chartLegendKeys[chartGroup] = legendKey;
+          // Only rebuild if structure changed
+          if (legendKey === chartLegendKeys[chartGroup]) return;
+          chartLegendKeys[chartGroup] = legendKey;
 
-            const items = [];
-            runNames.forEach((name) => {
-              const run = runs[name];
-              const baseColor = getRunColor(name, run);
-              const queries = run.queries || {};
-              const queryNames = Object.keys(queries).sort();
+          const items = [];
+          runNames.forEach((name) => {
+            const run = runs[name];
+            const baseColor = getRunColor(name, run);
+            const queries = run.queries || {};
+            const queryNames = Object.keys(queries).sort();
 
-              queryNames.forEach((qName, idx) => {
-                const color =
-                  idx === 0 ? baseColor : shadeColor(baseColor, idx * 15);
-                const isEnabled = selectedQueries.has(qName);
-                const disabledClass = isEnabled ? "" : " disabled";
-                items.push(
-                  `<div class="legend-item${disabledClass}" data-query="${escapeHtml(qName)}" title="Click to toggle, Shift+click to isolate"><div class="legend-color" style="background: ${color}"></div> ${escapeHtml(qName)}</div>`,
-                );
-              });
-            });
-            legend.innerHTML = items.join("");
-            legend.querySelectorAll(".legend-item").forEach((item) => {
-              item.addEventListener("click", (event) => {
-                toggleQueryFilter(item.dataset.query, event);
-              });
+            queryNames.forEach((qName, idx) => {
+              const color =
+                idx === 0 ? baseColor : shadeColor(baseColor, idx * 15);
+              const isEnabled = selectedQueries.has(qName);
+              const disabledClass = isEnabled ? "" : " disabled";
+              items.push(
+                `<div class="legend-item${disabledClass}" data-query="${escapeHtml(qName)}" title="Click to toggle, Shift+click to isolate"><div class="legend-color" style="background: ${color}"></div> ${escapeHtml(qName)}</div>`,
+              );
             });
           });
+          legend.innerHTML = items.join("");
+          legend.querySelectorAll(".legend-item").forEach((item) => {
+            item.addEventListener("click", (event) => {
+              toggleQueryFilter(item.dataset.query, event);
+            });
+          });
+        });
       }
 
       function updateQueryFilters(runs) {
@@ -1584,7 +1625,7 @@
       function formatQueryText(queryText) {
         const trimmed = queryText.trim();
         // Try JSON first
-        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
           try {
             const parsed = JSON.parse(trimmed);
             return JSON.stringify(parsed, null, 2);
@@ -1595,9 +1636,9 @@
         // Try SQL formatting
         try {
           return sqlFormatter.format(trimmed, {
-            language: 'postgresql',
+            language: "postgresql",
             tabWidth: 2,
-            keywordCase: 'upper',
+            keywordCase: "upper",
           });
         } catch (e) {
           // Fallback to original
@@ -1717,7 +1758,8 @@
         postHtml += "</div>";
 
         // Container tab — docker inspect subset.
-        let containerHtml = '<div id="tab-container" class="config-tab-content">';
+        let containerHtml =
+          '<div id="tab-container" class="config-tab-content">';
         if (containerInfo) {
           containerHtml += renderContainerInfo(containerInfo);
         }
@@ -1734,7 +1776,13 @@
         scriptHtml += "</div>";
 
         document.getElementById("config-modal-content").innerHTML =
-          tabsHtml + configHtml + preHtml + postHtml + containerHtml + datasetHtml + scriptHtml;
+          tabsHtml +
+          configHtml +
+          preHtml +
+          postHtml +
+          containerHtml +
+          datasetHtml +
+          scriptHtml;
         document.getElementById("modal-backdrop").classList.add("visible");
         document.getElementById("config-modal").classList.add("visible");
       }
@@ -1784,9 +1832,7 @@
             items(
               info.env.map((e) => {
                 const idx = e.indexOf("=");
-                return idx >= 0
-                  ? [e.slice(0, idx), e.slice(idx + 1)]
-                  : [e, ""];
+                return idx >= 0 ? [e.slice(0, idx), e.slice(idx + 1)] : [e, ""];
               }),
             ),
           );
@@ -1884,8 +1930,14 @@
         const settingsEl = document.getElementById("timeline-settings");
         if (data.broadcastInterval != null || data.timelineWindow != null) {
           const parts = [];
-          if (data.broadcastInterval != null) parts.push("updating every " + data.broadcastInterval + "ms");
-          if (data.timelineWindow != null) parts.push(data.timelineWindow === 0 ? "no smoothing" : "smoothed over " + data.timelineWindow + "ms");
+          if (data.broadcastInterval != null)
+            parts.push("updating every " + data.broadcastInterval + "ms");
+          if (data.timelineWindow != null)
+            parts.push(
+              data.timelineWindow === 0
+                ? "no smoothing"
+                : "smoothed over " + data.timelineWindow + "ms",
+            );
           settingsEl.textContent = parts.join(", ");
         }
 
@@ -1945,86 +1997,82 @@
         const throughputDivisor = throughputWindowMs / 1000;
 
         chartGroupsSorted.forEach((chartGroup) => {
-            const chart = getOrCreateChartGroup(
-              chartGroup === "default" ? "" : chartGroup,
+          const chart = getOrCreateChartGroup(
+            chartGroup === "default" ? "" : chartGroup,
+          );
+          const groupRunNames = runsByChart[chartGroup];
+
+          const datasets = [];
+          groupRunNames.forEach((name) => {
+            const run = runs[name];
+            const baseColor = getRunColor(name, run);
+            const queries = run.queries || {};
+            const queryNames = Object.keys(queries).filter((qn) =>
+              selectedQueries.has(qn),
             );
-            const groupRunNames = runsByChart[chartGroup];
 
-            const datasets = [];
-            groupRunNames.forEach((name) => {
-              const run = runs[name];
-              const baseColor = getRunColor(name, run);
-              const queries = run.queries || {};
-              const queryNames = Object.keys(queries).filter((qn) =>
-                selectedQueries.has(qn),
-              );
+            // Use each run's own start time so scenarios starting later still begin at x=0
+            const startTime = run.startTime || 0;
 
-              // Use each run's own start time so scenarios starting later still begin at x=0
-              const startTime = run.startTime || 0;
-
-              if (
-                queryNames.length === 0 &&
-                Object.keys(queries).length === 0
-              ) {
-                // No query breakdown available, skip this run
-              } else {
-                // Show each selected query as separate line
-                queryNames.forEach((qName, idx) => {
-                  const q = queries[qName];
-                  // Slightly vary color for multiple queries in same run
-                  const color =
-                    idx === 0 ? baseColor : shadeColor(baseColor, idx * 15);
-                  const timelineData = (q.timeline || []).map((p) => {
-                    let y;
-                    if (chartType === "hits") {
-                      y = p.hits || 0;
-                    } else if (chartType === "throughput") {
-                      y = (p.count || 0) / throughputDivisor;
-                    } else {
-                      y = p[selectedMetric];
-                    }
-                    return { x: (p.time - startTime) / 1000, y };
-                  });
-                  datasets.push({
-                    datasetKey: `${name}::${qName}`,
-                    label: qName,
-                    borderColor: color,
-                    backgroundColor: color,
-                    data: timelineData,
-                    // Use scriptable option - checks data length on each render
-                    pointRadius: (ctx) => ctx.dataset.data.length === 1 ? 2 : 0,
-                  });
-                });
-              }
-            });
-
-            updateChartDatasets(
-              chart,
-              datasets,
-              metricChanged || chartTypeChanged,
-            );
-            updateChartYAxis(chart);
-
-            // Update y-axis unit based on chart type
-            if (chartType === "hits") {
-              chart.options.scales.y.ticks.callback = (v) =>
-                formatNumber(Math.round(v));
-              chart.options.plugins.tooltip.callbacks.label = (ctx) =>
-                `${ctx.dataset.label}: ${formatNumber(ctx.parsed.y)}`;
-            } else if (chartType === "throughput") {
-              chart.options.scales.y.ticks.callback = (v) =>
-                formatNumber(Math.round(v)) + " qps";
-              chart.options.plugins.tooltip.callbacks.label = (ctx) =>
-                `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} qps`;
+            if (queryNames.length === 0 && Object.keys(queries).length === 0) {
+              // No query breakdown available, skip this run
             } else {
-              chart.options.scales.y.ticks.callback = (v) =>
-                Math.round(v) + "ms";
-              chart.options.plugins.tooltip.callbacks.label = (ctx) =>
-                `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}ms`;
+              // Show each selected query as separate line
+              queryNames.forEach((qName, idx) => {
+                const q = queries[qName];
+                // Slightly vary color for multiple queries in same run
+                const color =
+                  idx === 0 ? baseColor : shadeColor(baseColor, idx * 15);
+                const timelineData = (q.timeline || []).map((p) => {
+                  let y;
+                  if (chartType === "hits") {
+                    y = p.hits || 0;
+                  } else if (chartType === "throughput") {
+                    y = (p.count || 0) / throughputDivisor;
+                  } else {
+                    y = p[selectedMetric];
+                  }
+                  return { x: (p.time - startTime) / 1000, y };
+                });
+                datasets.push({
+                  datasetKey: `${name}::${qName}`,
+                  label: qName,
+                  borderColor: color,
+                  backgroundColor: color,
+                  data: timelineData,
+                  // Use scriptable option - checks data length on each render
+                  pointRadius: (ctx) => (ctx.dataset.data.length === 1 ? 2 : 0),
+                });
+              });
             }
-
-            chart.update("none");
           });
+
+          updateChartDatasets(
+            chart,
+            datasets,
+            metricChanged || chartTypeChanged,
+          );
+          updateChartYAxis(chart);
+
+          // Update y-axis unit based on chart type
+          if (chartType === "hits") {
+            chart.options.scales.y.ticks.callback = (v) =>
+              formatNumber(Math.round(v));
+            chart.options.plugins.tooltip.callbacks.label = (ctx) =>
+              `${ctx.dataset.label}: ${formatNumber(ctx.parsed.y)}`;
+          } else if (chartType === "throughput") {
+            chart.options.scales.y.ticks.callback = (v) =>
+              formatNumber(Math.round(v)) + " qps";
+            chart.options.plugins.tooltip.callbacks.label = (ctx) =>
+              `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} qps`;
+          } else {
+            chart.options.scales.y.ticks.callback = (v) => Math.round(v) + "ms";
+            chart.options.plugins.tooltip.callbacks.label = (ctx) =>
+              `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}ms`;
+          }
+
+          chart.update("none");
+        });
 
         // Update CPU/Memory charts from containers data (independent of runs)
         const containers = data.containers || {};
@@ -2034,16 +2082,22 @@
           const allRuns = Object.values(runs);
 
           // Prefer exact container-name matches.
-          const byContainer = allRuns.filter((run) => run.container === containerName);
+          const byContainer = allRuns.filter(
+            (run) => run.container === containerName,
+          );
           if (byContainer.length === 1) {
             return byContainer[0];
           }
           if (byContainer.length > 1) {
-            return byContainer.sort((a, b) => (a.startTime || 0) - (b.startTime || 0))[0];
+            return byContainer.sort(
+              (a, b) => (a.startTime || 0) - (b.startTime || 0),
+            )[0];
           }
 
           // Fallback to backend only when unambiguous.
-          const byBackend = allRuns.filter((run) => run.backend === container.backend);
+          const byBackend = allRuns.filter(
+            (run) => run.backend === container.backend,
+          );
           if (byBackend.length === 1) {
             return byBackend[0];
           }
@@ -2051,15 +2105,19 @@
         };
 
         // Only show containers whose associated run has started (has a startTime)
-        const activeContainerNames = Object.keys(containers).filter(name => {
-          const container = containers[name];
-          const matchingRun = getContainerRun(name, container);
-          return matchingRun?.startTime > 0;
-        }).sort();
+        const activeContainerNames = Object.keys(containers)
+          .filter((name) => {
+            const container = containers[name];
+            const matchingRun = getContainerRun(name, container);
+            return matchingRun?.startTime > 0;
+          })
+          .sort();
 
-        const hasMetricsData = activeContainerNames.some(name => {
+        const hasMetricsData = activeContainerNames.some((name) => {
           const c = containers[name];
-          return (c.cpu && c.cpu.length > 0) || (c.memory && c.memory.length > 0);
+          return (
+            (c.cpu && c.cpu.length > 0) || (c.memory && c.memory.length > 0)
+          );
         });
 
         if (activeContainerNames.length > 0 && hasMetricsData) {

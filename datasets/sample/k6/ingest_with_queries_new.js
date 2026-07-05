@@ -2,12 +2,7 @@ import db from "k6/x/database";
 
 const backends = db.backends({
   datasetPath: "../",
-  backends: [
-    "paradedb",
-    "elasticsearch",
-    "clickhouse",
-    "mongodb",
-  ],
+  backends: ["paradedb", "elasticsearch", "clickhouse", "mongodb"],
 });
 
 const terms = db.terms(JSON.parse(open("./search_terms.json")));
@@ -82,7 +77,10 @@ const scenarios = {
     exec: "mongodbIngest",
   },
 };
-export const collectMetrics = backends.addDockerMetricsCollector(scenarios, timer);
+export const collectMetrics = backends.addDockerMetricsCollector(
+  scenarios,
+  timer,
+);
 
 export const options = { scenarios };
 
