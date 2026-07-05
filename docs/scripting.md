@@ -29,7 +29,10 @@ const scenarios = {
 };
 
 // 4. Add Docker metrics collector
-export const collectMetrics = backends.addDockerMetricsCollector(scenarios, timer);
+export const collectMetrics = backends.addDockerMetricsCollector(
+  scenarios,
+  timer,
+);
 
 export const options = { scenarios };
 
@@ -88,10 +91,10 @@ The framework is database-agnostic - the current backends and datasets are focus
 
 **PostgreSQL-based** (shared driver, different extensions):
 
-| Type       | Description                              |
-| ---------- | ---------------------------------------- |
-| `paradedb` | ParadeDB with pg_search (BM25)           |
-| `postgres` | PostgreSQL                               |
+| Type       | Description                    |
+| ---------- | ------------------------------ |
+| `paradedb` | ParadeDB with pg_search (BM25) |
+| `postgres` | PostgreSQL                     |
 
 **Elasticsearch-based** (shared driver):
 
@@ -152,7 +155,10 @@ const scenarios = {
     exec: "pdbQuery",
   },
 };
-export const collectMetrics = backends.addDockerMetricsCollector(scenarios, "35s");
+export const collectMetrics = backends.addDockerMetricsCollector(
+  scenarios,
+  "35s",
+);
 
 export const options = { scenarios };
 
@@ -208,7 +214,10 @@ const scenarios = {
 };
 
 // Adds a metrics_collector scenario covering the full test duration
-export const collectMetrics = backends.addDockerMetricsCollector(scenarios, timer);
+export const collectMetrics = backends.addDockerMetricsCollector(
+  scenarios,
+  timer,
+);
 
 export const options = { scenarios };
 ```
@@ -271,7 +280,10 @@ const scenarios = {
     env: { BACKEND: "elasticsearch" },
   },
 };
-export const collectMetrics = backends.addDockerMetricsCollector(scenarios, timer);
+export const collectMetrics = backends.addDockerMetricsCollector(
+  scenarios,
+  timer,
+);
 
 export const options = { scenarios };
 
@@ -341,7 +353,10 @@ const scenarios = {
     tags: { chart: "count" },
   },
 };
-export const collectMetrics = backends.addDockerMetricsCollector(scenarios, timer);
+export const collectMetrics = backends.addDockerMetricsCollector(
+  scenarios,
+  timer,
+);
 
 export const options = { scenarios };
 ```
@@ -367,7 +382,10 @@ const scenarios = {
     exec: "queryTest",
   },
 };
-export const collectMetrics = backends.addDockerMetricsCollector(scenarios, "220s");
+export const collectMetrics = backends.addDockerMetricsCollector(
+  scenarios,
+  "220s",
+);
 
 export const options = { scenarios };
 ```

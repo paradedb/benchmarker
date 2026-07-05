@@ -47,10 +47,10 @@ Then open http://localhost:5665/static/ in your browser.
 
 `--out dashboard` accepts a comma-separated list of outputs. Each keyword toggles one output independently — order doesn't matter, unknown keywords error out.
 
-| Keyword | Effect                                                  |
-| ------- | ------------------------------------------------------- |
-| `live`  | Serve the real-time dashboard at http://localhost:5665/ |
-| `json`  | Write a raw `dashboard_<timestamp>.json` snapshot on exit |
+| Keyword | Effect                                                         |
+| ------- | -------------------------------------------------------------- |
+| `live`  | Serve the real-time dashboard at http://localhost:5665/        |
+| `json`  | Write a raw `dashboard_<timestamp>.json` snapshot on exit      |
 | `html`  | Write a standalone `dashboard_<timestamp>.html` viewer on exit |
 
 ```bash

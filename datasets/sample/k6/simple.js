@@ -15,7 +15,10 @@ const scenarios = {
     exec: "paradedbSimpleQuery",
   },
 };
-export const collectMetrics = backends.addDockerMetricsCollector(scenarios, "500s");
+export const collectMetrics = backends.addDockerMetricsCollector(
+  scenarios,
+  "500s",
+);
 
 export const options = { scenarios };
 
