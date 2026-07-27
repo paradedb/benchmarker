@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"sort"
@@ -1169,6 +1170,10 @@ func (o *Output) handleData(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// percentile returns the smallest observed value such that at least p percent
+// of samples are at or below it — nearest-rank, the same semantics as
+// Postgres's percentile_disc and HdrHistogram. Always an actual sample, never
+// interpolated, and the "p% at or below" claim it makes is exactly true.
 func percentile(values []float64, p float64) float64 {
 	if len(values) == 0 {
 		return 0
@@ -1176,7 +1181,13 @@ func percentile(values []float64, p float64) float64 {
 	sorted := make([]float64, len(values))
 	copy(sorted, values)
 	sort.Float64s(sorted)
-	idx := int(float64(len(sorted)-1) * p / 100)
+	idx := int(math.Ceil(float64(len(sorted))*p/100)) - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
 	return sorted[idx]
 }
 
