@@ -305,7 +305,7 @@ func (o *Output) Stop() error {
 		base := fmt.Sprintf("dashboard_%s", time.Now().Format("2006-01-02_15-04-05"))
 
 		if o.exportJSON {
-			jsonData, err := json.MarshalIndent(data, "", "  ")
+			jsonData, err := marshalExportJSON(data)
 			if err == nil {
 				filename := base + ".json"
 				if err := os.WriteFile(filename, jsonData, 0644); err == nil {
@@ -819,6 +819,17 @@ func (o *Output) getSummary() map[string]interface{} {
 	}
 	addRunCaptures(out)
 	return out
+}
+
+// marshalExportJSON renders the export payload as indented JSON terminated by a
+// trailing newline. json.MarshalIndent stops at the closing brace, which trips
+// the end-of-file linters of repos these exports get committed to.
+func marshalExportJSON(data map[string]interface{}) ([]byte, error) {
+	jsonData, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(jsonData, '\n'), nil
 }
 
 // getExportData returns raw data for JSON export — no pre-aggregated timeline,
