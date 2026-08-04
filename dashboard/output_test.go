@@ -183,3 +183,51 @@ func TestReadMetaEnvUnsetReturnsNil(t *testing.T) {
 		t.Fatalf("expected nil for unset env, got %v", m)
 	}
 }
+
+// The standalone `--out dashboard=html` export hands aggregateExportData the
+// in-memory getExportData() map, whose sample arrays are native Go slices
+// ([]float64/[]int64) and whose times are native int64, not json.Unmarshal's
+// []interface{}/float64. Regression: the json* helpers only accepted the
+// unmarshaled types, so every query sample was dropped (count=0, empty timeline)
+// while container CPU/mem still rendered.
+func TestAggregateExportDataHandlesNativeGoTypes(t *testing.T) {
+	const n = 100
+	start := int64(1_000_000)
+	lat := make([]float64, n)
+	ts := make([]int64, n)
+	hits := make([]int64, n)
+	for i := 0; i < n; i++ {
+		lat[i] = 2.0
+		ts[i] = start + int64(i)*100 // spread across a ~10s window
+		hits[i] = 10
+	}
+	rawData := map[string]interface{}{
+		"runs": map[string]interface{}{
+			"run1": map[string]interface{}{
+				"startTime": start,             // native int64, not float64
+				"endTime":   start + n*100 + 1, // native int64
+				"queries": map[string]interface{}{
+					"q1": map[string]interface{}{
+						"name":       "q1",
+						"vus":        1,
+						"executor":   "constant-vus",
+						"latencies":  lat,  // native []float64
+						"timestamps": ts,   // native []int64
+						"hitCounts":  hits, // native []int64
+						"query":      "SELECT 1",
+					},
+				},
+			},
+		},
+	}
+
+	out := aggregateExportData(rawData, time.Second, 0)
+	q := out["runs"].(map[string]interface{})["run1"].(map[string]interface{})["queries"].(map[string]interface{})["q1"].(map[string]interface{})
+
+	if got := q["count"].(int); got != n {
+		t.Fatalf("count = %d, want %d (native-typed samples were dropped)", got, n)
+	}
+	if tl, ok := q["timeline"].([]TimelinePoint); !ok || len(tl) == 0 {
+		t.Fatalf("timeline is empty; native-typed samples were dropped: %v", q["timeline"])
+	}
+}

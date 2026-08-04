@@ -1092,39 +1092,53 @@ func buildTimeline(latencies []float64, timestamps []int64, hitCounts []int64, b
 }
 
 // JSON helper functions for untyped map access.
+// The json* helpers read a value that may arrive either as native Go types
+// (when aggregateExportData is handed getExportData()'s in-memory map, e.g. the
+// standalone `--out dashboard=html` export) or as json.Unmarshal types (when a
+// .json file is loaded, e.g. dashboard-viewer). Handle both, otherwise the
+// native-typed HTML path silently drops every sample (count=0, empty timeline).
 func jsonInt64(m map[string]interface{}, key string) int64 {
-	if v, ok := m[key].(float64); ok {
+	switch v := m[key].(type) {
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case float64:
 		return int64(v)
 	}
 	return 0
 }
 
 func jsonFloat64Slice(m map[string]interface{}, key string) []float64 {
-	arr, ok := m[key].([]interface{})
-	if !ok {
-		return nil
-	}
-	out := make([]float64, 0, len(arr))
-	for _, v := range arr {
-		if f, ok := v.(float64); ok {
-			out = append(out, f)
+	switch arr := m[key].(type) {
+	case []float64:
+		return arr
+	case []interface{}:
+		out := make([]float64, 0, len(arr))
+		for _, v := range arr {
+			if f, ok := v.(float64); ok {
+				out = append(out, f)
+			}
 		}
+		return out
 	}
-	return out
+	return nil
 }
 
 func jsonInt64Slice(m map[string]interface{}, key string) []int64 {
-	arr, ok := m[key].([]interface{})
-	if !ok {
-		return nil
-	}
-	out := make([]int64, 0, len(arr))
-	for _, v := range arr {
-		if f, ok := v.(float64); ok {
-			out = append(out, int64(f))
+	switch arr := m[key].(type) {
+	case []int64:
+		return arr
+	case []interface{}:
+		out := make([]int64, 0, len(arr))
+		for _, v := range arr {
+			if f, ok := v.(float64); ok {
+				out = append(out, int64(f))
+			}
 		}
+		return out
 	}
-	return out
+	return nil
 }
 
 func (o *Output) handleSSE(w http.ResponseWriter, r *http.Request) {
