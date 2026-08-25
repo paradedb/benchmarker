@@ -16,11 +16,14 @@ import (
 	"github.com/paradedb/benchmarker/metrics"
 )
 
-// ConfigQuery is a custom SQL query whose scalar result is captured during CaptureConfig.
-// The query must return a single row with a single text-compatible column.
+// ConfigQuery is a custom SQL query whose result is captured during CaptureConfig.
+// A query returning a single text column stores its first row under Key. A query
+// returning two text columns is treated as (name, value) rows; each name is
+// grouped into a config section by its dot-prefix, the same way GUCs are
+// (e.g., "paradedb.segments_at_run_start.idx" lands in the "paradedb" section).
 type ConfigQuery struct {
-	Key   string // Config map key (e.g., "paradedb_version")
-	Query string // SQL to execute (e.g., "SELECT paradedb.version_info()")
+	Key   string // Config map key for single-column results (e.g., "paradedb_version")
+	Query string // SQL to execute (e.g., "SELECT paradedb.version_info()::text")
 }
 
 // Driver implements the backends.Driver interface for PostgreSQL.
@@ -81,7 +84,7 @@ func (d *Driver) SetExtraGUCPrefixes(prefixes []string) {
 }
 
 // SetExtraQueries sets additional SQL queries to run during CaptureConfig.
-// Each query should return a single scalar text value.
+// See ConfigQuery for the supported result shapes.
 func (d *Driver) SetExtraQueries(queries []ConfigQuery) {
 	d.extraQueries = queries
 }
@@ -208,16 +211,29 @@ func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 		likePatterns[i] = prefix + ".%"
 	}
 
+	pgSettings := make(map[string]string)
+	extraByPrefix := make(map[string]map[string]string)
+
+	// addEntry groups a name/value pair by dot-prefix (e.g. "paradedb.xxx"
+	// lands in the "paradedb" section, unprefixed names in "postgresql").
+	addEntry := func(name, value string) {
+		if idx := strings.Index(name, "."); idx > 0 {
+			prefix := name[:idx]
+			if extraByPrefix[prefix] == nil {
+				extraByPrefix[prefix] = make(map[string]string)
+			}
+			extraByPrefix[prefix][name] = value
+		} else {
+			pgSettings[name] = value
+		}
+	}
+
 	rows, err := d.pool.Query(ctx, `
 		SELECT name, setting, unit
 		FROM pg_settings
 		WHERE name = ANY($1) OR name LIKE ANY($2)
 	`, allSettings, likePatterns)
 	if err == nil {
-		defer rows.Close()
-		pgSettings := make(map[string]string)
-		extraByPrefix := make(map[string]map[string]string)
-
 		for rows.Next() {
 			var name, setting string
 			var unit *string
@@ -226,25 +242,10 @@ func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 				if unit != nil && *unit != "" {
 					value = setting + *unit
 				}
-
-				// Check if this is an extra GUC (has a dot prefix like "paradedb.xxx")
-				if idx := strings.Index(name, "."); idx > 0 {
-					prefix := name[:idx]
-					if extraByPrefix[prefix] == nil {
-						extraByPrefix[prefix] = make(map[string]string)
-					}
-					extraByPrefix[prefix][name] = value
-				} else {
-					pgSettings[name] = value
-				}
+				addEntry(name, value)
 			}
 		}
-		config["postgresql"] = pgSettings
-
-		// Add extra GUC sections
-		for prefix, settings := range extraByPrefix {
-			config[prefix] = settings
-		}
+		rows.Close()
 	}
 
 	// Run config queries (base + specialization-registered)
@@ -252,10 +253,30 @@ func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 		{Key: "version", Query: "SELECT version()"},
 	}, d.extraQueries...)
 	for _, q := range allQueries {
-		var result string
-		if d.pool.QueryRow(ctx, q.Query).Scan(&result) == nil {
-			config[q.Key] = result
+		rows, err := d.pool.Query(ctx, q.Query)
+		if err != nil {
+			continue
 		}
+		twoColumns := len(rows.FieldDescriptions()) >= 2
+		for rows.Next() {
+			if twoColumns {
+				var name, value string
+				if rows.Scan(&name, &value) == nil {
+					addEntry(name, value)
+				}
+			} else {
+				var result string
+				if rows.Scan(&result) == nil {
+					config[q.Key] = result
+				}
+			}
+		}
+		rows.Close()
+	}
+
+	config["postgresql"] = pgSettings
+	for prefix, settings := range extraByPrefix {
+		config[prefix] = settings
 	}
 
 	metrics.RegisterBackendConfig(backendName, config)

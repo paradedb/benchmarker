@@ -32,7 +32,16 @@ func New(connString string) (backends.Driver, error) {
 	// Add ParadeDB-specific queries to capture
 	pgDriver.SetExtraQueries([]postgres.ConfigQuery{
 		// version_info() returns a composite record; cast so it scans as text
-		{Key: "paradedb_version", Query: "SELECT paradedb.version_info()::text"},
+		{Key: "paradedb.version", Query: "SELECT paradedb.version_info()::text"},
+		// Segment count of every BM25 index. Config capture runs at benchmark
+		// setup, after the dataset load, so this is the run-start layout.
+		{Key: "segments_at_run_start", Query: `
+			SELECT 'paradedb.segments_at_run_start.' || c.relname,
+			       (SELECT count(*) FROM paradedb.index_info(c.oid::regclass))::text
+			FROM pg_class c
+			JOIN pg_am am ON c.relam = am.oid
+			WHERE am.amname = 'bm25'
+			ORDER BY c.relname`},
 	})
 
 	return driver, nil
