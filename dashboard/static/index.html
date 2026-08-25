@@ -1720,7 +1720,14 @@
         // Config tab — DB GUCs etc.
         let configHtml =
           '<div id="tab-config" class="config-tab-content active">';
-        for (const [section, value] of Object.entries(config)) {
+        // Core postgres info first (settings section, then version), then
+        // extension sections (paradedb etc.) alphabetically.
+        const sectionRank = (name) =>
+          name === "postgresql" ? 0 : name === "version" ? 1 : 2;
+        const configEntries = Object.entries(config).sort(
+          (a, b) => sectionRank(a[0]) - sectionRank(b[0]) || a[0].localeCompare(b[0])
+        );
+        for (const [section, value] of configEntries) {
           if (["pre_script", "post_script"].includes(section)) continue;
 
           if (

@@ -25,10 +25,11 @@ type ConfigQuery struct {
 
 // Driver implements the backends.Driver interface for PostgreSQL.
 type Driver struct {
-	pool         *pgxpool.Pool
-	connString   string
-	extraGUCs    []string      // Additional GUCs to capture (e.g., "paradedb.xxx")
-	extraQueries []ConfigQuery // Additional SQL queries to capture
+	pool             *pgxpool.Pool
+	connString       string
+	extraGUCs        []string      // Additional GUCs to capture (e.g., "paradedb.xxx")
+	extraGUCPrefixes []string      // GUC prefixes captured wholesale (e.g., "paradedb")
+	extraQueries     []ConfigQuery // Additional SQL queries to capture
 }
 
 // New creates a new PostgreSQL driver.
@@ -70,6 +71,13 @@ func (d *Driver) Pool() *pgxpool.Pool {
 // GUCs are grouped by prefix (e.g., "paradedb.xxx" -> "paradedb" section).
 func (d *Driver) SetExtraGUCs(gucs []string) {
 	d.extraGUCs = gucs
+}
+
+// SetExtraGUCPrefixes sets GUC prefixes to capture wholesale in CaptureConfig.
+// Every pg_settings entry under "<prefix>." is captured into a section named
+// after the prefix (e.g., "paradedb" -> all "paradedb.*" GUCs).
+func (d *Driver) SetExtraGUCPrefixes(prefixes []string) {
+	d.extraGUCPrefixes = prefixes
 }
 
 // SetExtraQueries sets additional SQL queries to run during CaptureConfig.
@@ -195,11 +203,16 @@ func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 	// Combine base + extra GUCs
 	allSettings := append(baseSettings, d.extraGUCs...)
 
+	likePatterns := make([]string, len(d.extraGUCPrefixes))
+	for i, prefix := range d.extraGUCPrefixes {
+		likePatterns[i] = prefix + ".%"
+	}
+
 	rows, err := d.pool.Query(ctx, `
 		SELECT name, setting, unit
 		FROM pg_settings
-		WHERE name = ANY($1)
-	`, allSettings)
+		WHERE name = ANY($1) OR name LIKE ANY($2)
+	`, allSettings, likePatterns)
 	if err == nil {
 		defer rows.Close()
 		pgSettings := make(map[string]string)
