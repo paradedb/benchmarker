@@ -63,7 +63,7 @@ CREATE TABLE documents (
 );
 
 -- post.sql: Create indexes after load
-CREATE INDEX ON documents USING bm25 (content);
+CREATE INDEX ON documents USING paradedb (content);
 VACUUM ANALYZE documents;
 ```
 
