@@ -125,7 +125,7 @@ Usage:
   loader help
 
 Commands:
-  load    Run pre.sql/json, bulk load CSV, run post.sql/json
+  load    Run pre.sql/json, bulk load data.parquet or data.csv, run post.sql/json
   drop    Drop tables/indexes for the dataset
   pull    Download dataset from S3 to ./datasets/<name>/ (auto-extracts .tar.gz/.tgz)
   help    Show this help message
@@ -181,9 +181,9 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int) 
 		os.Exit(1)
 	}
 
-	csvPath := filepath.Join(datasetDir, "data.csv")
-	if _, err := os.Stat(csvPath); err != nil {
-		fmt.Printf("Error locating data.csv: %v\n", err)
+	dataPath, err := locateDataFile(datasetDir)
+	if err != nil {
+		fmt.Printf("Error locating data file: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -235,7 +235,7 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int) 
 				fmt.Printf("Loading data (batch size: %d)... ", batchSize)
 			}
 			start = time.Now()
-			count, err := loader.Load(ctx, schema, csvPath, batchSize, workers)
+			count, err := loader.Load(ctx, schema, dataPath, batchSize, workers)
 			if err != nil {
 				fmt.Printf("FAILED: %v\n", err)
 				overallFailed = true
@@ -298,6 +298,18 @@ func runDrop(datasetDir string, backendName string) {
 		}
 		b.Close()
 	}
+}
+
+// locateDataFile finds the dataset's data, preferring a single parquet file,
+// then CSV, then a data/ directory of parquet shards.
+func locateDataFile(datasetDir string) (string, error) {
+	for _, name := range []string{"data.parquet", "data.csv", "data"} {
+		path := filepath.Join(datasetDir, name)
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("no data.parquet, data.csv, or data/ directory found in %s", datasetDir)
 }
 
 func loadSchema(datasetDir string) (*backends.Schema, error) {

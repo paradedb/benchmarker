@@ -7,7 +7,7 @@ A dataset is a self-contained directory with everything needed to load data and 
 ```text
 datasets/sample/
 ├── schema.yaml              # Column names and types
-├── data.csv                 # Source data
+├── data.csv                 # Source data (or data.parquet)
 ├── paradedb/
 │   ├── pre.sql              # Create tables, set up schema
 │   └── post.sql             # Create indexes, VACUUM ANALYZE
@@ -43,7 +43,20 @@ columns:
   id: uuid
   title: text
   content: text
+  emb: vector(768)
 ```
+
+Supported column types: `text`/`varchar`, `bigint`, `integer`, `boolean`,
+`timestamp`, `jsonb`, `uuid`, arrays of the integer and text types, and
+`vector(n)` (pgvector; PostgreSQL-based backends only).
+
+## Data Files
+
+Source data lives in `data.csv` or `data.parquet` at the dataset root, or in
+a `data/` directory holding sharded parquet files; the loader prefers a single
+parquet file, then CSV, then the shard directory. CSV cells hold array and
+vector values as JSON (e.g. `"[0.1,0.2]"`). Parquet columns map directly:
+scalars to their Go types, `list<float>` to `vector(n)`.
 
 ## Pre/Post Scripts
 

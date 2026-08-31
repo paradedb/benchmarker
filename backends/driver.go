@@ -3,7 +3,6 @@ package backends
 
 import (
 	"context"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/paradedb/benchmarker/metrics"
+	"github.com/pgvector/pgvector-go"
 	"go.k6.io/k6/js/modules"
 )
 
@@ -335,12 +335,22 @@ func (c *K6Client) Close() {
 	c.driver.Close()
 }
 
+// normalizeSchemaType lowercases a schema type and drops any type modifier,
+// so "vector(768)" and "VARCHAR(255)" match their base type names.
+func normalizeSchemaType(schemaType string) string {
+	normalized := strings.ToLower(strings.TrimSpace(schemaType))
+	if i := strings.IndexByte(normalized, '('); i >= 0 {
+		normalized = strings.TrimSpace(normalized[:i])
+	}
+	return normalized
+}
+
 // convertValue converts a raw CSV string value to the appropriate Go type based on schema type.
 func convertValue(rawValue, schemaType string) (any, error) {
 	// Strip null bytes (invalid in PostgreSQL text)
 	rawValue = strings.ReplaceAll(rawValue, "\x00", "")
 
-	schemaType = strings.ToLower(schemaType)
+	schemaType = normalizeSchemaType(schemaType)
 	if rawValue == "" {
 		switch schemaType {
 		case "text", "varchar", "char", "character varying", "string":
@@ -417,6 +427,13 @@ func convertValue(rawValue, schemaType string) (any, error) {
 		}
 		return obj, nil
 
+	case "vector":
+		var arr []float32
+		if err := json.Unmarshal([]byte(rawValue), &arr); err != nil {
+			return nil, fmt.Errorf("invalid vector %q: %w", rawValue, err)
+		}
+		return pgvector.NewVector(arr), nil
+
 	default:
 		// text, varchar, etc - return as-is
 		return rawValue, nil
@@ -487,8 +504,20 @@ func (l *CLILoader) ensureDriver() error {
 
 func (l *CLILoader) Name() string { return l.name }
 
+// TypeReloader is implemented by drivers whose connections cache database type
+// information that can be invalidated by pre scripts (e.g. CREATE EXTENSION).
+type TypeReloader interface {
+	ReloadTypes(ctx context.Context) error
+}
+
 func (l *CLILoader) RunPre(ctx context.Context, dir string, schema *Schema) error {
-	return l.execFile(ctx, filepath.Join(dir, "pre."+l.fileType))
+	if err := l.execFile(ctx, filepath.Join(dir, "pre."+l.fileType)); err != nil {
+		return err
+	}
+	if reloader, ok := l.driver.(TypeReloader); ok {
+		return reloader.ReloadTypes(ctx)
+	}
+	return nil
 }
 
 func (l *CLILoader) RunPost(ctx context.Context, dir string, schema *Schema) error {
@@ -511,7 +540,7 @@ func (l *CLILoader) execFile(ctx context.Context, path string) error {
 	return l.driver.Exec(ctx, string(data))
 }
 
-func (l *CLILoader) Load(ctx context.Context, schema *Schema, csvPath string, batchSize int, workers int) (int, error) {
+func (l *CLILoader) Load(ctx context.Context, schema *Schema, dataPath string, batchSize int, workers int) (int, error) {
 	if err := l.ensureDriver(); err != nil {
 		return 0, err
 	}
@@ -522,28 +551,13 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, csvPath string, ba
 		batchSize = 1
 	}
 
-	file, err := os.Open(csvPath)
+	source, err := OpenRowSource(dataPath, schema)
 	if err != nil {
 		return 0, err
 	}
-	defer file.Close()
+	defer source.Close()
 
-	reader := csv.NewReader(file)
-	headers, err := reader.Read()
-	if err != nil {
-		return 0, err
-	}
-
-	// Map headers to column indices
-	headerIdx := make(map[string]int)
-	for i, h := range headers {
-		headerIdx[h] = i
-	}
-
-	cols, err := schemaColumnsInOrder(schema, headers)
-	if err != nil {
-		return 0, err
-	}
+	cols := source.Columns()
 
 	target := schema.Table
 	if target == "" {
@@ -621,32 +635,14 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, csvPath string, ba
 	}
 
 	batch := make([][]any, 0, batchSize)
-	rowNum := 1 // header row
-rowLoop:
 	for {
-		record, err := reader.Read()
+		row, err := source.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			setErr(fmt.Errorf("failed to read CSV row %d from %q: %w", rowNum+1, csvPath, err))
+			setErr(err)
 			break
-		}
-		rowNum++
-
-		row := make([]any, len(cols))
-		for i, col := range cols {
-			idx, ok := headerIdx[col]
-			if !ok || idx >= len(record) {
-				row[i] = nil
-				continue
-			}
-			value, err := convertValue(record[idx], schema.Columns[col])
-			if err != nil {
-				setErr(fmt.Errorf("row %d column %q: %w", rowNum, col, err))
-				break rowLoop
-			}
-			row[i] = value
 		}
 		batch = append(batch, row)
 
