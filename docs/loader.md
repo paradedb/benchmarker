@@ -1,6 +1,6 @@
 # Data Loader
 
-The loader CLI handles bulk data loading with lifecycle scripts. It reads your dataset's `schema.yaml` and `data.csv`, runs backend-specific `pre` scripts, bulk inserts the data, then runs `post` scripts.
+The loader CLI handles bulk data loading with lifecycle scripts. It reads your dataset's `schema.yaml` and `data.csv` (or `data.parquet`), runs backend-specific `pre` scripts, bulk inserts the data, then runs `post` scripts.
 
 ## Commands
 
