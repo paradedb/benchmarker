@@ -4,6 +4,11 @@ dashboard*.json
 # Datasets - only include sample (everything in it)
 datasets/*
 !datasets/sample
+!datasets/cohere-10m
+datasets/cohere-10m/data/
+datasets/cohere-10m/queries/
+datasets/cohere-10m/dataset.yaml
+datasets/cohere-10m/k6/query_vectors.json
 
 # Build outputs
 *.exe
