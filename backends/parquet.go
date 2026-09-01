@@ -1,12 +1,14 @@
 package backends
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/parquet-go/parquet-go"
 	"github.com/pgvector/pgvector-go"
@@ -16,6 +18,7 @@ const parquetReadBatch = 256
 
 type parquetSource struct {
 	file       *os.File
+	path       string
 	fileSchema *parquet.Schema
 	schema     *Schema
 	cols       []string
@@ -60,6 +63,7 @@ func openParquetSource(path string, schema *Schema) (RowSource, error) {
 
 	return &parquetSource{
 		file:       file,
+		path:       path,
 		fileSchema: pf.Schema(),
 		schema:     schema,
 		cols:       cols,
@@ -117,14 +121,14 @@ func (s *parquetSource) fill() error {
 func (s *parquetSource) convert(row parquet.Row) ([]any, error) {
 	record, err := s.reconstruct(row)
 	if err != nil {
-		return nil, fmt.Errorf("row %d: %w", s.rowNum, err)
+		return nil, fmt.Errorf("parquet row %d in %q: %w", s.rowNum, s.path, err)
 	}
 
 	out := make([]any, len(s.cols))
 	for i, col := range s.cols {
 		value, err := convertParquetValue(record[col], s.schema.Columns[col])
 		if err != nil {
-			return nil, fmt.Errorf("row %d column %q: %w", s.rowNum, col, err)
+			return nil, fmt.Errorf("parquet row %d column %q in %q: %w", s.rowNum, col, s.path, err)
 		}
 		out[i] = value
 	}
@@ -151,23 +155,200 @@ func convertParquetValue(raw any, schemaType string) (any, error) {
 	if raw == nil {
 		return nil, nil
 	}
-	if normalizeSchemaType(schemaType) == "vector" {
-		return toVector(raw)
+	normalizedType := normalizeSchemaType(schemaType)
+	if normalizedType == "vector" {
+		return toVector(raw, schemaType)
 	}
 	if str, ok := raw.(string); ok {
 		return convertValue(str, schemaType)
 	}
-	return raw, nil
+
+	switch normalizedType {
+	case "text", "varchar", "char", "character varying", "string", "uuid":
+		return toText(raw)
+
+	case "bigint", "int8":
+		return toInt64(raw)
+
+	case "integer", "int", "int4":
+		v, err := toInt64(raw)
+		if err != nil {
+			return nil, err
+		}
+		if v < -2147483648 || v > 2147483647 {
+			return nil, fmt.Errorf("integer value %d overflows int32", v)
+		}
+		return int32(v), nil
+
+	case "boolean", "bool":
+		v, ok := raw.(bool)
+		if !ok {
+			return nil, fmt.Errorf("invalid boolean value of type %T", raw)
+		}
+		return v, nil
+
+	case "bigint[]", "int8[]":
+		return toInt64Slice(raw)
+
+	case "integer[]", "int[]", "int4[]":
+		values, err := toInt64Slice(raw)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]int32, len(values))
+		for i, v := range values {
+			if v < -2147483648 || v > 2147483647 {
+				return nil, fmt.Errorf("integer array element %d overflows int32", v)
+			}
+			out[i] = int32(v)
+		}
+		return out, nil
+
+	case "text[]", "varchar[]":
+		return toStringSlice(raw)
+
+	case "timestamp", "timestamptz":
+		switch v := raw.(type) {
+		case time.Time:
+			return v, nil
+		case []byte:
+			return convertValue(string(v), schemaType)
+		default:
+			return nil, fmt.Errorf("invalid timestamp value of type %T", raw)
+		}
+
+	case "jsonb", "json":
+		switch v := raw.(type) {
+		case []byte:
+			var obj any
+			if err := json.Unmarshal(v, &obj); err != nil {
+				return nil, fmt.Errorf("invalid json %q: %w", string(v), err)
+			}
+			return obj, nil
+		default:
+			return raw, nil
+		}
+
+	default:
+		return raw, nil
+	}
 }
 
-func toVector(raw any) (any, error) {
+func toText(raw any) (string, error) {
+	switch v := raw.(type) {
+	case []byte:
+		return string(v), nil
+	default:
+		return "", fmt.Errorf("invalid text value of type %T", raw)
+	}
+}
+
+func toInt64(raw any) (int64, error) {
+	switch v := raw.(type) {
+	case int:
+		return int64(v), nil
+	case int8:
+		return int64(v), nil
+	case int16:
+		return int64(v), nil
+	case int32:
+		return int64(v), nil
+	case int64:
+		return v, nil
+	case uint:
+		if uint64(v) > uint64(^uint64(0)>>1) {
+			return 0, fmt.Errorf("integer value %d overflows int64", v)
+		}
+		return int64(v), nil
+	case uint8:
+		return int64(v), nil
+	case uint16:
+		return int64(v), nil
+	case uint32:
+		return int64(v), nil
+	case uint64:
+		if v > uint64(^uint64(0)>>1) {
+			return 0, fmt.Errorf("integer value %d overflows int64", v)
+		}
+		return int64(v), nil
+	default:
+		return 0, fmt.Errorf("invalid integer value of type %T", raw)
+	}
+}
+
+func toInt64Slice(raw any) ([]int64, error) {
+	switch v := raw.(type) {
+	case []int:
+		out := make([]int64, len(v))
+		for i, e := range v {
+			out[i] = int64(e)
+		}
+		return out, nil
+	case []int32:
+		out := make([]int64, len(v))
+		for i, e := range v {
+			out[i] = int64(e)
+		}
+		return out, nil
+	case []int64:
+		return v, nil
+	case []any:
+		out := make([]int64, len(v))
+		for i, e := range v {
+			value, err := toInt64(e)
+			if err != nil {
+				return nil, fmt.Errorf("array element %d: %w", i, err)
+			}
+			out[i] = value
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("invalid integer array value of type %T", raw)
+	}
+}
+
+func toStringSlice(raw any) ([]string, error) {
+	switch v := raw.(type) {
+	case []string:
+		return v, nil
+	case [][]byte:
+		out := make([]string, len(v))
+		for i, e := range v {
+			out[i] = string(e)
+		}
+		return out, nil
+	case []any:
+		out := make([]string, len(v))
+		for i, e := range v {
+			switch value := e.(type) {
+			case string:
+				out[i] = value
+			case []byte:
+				out[i] = string(value)
+			default:
+				return nil, fmt.Errorf("array element %d: invalid text value of type %T", i, e)
+			}
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("invalid text array value of type %T", raw)
+	}
+}
+
+func toVector(raw any, schemaType string) (any, error) {
 	switch v := raw.(type) {
 	case []float32:
+		if err := validateVectorDimension(len(v), schemaType); err != nil {
+			return nil, err
+		}
 		return pgvector.NewVector(v), nil
 	case []float64:
 		out := make([]float32, len(v))
 		for i, f := range v {
 			out[i] = float32(f)
+		}
+		if err := validateVectorDimension(len(out), schemaType); err != nil {
+			return nil, err
 		}
 		return pgvector.NewVector(out), nil
 	case []any:
@@ -182,9 +363,12 @@ func toVector(raw any) (any, error) {
 				return nil, fmt.Errorf("invalid vector element of type %T", e)
 			}
 		}
+		if err := validateVectorDimension(len(out), schemaType); err != nil {
+			return nil, err
+		}
 		return pgvector.NewVector(out), nil
 	case string:
-		return convertValue(v, "vector")
+		return convertValue(v, schemaType)
 	default:
 		return nil, fmt.Errorf("invalid vector value of type %T", raw)
 	}

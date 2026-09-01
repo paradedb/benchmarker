@@ -109,7 +109,7 @@ func (s *csvSource) Next() ([]any, error) {
 		}
 		value, err := convertValue(record[idx], s.schema.Columns[col])
 		if err != nil {
-			return nil, fmt.Errorf("row %d column %q: %w", s.rowNum, col, err)
+			return nil, fmt.Errorf("row %d column %q in %q: %w", s.rowNum, col, s.path, err)
 		}
 		row[i] = value
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -136,5 +137,51 @@ func TestResolveDownloadPath(t *testing.T) {
 				t.Fatalf("local mismatch: got %q, want %q", local, wantLocal)
 			}
 		})
+	}
+}
+
+func TestLocateDataFilePreference(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.Mkdir(dataDir, 0755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	csvPath := filepath.Join(dir, "data.csv")
+	if err := os.WriteFile(csvPath, []byte("id\n1\n"), 0644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+	parquetPath := filepath.Join(dir, "data.parquet")
+	if err := os.WriteFile(parquetPath, []byte("PAR1"), 0644); err != nil {
+		t.Fatalf("write parquet placeholder: %v", err)
+	}
+
+	got, err := locateDataFile(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != parquetPath {
+		t.Fatalf("locateDataFile() = %q, want %q", got, parquetPath)
+	}
+}
+
+func TestLocateDataFileFallsBackToShardDirectory(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.Mkdir(dataDir, 0755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+
+	got, err := locateDataFile(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != dataDir {
+		t.Fatalf("locateDataFile() = %q, want %q", got, dataDir)
+	}
+}
+
+func TestLocateDataFileRejectsMissingData(t *testing.T) {
+	if _, err := locateDataFile(t.TempDir()); err == nil {
+		t.Fatal("expected error for dataset without data")
 	}
 }
