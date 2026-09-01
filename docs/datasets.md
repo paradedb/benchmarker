@@ -48,7 +48,7 @@ columns:
 
 Supported column types: `text`/`varchar`, `bigint`, `integer`, `boolean`,
 `timestamp`, `jsonb`, `uuid`, arrays of the integer and text types, and
-`vector(n)` (pgvector; PostgreSQL-based backends only).
+`vector(n)` (pgvector; ParadeDB and PostgreSQL only).
 
 ## Data Files
 
@@ -57,6 +57,30 @@ a `data/` directory holding sharded parquet files; the loader prefers a single
 parquet file, then CSV, then the shard directory. CSV cells hold array and
 vector values as JSON (e.g. `"[0.1,0.2]"`). Parquet columns map directly:
 scalars to their Go types, `list<float>` to `vector(n)`.
+
+Each loader run imports one data source into one target named by `table`.
+Backend `pre` and `post` scripts may create or index additional tables, but the
+CLI bulk-import path loads only this one table/index/collection.
+
+## Loader Support Matrix
+
+| Backend | CSV scalar columns | Parquet scalar columns | `vector(n)` columns |
+| --- | --- | --- | --- |
+| ParadeDB | Yes | Yes | Yes |
+| PostgreSQL | Yes | Yes | Yes |
+| ClickHouse | Yes | Yes | No |
+| Elasticsearch | Yes | Yes | No |
+| OpenSearch | Yes | Yes | No |
+| MongoDB | Yes | Yes | No |
+
+The CLI validates vector schemas before running backend `pre` scripts. A dataset
+with `vector(n)` columns will fail early for non-PostgreSQL backends instead of
+passing pgvector values into drivers that cannot encode them. Vector dimensions
+are checked against `vector(n)` before insert.
+
+The k6 `db.loader().openDocuments()` helper is separate from the CLI loader: it
+is still a CSV-only reader for ingest and update workloads and does not apply
+`schema.yaml` type conversion.
 
 ## Pre/Post Scripts
 

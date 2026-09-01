@@ -345,14 +345,74 @@ func normalizeSchemaType(schemaType string) string {
 	return normalized
 }
 
+func vectorDimension(schemaType string) (int, bool, error) {
+	if normalizeSchemaType(schemaType) != "vector" {
+		return 0, false, nil
+	}
+
+	start := strings.IndexByte(schemaType, '(')
+	if start < 0 {
+		return 0, false, nil
+	}
+	end := strings.IndexByte(schemaType[start+1:], ')')
+	if end < 0 {
+		return 0, false, fmt.Errorf("invalid vector type %q: missing closing parenthesis", schemaType)
+	}
+	end += start + 1
+	if trailing := strings.TrimSpace(schemaType[end+1:]); trailing != "" {
+		return 0, false, fmt.Errorf("invalid vector type %q: unexpected trailing text %q", schemaType, trailing)
+	}
+
+	rawDim := strings.TrimSpace(schemaType[start+1 : end])
+	dim, err := strconv.Atoi(rawDim)
+	if err != nil || dim < 1 {
+		return 0, false, fmt.Errorf("invalid vector dimension %q in %q", rawDim, schemaType)
+	}
+	return dim, true, nil
+}
+
+func validateVectorDimension(length int, schemaType string) error {
+	dim, ok, err := vectorDimension(schemaType)
+	if err != nil || !ok {
+		return err
+	}
+	if length != dim {
+		return fmt.Errorf("vector dimension mismatch: schema %s expects %d values, got %d", schemaType, dim, length)
+	}
+	return nil
+}
+
+func vectorColumns(schema *Schema) []string {
+	if schema == nil {
+		return nil
+	}
+	cols := make([]string, 0)
+	for col, schemaType := range schema.Columns {
+		if normalizeSchemaType(schemaType) == "vector" {
+			cols = append(cols, col)
+		}
+	}
+	sort.Strings(cols)
+	return cols
+}
+
+func backendSupportsVectorColumns(name string) bool {
+	switch name {
+	case "paradedb", "postgres":
+		return true
+	default:
+		return false
+	}
+}
+
 // convertValue converts a raw CSV string value to the appropriate Go type based on schema type.
 func convertValue(rawValue, schemaType string) (any, error) {
 	// Strip null bytes (invalid in PostgreSQL text)
 	rawValue = strings.ReplaceAll(rawValue, "\x00", "")
 
-	schemaType = normalizeSchemaType(schemaType)
+	normalizedType := normalizeSchemaType(schemaType)
 	if rawValue == "" {
-		switch schemaType {
+		switch normalizedType {
 		case "text", "varchar", "char", "character varying", "string":
 			return "", nil
 		default:
@@ -360,7 +420,7 @@ func convertValue(rawValue, schemaType string) (any, error) {
 		}
 	}
 
-	switch schemaType {
+	switch normalizedType {
 	case "bigint", "int8":
 		v, err := strconv.ParseInt(rawValue, 10, 64)
 		if err != nil {
@@ -432,6 +492,9 @@ func convertValue(rawValue, schemaType string) (any, error) {
 		if err := json.Unmarshal([]byte(rawValue), &arr); err != nil {
 			return nil, fmt.Errorf("invalid vector %q: %w", rawValue, err)
 		}
+		if err := validateVectorDimension(len(arr), schemaType); err != nil {
+			return nil, err
+		}
 		return pgvector.NewVector(arr), nil
 
 	default:
@@ -462,10 +525,10 @@ func schemaColumnsInOrder(schema *Schema, headers []string) ([]string, error) {
 	}
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		return nil, fmt.Errorf("schema columns missing from CSV: %s", strings.Join(missing, ", "))
+		return nil, fmt.Errorf("schema columns missing from data file: %s", strings.Join(missing, ", "))
 	}
 	if len(cols) == 0 {
-		return nil, fmt.Errorf("no schema columns matched CSV headers")
+		return nil, fmt.Errorf("no schema columns matched data file headers")
 	}
 
 	return cols, nil
@@ -504,6 +567,23 @@ func (l *CLILoader) ensureDriver() error {
 
 func (l *CLILoader) Name() string { return l.name }
 
+// ValidateSchema checks whether this backend can load every schema column type.
+func (l *CLILoader) ValidateSchema(schema *Schema) error {
+	if schema == nil || len(schema.Columns) == 0 {
+		return fmt.Errorf("schema has no columns")
+	}
+	if cols := vectorColumns(schema); len(cols) > 0 && !backendSupportsVectorColumns(l.name) {
+		return fmt.Errorf("backend %q does not support vector columns: %s (supported backends: paradedb, postgres)",
+			l.name, strings.Join(cols, ", "))
+	}
+	for col, schemaType := range schema.Columns {
+		if _, _, err := vectorDimension(schemaType); err != nil {
+			return fmt.Errorf("column %q: %w", col, err)
+		}
+	}
+	return nil
+}
+
 // TypeReloader is implemented by drivers whose connections cache database type
 // information that can be invalidated by pre scripts (e.g. CREATE EXTENSION).
 type TypeReloader interface {
@@ -541,6 +621,9 @@ func (l *CLILoader) execFile(ctx context.Context, path string) error {
 }
 
 func (l *CLILoader) Load(ctx context.Context, schema *Schema, dataPath string, batchSize int, workers int) (int, error) {
+	if err := l.ValidateSchema(schema); err != nil {
+		return 0, err
+	}
 	if err := l.ensureDriver(); err != nil {
 		return 0, err
 	}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -53,6 +55,51 @@ func TestConvertValueRejectsInvalidVector(t *testing.T) {
 	}
 }
 
+func TestConvertValueRejectsWrongVectorDimension(t *testing.T) {
+	_, err := convertValue("[1,2]", "vector(3)")
+	if err == nil {
+		t.Fatal("expected error for wrong vector dimension")
+	}
+	if !strings.Contains(err.Error(), "expects 3 values, got 2") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateSchemaRejectsMalformedVectorType(t *testing.T) {
+	loader := NewCLILoader("postgres", "sql", "stub://default", func(string) (Driver, error) {
+		t.Fatal("factory should not be called during validation")
+		return nil, nil
+	})
+
+	err := loader.ValidateSchema(&Schema{
+		Columns: map[string]string{"emb": "vector(nope)"},
+	})
+	if err == nil {
+		t.Fatal("expected malformed vector type error")
+	}
+	if !strings.Contains(err.Error(), `column "emb"`) {
+		t.Fatalf("expected column context in error, got %v", err)
+	}
+}
+
+func TestCLILoaderRejectsVectorSchemaForUnsupportedBackend(t *testing.T) {
+	loader := NewCLILoader("clickhouse", "sql", "stub://default", func(string) (Driver, error) {
+		t.Fatal("factory should not be called for unsupported vector schema")
+		return nil, nil
+	})
+
+	_, err := loader.Load(context.Background(), &Schema{
+		Table:   "documents",
+		Columns: map[string]string{"emb": "vector(3)"},
+	}, filepath.Join(t.TempDir(), "missing.parquet"), 100, 1)
+	if err == nil {
+		t.Fatal("expected unsupported vector schema error")
+	}
+	if !strings.Contains(err.Error(), `backend "clickhouse" does not support vector columns: emb`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 type capturingDriver struct {
 	mu   sync.Mutex
 	cols []string
@@ -80,6 +127,14 @@ type parquetTestRow struct {
 	Emb   []float32 `parquet:"emb"`
 }
 
+type parquetScalarRow struct {
+	ID     int32    `parquet:"id"`
+	Hits   int64    `parquet:"hits"`
+	Active bool     `parquet:"active"`
+	Title  string   `parquet:"title"`
+	Tags   []string `parquet:"tags,list"`
+}
+
 func writeParquetFixture(t *testing.T, rows []parquetTestRow) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "data.parquet")
@@ -100,6 +155,50 @@ func writeParquetFixture(t *testing.T, rows []parquetTestRow) string {
 	return path
 }
 
+func writeParquetScalarFixture(t *testing.T, rows []parquetScalarRow) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "data.parquet")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create parquet file: %v", err)
+	}
+	writer := parquet.NewGenericWriter[parquetScalarRow](file)
+	if _, err := writer.Write(rows); err != nil {
+		t.Fatalf("write parquet rows: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close parquet writer: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close parquet file: %v", err)
+	}
+	return path
+}
+
+func writeStandardListParquetFixture(t *testing.T, rows []map[string]any) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "data.parquet")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create parquet file: %v", err)
+	}
+	schema := parquet.NewSchema("cohere", parquet.Group{
+		"_id": parquet.String(),
+		"emb": parquet.List(parquet.Leaf(parquet.FloatType)),
+	})
+	writer := parquet.NewGenericWriter[map[string]any](file, schema)
+	if _, err := writer.Write(rows); err != nil {
+		t.Fatalf("write parquet rows: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close parquet writer: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close parquet file: %v", err)
+	}
+	return path
+}
+
 func TestCLILoaderLoadsParquetWithVectors(t *testing.T) {
 	path := writeParquetFixture(t, []parquetTestRow{
 		{ID: 1, Title: "first", Emb: []float32{0.1, 0.2, 0.3}},
@@ -107,7 +206,7 @@ func TestCLILoaderLoadsParquetWithVectors(t *testing.T) {
 	})
 
 	driver := &capturingDriver{}
-	loader := NewCLILoader("test", "sql", "stub://default", func(string) (Driver, error) {
+	loader := NewCLILoader("postgres", "sql", "stub://default", func(string) (Driver, error) {
 		return driver, nil
 	})
 
@@ -145,6 +244,101 @@ func TestCLILoaderLoadsParquetWithVectors(t *testing.T) {
 	}
 }
 
+func TestCLILoaderLoadsParquetScalarsForNonPostgresBackend(t *testing.T) {
+	path := writeParquetScalarFixture(t, []parquetScalarRow{
+		{ID: 7, Hits: 42, Active: true, Title: "scalar", Tags: []string{"a", "b"}},
+	})
+
+	driver := &capturingDriver{}
+	loader := NewCLILoader("clickhouse", "sql", "stub://default", func(string) (Driver, error) {
+		return driver, nil
+	})
+
+	count, err := loader.Load(context.Background(), &Schema{
+		Table: "documents",
+		Columns: map[string]string{
+			"id":     "integer",
+			"hits":   "bigint",
+			"active": "boolean",
+			"title":  "text",
+			"tags":   "text[]",
+		},
+	}, path, 100, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 row loaded, got %d", count)
+	}
+
+	byCol := make(map[string]any, len(driver.cols))
+	for i, col := range driver.cols {
+		byCol[col] = driver.rows[0][i]
+	}
+	if got, ok := byCol["id"].(int32); !ok || got != 7 {
+		t.Fatalf("expected int32 id 7, got %#v", byCol["id"])
+	}
+	if got, ok := byCol["hits"].(int64); !ok || got != 42 {
+		t.Fatalf("expected int64 hits 42, got %#v", byCol["hits"])
+	}
+	if got, ok := byCol["active"].(bool); !ok || !got {
+		t.Fatalf("expected active true, got %#v", byCol["active"])
+	}
+	if got, ok := byCol["title"].(string); !ok || got != "scalar" {
+		t.Fatalf("expected title scalar, got %#v", byCol["title"])
+	}
+	if got := byCol["tags"]; !reflect.DeepEqual(got, []string{"a", "b"}) {
+		t.Fatalf("expected tags [a b], got %#v", got)
+	}
+}
+
+func TestCLILoaderLoadsStandardListParquetVector(t *testing.T) {
+	path := writeStandardListParquetFixture(t, []map[string]any{
+		{"_id": "doc-1", "emb": []float32{0.1, 0.2, 0.3}},
+	})
+
+	driver := &capturingDriver{}
+	loader := NewCLILoader("postgres", "sql", "stub://default", func(string) (Driver, error) {
+		return driver, nil
+	})
+
+	count, err := loader.Load(context.Background(), &Schema{
+		Table: "documents",
+		Columns: map[string]string{
+			"_id": "text",
+			"emb": "vector(3)",
+		},
+	}, path, 100, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 row loaded, got %d", count)
+	}
+
+	byCol := make(map[string]any, len(driver.cols))
+	for i, col := range driver.cols {
+		byCol[col] = driver.rows[0][i]
+	}
+	vec, ok := byCol["emb"].(pgvector.Vector)
+	if !ok {
+		t.Fatalf("expected pgvector.Vector, got %T", byCol["emb"])
+	}
+	if slice := vec.Slice(); len(slice) != 3 || slice[2] != 0.3 {
+		t.Fatalf("unexpected vector contents: %v", vec.Slice())
+	}
+}
+
+func TestConvertParquetValueRejectsWrongVectorDimension(t *testing.T) {
+	_, err := convertParquetValue([]float32{1, 2}, "vector(3)")
+	if err == nil {
+		t.Fatal("expected vector dimension error")
+	}
+	if !strings.Contains(err.Error(), "expects 3 values, got 2") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestCLILoaderLoadsShardedParquetDirectory(t *testing.T) {
 	dir := t.TempDir()
 	shards := [][]parquetTestRow{
@@ -163,7 +357,7 @@ func TestCLILoaderLoadsShardedParquetDirectory(t *testing.T) {
 	}
 
 	driver := &capturingDriver{}
-	loader := NewCLILoader("test", "sql", "stub://default", func(string) (Driver, error) {
+	loader := NewCLILoader("postgres", "sql", "stub://default", func(string) (Driver, error) {
 		return driver, nil
 	})
 
@@ -184,7 +378,11 @@ func TestCLILoaderLoadsShardedParquetDirectory(t *testing.T) {
 }
 
 func TestOpenRowSourceRejectsUnknownExtension(t *testing.T) {
-	if _, err := OpenRowSource("data.jsonl", &Schema{Columns: map[string]string{"id": "text"}}); err == nil {
+	path := filepath.Join(t.TempDir(), "data.jsonl")
+	if err := os.WriteFile(path, []byte(`{"id":1}`), 0644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	if _, err := OpenRowSource(path, &Schema{Columns: map[string]string{"id": "text"}}); err == nil {
 		t.Fatal("expected error for unsupported data file extension")
 	}
 }

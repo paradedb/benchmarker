@@ -218,6 +218,12 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int) 
 
 			fmt.Printf("\n=== %s ===\n", strings.ToUpper(loader.Name()))
 
+			if err := loader.ValidateSchema(schema); err != nil {
+				fmt.Printf("Schema validation FAILED: %v\n", err)
+				overallFailed = true
+				return
+			}
+
 			// Run pre
 			fmt.Print("Running pre... ")
 			start := time.Now()
@@ -303,11 +309,30 @@ func runDrop(datasetDir string, backendName string) {
 // locateDataFile finds the dataset's data, preferring a single parquet file,
 // then CSV, then a data/ directory of parquet shards.
 func locateDataFile(datasetDir string) (string, error) {
-	for _, name := range []string{"data.parquet", "data.csv", "data"} {
-		path := filepath.Join(datasetDir, name)
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
+	candidates := []struct {
+		name string
+		dir  bool
+	}{
+		{name: "data.parquet"},
+		{name: "data.csv"},
+		{name: "data", dir: true},
+	}
+	for _, candidate := range candidates {
+		path := filepath.Join(datasetDir, candidate.name)
+		info, err := os.Stat(path)
+		if os.IsNotExist(err) {
+			continue
 		}
+		if err != nil {
+			return "", fmt.Errorf("checking %s: %w", path, err)
+		}
+		if candidate.dir && !info.IsDir() {
+			return "", fmt.Errorf("%s exists but is not a directory", path)
+		}
+		if !candidate.dir && info.IsDir() {
+			return "", fmt.Errorf("%s exists but is a directory", path)
+		}
+		return path, nil
 	}
 	return "", fmt.Errorf("no data.parquet, data.csv, or data/ directory found in %s", datasetDir)
 }
