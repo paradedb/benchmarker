@@ -19,10 +19,55 @@ import (
 	"go.k6.io/k6/js/modules"
 )
 
-// Schema defines the dataset schema from schema.yaml
+// Schema defines the dataset schema from schema.yaml. A dataset is either
+// single-table (top-level table and columns) or multi-table (a tables list
+// with one entry per table); the two forms cannot be mixed.
 type Schema struct {
 	Table   string            `yaml:"table"`
 	Columns map[string]string `yaml:"columns"`
+	Tables  []Schema          `yaml:"tables"`
+}
+
+// TableSchemas returns one single-table schema per table to load: the schema
+// itself for single-table datasets, or each tables entry for multi-table ones.
+func (s *Schema) TableSchemas() []*Schema {
+	if len(s.Tables) == 0 {
+		return []*Schema{s}
+	}
+	out := make([]*Schema, len(s.Tables))
+	for i := range s.Tables {
+		out[i] = &s.Tables[i]
+	}
+	return out
+}
+
+// Validate checks the structural rules for a schema: the single- and
+// multi-table forms cannot be mixed, and every tables entry needs a unique
+// name and its own columns.
+func (s *Schema) Validate() error {
+	if len(s.Tables) == 0 {
+		return nil
+	}
+	if s.Table != "" || len(s.Columns) > 0 {
+		return fmt.Errorf("cannot mix top-level table/columns with a tables list")
+	}
+	seen := make(map[string]bool, len(s.Tables))
+	for i, t := range s.Tables {
+		if t.Table == "" {
+			return fmt.Errorf("tables[%d] has no table name", i)
+		}
+		if len(t.Columns) == 0 {
+			return fmt.Errorf("table %q has no columns", t.Table)
+		}
+		if len(t.Tables) > 0 {
+			return fmt.Errorf("table %q: tables entries cannot be nested", t.Table)
+		}
+		if seen[t.Table] {
+			return fmt.Errorf("duplicate table %q", t.Table)
+		}
+		seen[t.Table] = true
+	}
+	return nil
 }
 
 // BackendConfig holds all configuration for a backend.
@@ -435,6 +480,13 @@ func convertValue(rawValue, schemaType string) (any, error) {
 		}
 		return int32(v), nil
 
+	case "smallint", "int2":
+		v, err := strconv.ParseInt(rawValue, 10, 16)
+		if err != nil {
+			return nil, fmt.Errorf("invalid smallint %q: %w", rawValue, err)
+		}
+		return int16(v), nil
+
 	case "boolean", "bool":
 		switch strings.ToLower(rawValue) {
 		case "true", "t", "1":
@@ -567,9 +619,28 @@ func (l *CLILoader) ensureDriver() error {
 
 func (l *CLILoader) Name() string { return l.name }
 
-// ValidateSchema checks whether this backend can load every schema column type.
+// ValidateSchema checks whether this backend can load every schema column type,
+// covering each table of a multi-table schema.
 func (l *CLILoader) ValidateSchema(schema *Schema) error {
-	if schema == nil || len(schema.Columns) == 0 {
+	if schema == nil {
+		return fmt.Errorf("schema has no columns")
+	}
+	if err := schema.Validate(); err != nil {
+		return err
+	}
+	for _, ts := range schema.TableSchemas() {
+		if err := l.validateTableSchema(ts); err != nil {
+			if len(schema.Tables) > 0 {
+				return fmt.Errorf("table %q: %w", ts.Table, err)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *CLILoader) validateTableSchema(schema *Schema) error {
+	if len(schema.Columns) == 0 {
 		return fmt.Errorf("schema has no columns")
 	}
 	if cols := vectorColumns(schema); len(cols) > 0 && !backendSupportsVectorColumns(l.name) {
@@ -779,11 +850,22 @@ func (l *CLILoader) Drop(ctx context.Context, schema *Schema) error {
 		return err
 	}
 
-	target := "documents"
-	if schema != nil && schema.Table != "" {
-		target = schema.Table
+	if schema == nil {
+		return l.dropTarget(ctx, "documents")
 	}
+	for _, ts := range schema.TableSchemas() {
+		target := ts.Table
+		if target == "" {
+			target = "documents"
+		}
+		if err := l.dropTarget(ctx, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
+func (l *CLILoader) dropTarget(ctx context.Context, target string) error {
 	switch l.fileType {
 	case "sql":
 		table, err := safeSQLIdentifier(target)

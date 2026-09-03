@@ -46,21 +46,41 @@ columns:
   emb: vector(768)
 ```
 
-Supported column types: `text`/`varchar`, `bigint`, `integer`, `boolean`,
-`timestamp`, `jsonb`, `uuid`, arrays of the integer and text types, and
-`vector(n)` (pgvector; ParadeDB and PostgreSQL only).
+Supported column types: `text`/`varchar`, `bigint`, `integer`, `smallint`,
+`boolean`, `timestamp`, `jsonb`, `uuid`, arrays of the integer and text types,
+and `vector(n)` (pgvector; ParadeDB and PostgreSQL only).
+
+Normalized datasets declare a `tables` list instead of top-level
+`table`/`columns` (the two forms cannot be mixed):
+
+```yaml
+tables:
+  - table: posts
+    columns:
+      id: integer
+      title: text
+  - table: comments
+    columns:
+      id: integer
+      post_id: integer
+      text: text
+```
 
 ## Data Files
 
-Source data lives in `data.csv` or `data.parquet` at the dataset root, or in
-a `data/` directory holding sharded parquet files; the loader prefers a single
-parquet file, then CSV, then the shard directory. CSV cells hold array and
-vector values as JSON (e.g. `"[0.1,0.2]"`). Parquet columns map directly:
-scalars to their Go types, `list<float>` to `vector(n)`.
+For single-table datasets, source data lives in `data.csv` or `data.parquet`
+at the dataset root, or in a `data/` directory holding sharded parquet files;
+the loader prefers a single parquet file, then CSV, then the shard directory.
+CSV cells hold array and vector values as JSON (e.g. `"[0.1,0.2]"`). Parquet
+columns map directly: scalars to their Go types, `list<float>` to `vector(n)`.
 
-Each loader run imports one data source into one target named by `table`.
-Backend `pre` and `post` scripts may create or index additional tables, but the
-CLI bulk-import path loads only this one table/index/collection.
+Multi-table datasets keep each table's data under `data/`, resolved per table
+with the same preference order: `data/<table>.parquet`, `data/<table>.csv`,
+then a `data/<table>/` directory of parquet shards. Tables load sequentially
+in `tables` order, into the target named by each entry's `table`.
+
+Backend `pre` and `post` scripts may create or index additional tables beyond
+those the CLI bulk-import path loads.
 
 ## Loader Support Matrix
 

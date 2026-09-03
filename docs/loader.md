@@ -1,9 +1,10 @@
 # Data Loader
 
 The loader CLI handles bulk data loading with lifecycle scripts. It reads your
-dataset's `schema.yaml` and one data source (`data.parquet`, `data.csv`, or a
-sharded Parquet `data/` directory), validates the schema for each backend, runs
-backend-specific `pre` scripts, bulk inserts the data, then runs `post` scripts.
+dataset's `schema.yaml` and its data sources (`data.parquet`, `data.csv`, or a
+sharded Parquet `data/` directory; one source per table for multi-table
+datasets), validates the schema for each backend, runs backend-specific `pre`
+scripts, bulk inserts the data, then runs `post` scripts.
 
 ## Commands
 
@@ -52,10 +53,13 @@ For S3 pulls, the AWS SDK uses its standard credential chain (environment variab
 
 ## Data Source Support
 
-The CLI imports one table/index/collection per dataset load. It supports scalar
-CSV and Parquet columns for every backend, including sharded Parquet directories
-at `data/`. `vector(n)` schema columns are supported only for ParadeDB and
-PostgreSQL; the CLI checks this before running `pre.sql`.
+The CLI imports one table/index/collection per `tables` entry (or the single
+top-level `table`). It supports scalar CSV and Parquet columns for every
+backend, including sharded Parquet directories. Single-table data lives at the
+dataset root (`data.parquet`, `data.csv`, or `data/`); multi-table data lives
+under `data/` as `<table>.parquet`, `<table>.csv`, or a `<table>/` shard
+directory per table. `vector(n)` schema columns are supported only for ParadeDB
+and PostgreSQL; the CLI checks this before running `pre.sql`.
 
 The k6-side loader API is separate from this CLI. `db.loader().openDocuments()`
 and `loader.load...()` remain CSV-only helpers for script setup, ingest, and
