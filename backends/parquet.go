@@ -180,6 +180,16 @@ func convertParquetValue(raw any, schemaType string) (any, error) {
 		}
 		return int32(v), nil
 
+	case "smallint", "int2":
+		v, err := toInt64(raw)
+		if err != nil {
+			return nil, err
+		}
+		if v < -32768 || v > 32767 {
+			return nil, fmt.Errorf("smallint value %d overflows int16", v)
+		}
+		return int16(v), nil
+
 	case "boolean", "bool":
 		v, ok := raw.(bool)
 		if !ok {
