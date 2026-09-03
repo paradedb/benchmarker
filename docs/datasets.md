@@ -84,19 +84,33 @@ those the CLI bulk-import path loads.
 
 ## Loader Support Matrix
 
-| Backend | CSV scalar columns | Parquet scalar columns | `vector(n)` columns |
-| --- | --- | --- | --- |
-| ParadeDB | Yes | Yes | Yes |
-| PostgreSQL | Yes | Yes | Yes |
-| ClickHouse | Yes | Yes | No |
-| Elasticsearch | Yes | Yes | No |
-| OpenSearch | Yes | Yes | No |
-| MongoDB | Yes | Yes | No |
+| Backend | CSV scalar columns | Parquet scalar columns | `vector(n)` columns | Multi-table load/drop | Cross-table (join) queries |
+| --- | --- | --- | --- | --- | --- |
+| ParadeDB | Yes | Yes | Yes | Yes | Yes |
+| PostgreSQL | Yes | Yes | Yes | Yes | Yes |
+| ClickHouse | Yes | Yes | No | Yes | Yes (no BM25 scoring) |
+| Elasticsearch | Yes | Yes | No | Yes (one index per table) | No |
+| OpenSearch | Yes | Yes | No | Yes (one index per table) | No |
+| MongoDB | Yes | Yes | No | Yes (one collection per table) | No (driver is `$search`-only) |
 
 The CLI validates vector schemas before running backend `pre` scripts. A dataset
 with `vector(n)` columns will fail early for non-PostgreSQL backends instead of
 passing pgvector values into drivers that cannot encode them. Vector dimensions
 are checked against `vector(n)` before insert.
+
+Multi-table loading works for every backend because type conversion happens in
+the shared row-source layer before each driver's insert: SQL backends insert
+into the named table, Elasticsearch/OpenSearch bulk into an index named after
+the table, and MongoDB into a collection named after it. Whether the loaded
+tables can then be *queried together* depends on the backend: SQL backends
+support joins in k6 query scripts, Elasticsearch and OpenSearch have no
+cross-index joins, and the MongoDB driver only issues single-`$search`
+aggregation pipelines (no `$lookup`).
+
+Column types map to Go values once for all backends (`smallint` → `int16`,
+`integer` → `int32`, `bigint` → `int64`, and so on), so backend DDL must use
+the matching width — e.g. a `smallint` schema column should be `SMALLINT` in
+Postgres-family `pre.sql` and `Int16` in ClickHouse.
 
 The k6 `db.loader().openDocuments()` helper is separate from the CLI loader: it
 is still a CSV-only reader for ingest and update workloads and does not apply
