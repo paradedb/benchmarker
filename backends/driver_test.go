@@ -35,6 +35,23 @@ func TestConvertValueRejectsInvalidInteger(t *testing.T) {
 	}
 }
 
+func TestConvertValueSmallint(t *testing.T) {
+	got, err := convertValue("123", "smallint")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v, ok := got.(int16); !ok || v != 123 {
+		t.Fatalf("expected int16 123, got %#v", got)
+	}
+
+	if _, err := convertValue("40000", "smallint"); err == nil {
+		t.Fatal("expected error for smallint overflow")
+	}
+	if _, err := convertValue("abc", "int2"); err == nil {
+		t.Fatal("expected error for invalid smallint")
+	}
+}
+
 func TestConvertValueRejectsInvalidJSONArray(t *testing.T) {
 	_, err := convertValue("not-json", "text[]")
 	if err == nil {
