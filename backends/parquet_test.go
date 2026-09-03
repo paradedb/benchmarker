@@ -129,6 +129,7 @@ type parquetTestRow struct {
 
 type parquetScalarRow struct {
 	ID     int32    `parquet:"id"`
+	Kind   int32    `parquet:"kind"`
 	Hits   int64    `parquet:"hits"`
 	Active bool     `parquet:"active"`
 	Title  string   `parquet:"title"`
@@ -246,7 +247,7 @@ func TestCLILoaderLoadsParquetWithVectors(t *testing.T) {
 
 func TestCLILoaderLoadsParquetScalarsForNonPostgresBackend(t *testing.T) {
 	path := writeParquetScalarFixture(t, []parquetScalarRow{
-		{ID: 7, Hits: 42, Active: true, Title: "scalar", Tags: []string{"a", "b"}},
+		{ID: 7, Kind: 3, Hits: 42, Active: true, Title: "scalar", Tags: []string{"a", "b"}},
 	})
 
 	driver := &capturingDriver{}
@@ -258,6 +259,7 @@ func TestCLILoaderLoadsParquetScalarsForNonPostgresBackend(t *testing.T) {
 		Table: "documents",
 		Columns: map[string]string{
 			"id":     "integer",
+			"kind":   "smallint",
 			"hits":   "bigint",
 			"active": "boolean",
 			"title":  "text",
@@ -277,6 +279,9 @@ func TestCLILoaderLoadsParquetScalarsForNonPostgresBackend(t *testing.T) {
 	}
 	if got, ok := byCol["id"].(int32); !ok || got != 7 {
 		t.Fatalf("expected int32 id 7, got %#v", byCol["id"])
+	}
+	if got, ok := byCol["kind"].(int16); !ok || got != 3 {
+		t.Fatalf("expected int16 kind 3, got %#v", byCol["kind"])
 	}
 	if got, ok := byCol["hits"].(int64); !ok || got != 42 {
 		t.Fatalf("expected int64 hits 42, got %#v", byCol["hits"])
@@ -326,6 +331,24 @@ func TestCLILoaderLoadsStandardListParquetVector(t *testing.T) {
 	}
 	if slice := vec.Slice(); len(slice) != 3 || slice[2] != 0.3 {
 		t.Fatalf("unexpected vector contents: %v", vec.Slice())
+	}
+}
+
+func TestConvertParquetValueRejectsSmallintOverflow(t *testing.T) {
+	got, err := convertParquetValue(int32(7), "smallint")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v, ok := got.(int16); !ok || v != 7 {
+		t.Fatalf("expected int16 7, got %#v", got)
+	}
+
+	_, err = convertParquetValue(int64(40000), "smallint")
+	if err == nil {
+		t.Fatal("expected smallint overflow error")
+	}
+	if !strings.Contains(err.Error(), "overflows int16") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
