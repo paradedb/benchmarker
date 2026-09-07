@@ -718,6 +718,24 @@
         return match ? match[1] : run;
       }
 
+      // Short version string for a backend label, from the captured config.
+      // ParadeDB reports the pg_search version (composite record text like
+      // "(0.25.6,rev,...)"); postgres-family the "PostgreSQL x.y" banner;
+      // ES/OpenSearch/Mongo/ClickHouse a bare version string.
+      function backendVersion(cfg) {
+        if (!cfg) return "";
+        const pdb = cfg["paradedb.version"];
+        if (typeof pdb === "string") {
+          const m = pdb.match(/\(?"?v?([0-9][^,")]*)/);
+          if (m) return m[1];
+        }
+        const v = cfg.version;
+        if (typeof v !== "string" || v === "") return "";
+        const pg = v.match(/^PostgreSQL (\S+)/);
+        if (pg) return pg[1];
+        return v.split(" ")[0];
+      }
+
       function sanitizeColor(value) {
         const color = String(value || "").trim();
         if (/^#[0-9a-fA-F]{3,8}$/.test(color)) {
@@ -1445,6 +1463,19 @@
                 labelEl.style.textDecorationStyle = "dotted";
                 labelEl.addEventListener("click", () => showConfigModal(name));
                 labelEl.dataset.configHandler = "1";
+              }
+            }
+
+            // Append the backend version to the label (config may arrive
+            // after the label is first rendered, so re-check every update).
+            {
+              const labelEl = document.getElementById(labelId);
+              if (labelEl) {
+                const ver = backendVersion(backendConfig);
+                const text = ver
+                  ? `${getBaseName(name)} ${ver}`
+                  : getBaseName(name);
+                if (labelEl.textContent !== text) labelEl.textContent = text;
               }
             }
 
@@ -2185,7 +2216,11 @@
           document.getElementById("ingest-legend").innerHTML = runsWithIngest
             .map((name) => {
               const color = getRunColor(name, runs[name]);
-              return `<div class="legend-item"><div class="legend-color" style="background: ${color}"></div> ${escapeHtml(name)}</div>`;
+              const cfg = (lastData?.backends?.[runs[name].backend] || {})
+                .config;
+              const ver = backendVersion(cfg);
+              const label = ver ? `${name} ${ver}` : name;
+              return `<div class="legend-item"><div class="legend-color" style="background: ${color}"></div> ${escapeHtml(label)}</div>`;
             })
             .join("");
 
