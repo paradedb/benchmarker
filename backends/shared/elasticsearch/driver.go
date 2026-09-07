@@ -282,27 +282,57 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 	return result.Hits.Total.Value, nil
 }
 
-// Insert bulk inserts documents.
-func (d *Driver) Insert(ctx context.Context, index string, cols []string, rows [][]any) (int, error) {
+// buildBulkBody renders rows as an ndjson _bulk payload. A `_id` column is
+// routed to the action line's document id (ES reserves the `_id` field name
+// inside sources). Vector columns arrive as []float32 and marshal as plain
+// JSON arrays for dense_vector fields.
+func buildBulkBody(index string, cols []string, rows [][]any) (string, error) {
 	var body strings.Builder
 
 	for _, row := range rows {
+		docID := ""
 		doc := make(map[string]interface{})
 		for i, col := range cols {
-			doc[col] = row[i]
+			value := row[i]
+			if col == "_id" {
+				docID = fmt.Sprintf("%v", value)
+				continue
+			}
+			doc[col] = value
 		}
 
 		// Action line
-		body.WriteString(fmt.Sprintf(`{"index":{"_index":"%s"}}`, index))
+		action := map[string]interface{}{"_index": index}
+		if docID != "" {
+			action["_id"] = docID
+		}
+		actionJSON, err := json.Marshal(map[string]interface{}{"index": action})
+		if err != nil {
+			return "", err
+		}
+		body.Write(actionJSON)
 		body.WriteByte('\n')
 
 		// Document line
-		docJSON, _ := json.Marshal(doc)
+		docJSON, err := json.Marshal(doc)
+		if err != nil {
+			return "", err
+		}
 		body.Write(docJSON)
 		body.WriteByte('\n')
 	}
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/_bulk", d.address), strings.NewReader(body.String()))
+	return body.String(), nil
+}
+
+// Insert bulk inserts documents.
+func (d *Driver) Insert(ctx context.Context, index string, cols []string, rows [][]any) (int, error) {
+	body, err := buildBulkBody(index, cols, rows)
+	if err != nil {
+		return 0, err
+	}
+
+	req, _ := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/_bulk", d.address), strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/x-ndjson")
 
 	resp, err := d.client.Do(req)

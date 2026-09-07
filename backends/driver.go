@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/paradedb/benchmarker/metrics"
-	"github.com/pgvector/pgvector-go"
 	"go.k6.io/k6/js/modules"
 )
 
@@ -445,6 +444,10 @@ func backendSupportsVectorColumns(name string) bool {
 	switch name {
 	case "paradedb", "postgres":
 		return true
+	case "elasticsearch", "opensearch":
+		// dense_vector / knn_vector mappings; []float32 values marshal as
+		// plain JSON arrays in the bulk payload.
+		return true
 	default:
 		return false
 	}
@@ -547,7 +550,7 @@ func convertValue(rawValue, schemaType string) (any, error) {
 		if err := validateVectorDimension(len(arr), schemaType); err != nil {
 			return nil, err
 		}
-		return pgvector.NewVector(arr), nil
+		return arr, nil
 
 	default:
 		// text, varchar, etc - return as-is
@@ -644,7 +647,7 @@ func (l *CLILoader) validateTableSchema(schema *Schema) error {
 		return fmt.Errorf("schema has no columns")
 	}
 	if cols := vectorColumns(schema); len(cols) > 0 && !backendSupportsVectorColumns(l.name) {
-		return fmt.Errorf("backend %q does not support vector columns: %s (supported backends: paradedb, postgres)",
+		return fmt.Errorf("backend %q does not support vector columns: %s (supported backends: paradedb, postgres, elasticsearch, opensearch)",
 			l.name, strings.Join(cols, ", "))
 	}
 	for col, schemaType := range schema.Columns {

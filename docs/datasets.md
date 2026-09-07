@@ -89,14 +89,25 @@ those the CLI bulk-import path loads.
 | ParadeDB | Yes | Yes | Yes | Yes | Yes |
 | PostgreSQL | Yes | Yes | Yes | Yes | Yes |
 | ClickHouse | Yes | Yes | No | Yes | Yes (no BM25 scoring) |
-| Elasticsearch | Yes | Yes | No | Yes (one index per table) | No |
-| OpenSearch | Yes | Yes | No | Yes (one index per table) | No |
+| Elasticsearch | Yes | Yes | Yes (`dense_vector`) | Yes (one index per table) | No |
+| OpenSearch | Yes | Yes | Yes (`knn_vector` mapping) | Yes (one index per table) | No |
 | MongoDB | Yes | Yes | No | Yes (one collection per table) | No (driver is `$search`-only) |
 
 The CLI validates vector schemas before running backend `pre` scripts. A dataset
-with `vector(n)` columns will fail early for non-PostgreSQL backends instead of
-passing pgvector values into drivers that cannot encode them. Vector dimensions
-are checked against `vector(n)` before insert.
+with `vector(n)` columns will fail early for unsupported backends instead of
+passing vector values into drivers that cannot encode them. Vector dimensions
+are checked against `vector(n)` before insert. For Elasticsearch/OpenSearch the
+vector arrives as a plain JSON float array; the backend `pre.json` must define
+the matching `dense_vector`/`knn_vector` field, and a schema column named `_id`
+becomes the document id rather than a source field.
+
+Consistency caveat for cross-backend comparisons: the Postgres-family backends
+are transactional and read-your-writes, while Elasticsearch and OpenSearch are
+near-real-time — documents only become searchable after a refresh, and there
+are no multi-document transactions. That makes them a fit when the workload is
+append-only and absolute correctness of reads isn't required; benchmark
+numbers implicitly compare against that weaker consistency model, so loads
+always refresh (see each dataset's `post.json`) before queries run.
 
 Multi-table loading works for every backend because type conversion happens in
 the shared row-source layer before each driver's insert: SQL backends insert

@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/parquet-go/parquet-go"
-	"github.com/pgvector/pgvector-go"
 )
 
 func TestNormalizeSchemaType(t *testing.T) {
@@ -33,12 +32,12 @@ func TestConvertValueParsesVector(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	vec, ok := got.(pgvector.Vector)
+	vec, ok := got.([]float32)
 	if !ok {
-		t.Fatalf("expected pgvector.Vector, got %T", got)
+		t.Fatalf("expected []float32, got %T", got)
 	}
 	want := []float32{0.5, -1.25, 2}
-	slice := vec.Slice()
+	slice := vec
 	if len(slice) != len(want) {
 		t.Fatalf("expected %d elements, got %d", len(want), len(slice))
 	}
@@ -236,12 +235,12 @@ func TestCLILoaderLoadsParquetWithVectors(t *testing.T) {
 	if got, ok := byCol["title"].(string); !ok || got != "first" {
 		t.Fatalf("expected title \"first\", got %#v", byCol["title"])
 	}
-	vec, ok := byCol["emb"].(pgvector.Vector)
+	vec, ok := byCol["emb"].([]float32)
 	if !ok {
-		t.Fatalf("expected pgvector.Vector, got %T", byCol["emb"])
+		t.Fatalf("expected []float32, got %T", byCol["emb"])
 	}
-	if slice := vec.Slice(); len(slice) != 3 || slice[0] != 0.1 {
-		t.Fatalf("unexpected vector contents: %v", vec.Slice())
+	if len(vec) != 3 || vec[0] != 0.1 {
+		t.Fatalf("unexpected vector contents: %v", vec)
 	}
 }
 
@@ -325,12 +324,12 @@ func TestCLILoaderLoadsStandardListParquetVector(t *testing.T) {
 	for i, col := range driver.cols {
 		byCol[col] = driver.rows[0][i]
 	}
-	vec, ok := byCol["emb"].(pgvector.Vector)
+	vec, ok := byCol["emb"].([]float32)
 	if !ok {
-		t.Fatalf("expected pgvector.Vector, got %T", byCol["emb"])
+		t.Fatalf("expected []float32, got %T", byCol["emb"])
 	}
-	if slice := vec.Slice(); len(slice) != 3 || slice[2] != 0.3 {
-		t.Fatalf("unexpected vector contents: %v", vec.Slice())
+	if len(vec) != 3 || vec[2] != 0.3 {
+		t.Fatalf("unexpected vector contents: %v", vec)
 	}
 }
 
