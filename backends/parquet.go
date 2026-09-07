@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/parquet-go/parquet-go"
-	"github.com/pgvector/pgvector-go"
 )
 
 const parquetReadBatch = 256
@@ -223,6 +222,8 @@ func convertParquetValue(raw any, schemaType string) (any, error) {
 			return v, nil
 		case []byte:
 			return convertValue(string(v), schemaType)
+		case int64:
+			return epochToTime(v), nil
 		default:
 			return nil, fmt.Errorf("invalid timestamp value of type %T", raw)
 		}
@@ -351,7 +352,7 @@ func toVector(raw any, schemaType string) (any, error) {
 		if err := validateVectorDimension(len(v), schemaType); err != nil {
 			return nil, err
 		}
-		return pgvector.NewVector(v), nil
+		return v, nil
 	case []float64:
 		out := make([]float32, len(v))
 		for i, f := range v {
@@ -360,7 +361,7 @@ func toVector(raw any, schemaType string) (any, error) {
 		if err := validateVectorDimension(len(out), schemaType); err != nil {
 			return nil, err
 		}
-		return pgvector.NewVector(out), nil
+		return out, nil
 	case []any:
 		out := make([]float32, len(v))
 		for i, e := range v {
@@ -376,7 +377,7 @@ func toVector(raw any, schemaType string) (any, error) {
 		if err := validateVectorDimension(len(out), schemaType); err != nil {
 			return nil, err
 		}
-		return pgvector.NewVector(out), nil
+		return out, nil
 	case string:
 		return convertValue(v, schemaType)
 	default:
@@ -463,4 +464,25 @@ func (s *parquetDirSource) Close() error {
 		return s.current.Close()
 	}
 	return nil
+}
+
+// epochToTime converts a raw int64 epoch value to time.Time, inferring the
+// unit (s/ms/us/ns) from magnitude. Unambiguous for dates between 1971 and
+// ~2500, which covers any real timestamp column; parquet readers surface
+// timestamp logical types as int64 when rows are decoded generically.
+func epochToTime(v int64) time.Time {
+	abs := v
+	if abs < 0 {
+		abs = -abs
+	}
+	switch {
+	case abs < 1e11: // seconds
+		return time.Unix(v, 0).UTC()
+	case abs < 1e14: // milliseconds
+		return time.UnixMilli(v).UTC()
+	case abs < 1e17: // microseconds
+		return time.UnixMicro(v).UTC()
+	default: // nanoseconds
+		return time.Unix(0, v).UTC()
+	}
 }
