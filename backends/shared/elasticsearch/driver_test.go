@@ -1,8 +1,12 @@
 package elasticsearch
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAggregationHitCountPrefersBuckets(t *testing.T) {
@@ -69,5 +73,49 @@ func TestBuildBulkBodyRoutesIDAndUnwrapsVectors(t *testing.T) {
 	}
 	if strings.Contains(lines[3], `"_id"`) {
 		t.Fatalf("_id must not appear in the document source: %s", lines[3])
+	}
+}
+
+func TestExecOperationsHonorsPerOpTimeout(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(150 * time.Millisecond)
+		w.WriteHeader(200)
+	}))
+	defer slow.Close()
+
+	drv, err := New(slow.URL, DriverConfig{})
+	if err != nil {
+		t.Fatalf("new driver: %v", err)
+	}
+	d := drv.(*Driver)
+
+	// Default client timeout (15m) tolerates the slow handler.
+	if err := d.execOperations(context.Background(), []map[string]interface{}{
+		{"endpoint": "_refresh"},
+	}); err != nil {
+		t.Fatalf("default timeout should succeed: %v", err)
+	}
+
+	// A tight per-op timeout must fail against the same handler.
+	err = d.execOperations(context.Background(), []map[string]interface{}{
+		{"endpoint": "_forcemerge", "timeout": "20ms"},
+	})
+	if err == nil {
+		t.Fatal("expected timeout error for 20ms per-op timeout")
+	}
+
+	// A generous per-op timeout succeeds.
+	if err := d.execOperations(context.Background(), []map[string]interface{}{
+		{"endpoint": "_forcemerge", "timeout": "5s"},
+	}); err != nil {
+		t.Fatalf("5s per-op timeout should succeed: %v", err)
+	}
+
+	// Malformed timeout is an explicit error, not a silent default.
+	err = d.execOperations(context.Background(), []map[string]interface{}{
+		{"endpoint": "_forcemerge", "timeout": "2 hours"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid timeout") {
+		t.Fatalf("expected invalid timeout error, got %v", err)
 	}
 }
