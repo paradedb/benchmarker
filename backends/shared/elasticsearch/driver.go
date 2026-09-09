@@ -156,7 +156,20 @@ func (d *Driver) execOperations(ctx context.Context, operations []map[string]int
 			req.Header.Set("Content-Type", "application/json")
 		}
 
-		resp, err := d.client.Do(req)
+		// A per-op "timeout" overrides the client default (15m), for
+		// long-running maintenance like _forcemerge on large indexes.
+		client := d.client
+		if t, ok := op["timeout"].(string); ok {
+			if dur, err := time.ParseDuration(t); err == nil {
+				opClient := *d.client
+				opClient.Timeout = dur
+				client = &opClient
+			} else {
+				return fmt.Errorf("operation %s %s: invalid timeout %q: %w", method, opURL, t, err)
+			}
+		}
+
+		resp, err := client.Do(req)
 		if err != nil {
 			return err
 		}
