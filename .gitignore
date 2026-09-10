@@ -9,6 +9,11 @@ datasets/cohere-10m/data/
 datasets/cohere-10m/queries/
 datasets/cohere-10m/dataset.yaml
 datasets/cohere-10m/k6/query_vectors.json
+!datasets/cohere-1m
+datasets/cohere-1m/data/
+datasets/cohere-1m/queries/
+datasets/cohere-1m/dataset.yaml
+datasets/cohere-1m/k6/query_vectors.json
 
 # Build outputs
 *.exe
