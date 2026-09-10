@@ -73,9 +73,11 @@ export function postgresKnn() {
   backends.get("postgres").query(POSTGRES_KNN, vectors.next());
 }
 
-// num_candidates is the ES recall knob (ef_search analog): tune against
-// ground truth to the same recall@10 operating point as the SQL backends.
-const ES_NUM_CANDIDATES = Number(__ENV.ES_NUM_CANDIDATES || 40);
+// num_candidates is the ES recall knob (ef_search analog). Default is the
+// measured 95% recall@10 operating point on the 10m single-segment index
+// (see measure_recall.py; 40 → 0.835, 150 → 0.951, 300 → 0.966). Match the
+// SQL backends to the same measured recall before comparing latency.
+const ES_NUM_CANDIDATES = Number(__ENV.ES_NUM_CANDIDATES || 150);
 
 export function elasticsearchKnn() {
   backends.get("elasticsearch").query(
