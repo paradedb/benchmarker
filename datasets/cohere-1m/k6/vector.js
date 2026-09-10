@@ -69,7 +69,7 @@ const scenarios = {
 
 export const collectMetrics = backends.addDockerMetricsCollector(
   scenarios,
-  "140s",
+  "220s",
 );
 
 export const options = { scenarios };
