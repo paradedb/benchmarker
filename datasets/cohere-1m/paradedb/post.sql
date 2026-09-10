@@ -13,6 +13,7 @@ USING bm25 (
 
 -- Recall knob (fraction of the cluster work budget, 1.0 = exhaustive):
 -- tune to the recall@10 operating point before publishing numbers.
-ALTER DATABASE benchmark_1m SET paradedb.vector_cluster_max_probe = 0.05;
+-- Measured 95% recall@10 operating point on the 1m index (see README).
+ALTER DATABASE benchmark_1m SET paradedb.vector_cluster_max_probe = 0.035;
 
 VACUUM ANALYZE cohere_wiki;
