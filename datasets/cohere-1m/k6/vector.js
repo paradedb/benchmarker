@@ -29,6 +29,13 @@ const backends = db.backends({
       container: __ENV.POSTGRES_CONTAINER || "postgres",
       color: "orange",
     },
+    {
+      type: "elasticsearch",
+      alias: "elasticsearch",
+      connection: __ENV.ELASTICSEARCH_URL || "http://localhost:9200",
+      container: __ENV.ELASTICSEARCH_CONTAINER || "elasticsearch",
+      color: "green",
+    },
   ],
 });
 
@@ -50,6 +57,13 @@ const scenarios = {
     duration: timer.duration(),
     startTime: timer.advanceAndGet(),
     exec: "postgresKnn",
+  },
+  elasticsearch_knn: {
+    executor: "constant-vus",
+    vus: 5,
+    duration: timer.duration(),
+    startTime: timer.advanceAndGet(),
+    exec: "elasticsearchKnn",
   },
 };
 
@@ -81,4 +95,24 @@ export function paradedbKnn() {
 
 export function postgresKnn() {
   backends.get("postgres").query(POSTGRES_KNN, vectors.next());
+}
+
+// Tune to the same measured recall@10 as the SQL backends (measure_recall.py).
+const ES_NUM_CANDIDATES = Number(__ENV.ES_NUM_CANDIDATES || 150);
+
+export function elasticsearchKnn() {
+  backends.get("elasticsearch").query(
+    JSON.stringify({
+      knn: {
+        field: "emb",
+        query_vector: JSON.parse(vectors.next()),
+        k: 10,
+        num_candidates: ES_NUM_CANDIDATES,
+      },
+      size: 10,
+      _source: false,
+      fields: ["title"],
+    }),
+    "cohere_wiki",
+  );
 }
