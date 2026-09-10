@@ -46,3 +46,20 @@ python3 measure_recall_pdb.py --db benchmark_1m --ground-truth ground_truth_top1
 ```bash
 ./k6 run --out dashboard=live,json,html datasets/cohere-1m/k6/vector.js
 ```
+
+## Measured recall@10 (1m, 100 held-out queries)
+
+Elasticsearch (33-segment index, as-loaded — no force-merge):
+10 → 0.688, 20 → 0.828, 40 → 0.914, **80 → 0.955**, 150 → 0.975, 300 → 0.985
+
+ParadeDB (pg_search vector index):
+0.005 → 0.880, 0.01 → 0.887, 0.02 → 0.918, 0.03 → 0.947, **0.035 → 0.958**,
+0.05 → 0.968, 0.1 → 0.982
+
+Matched ~95% operating points (the configured defaults):
+ES `num_candidates=80` (0.955) vs `paradedb.vector_cluster_max_probe=0.035` (0.958).
+
+pgvector is excluded from the 1m comparison (HNSW build wants the whole
+~5GB graph in maintenance_work_mem and was cut rather than sized around);
+ES runs unmerged (33 segments) since the single-segment force-merge rebuilds
+the HNSW graph and costs more than the load itself.

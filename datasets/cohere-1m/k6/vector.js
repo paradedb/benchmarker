@@ -21,15 +21,6 @@ const backends = db.backends({
       color: "blue",
     },
     {
-      type: "postgres",
-      alias: "postgres",
-      connection:
-        __ENV.POSTGRES_URL ||
-        "postgres://postgres:postgres@localhost:5433/benchmark_1m",
-      container: __ENV.POSTGRES_CONTAINER || "postgres",
-      color: "orange",
-    },
-    {
       type: "elasticsearch",
       alias: "elasticsearch",
       connection: __ENV.ELASTICSEARCH_URL || "http://localhost:9200",
@@ -51,13 +42,6 @@ const scenarios = {
     startTime: timer.get(),
     exec: "paradedbKnn",
   },
-  postgres_knn: {
-    executor: "constant-vus",
-    vus: 5,
-    duration: timer.duration(),
-    startTime: timer.advanceAndGet(),
-    exec: "postgresKnn",
-  },
   elasticsearch_knn: {
     executor: "constant-vus",
     vus: 5,
@@ -69,7 +53,7 @@ const scenarios = {
 
 export const collectMetrics = backends.addDockerMetricsCollector(
   scenarios,
-  "220s",
+  "150s",
 );
 
 export const options = { scenarios };
@@ -82,23 +66,13 @@ const PARADEDB_KNN = `
   LIMIT 10
 `;
 
-const POSTGRES_KNN = `
-  SELECT _id, title
-  FROM cohere_wiki
-  ORDER BY emb <=> $1::vector(1024)
-  LIMIT 10
-`;
-
 export function paradedbKnn() {
   backends.get("paradedb").query(PARADEDB_KNN, vectors.next());
 }
 
-export function postgresKnn() {
-  backends.get("postgres").query(POSTGRES_KNN, vectors.next());
-}
-
-// Tune to the same measured recall@10 as the SQL backends (measure_recall.py).
-const ES_NUM_CANDIDATES = Number(__ENV.ES_NUM_CANDIDATES || 150);
+// Measured 95% recall@10 operating point on the 1m 33-segment index,
+// matched to paradedb's max_probe=0.035 (see README).
+const ES_NUM_CANDIDATES = Number(__ENV.ES_NUM_CANDIDATES || 80);
 
 export function elasticsearchKnn() {
   backends.get("elasticsearch").query(
