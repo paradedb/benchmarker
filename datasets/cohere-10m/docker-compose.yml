@@ -120,9 +120,12 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      # Heap for bulk vector indexing; the HNSW graph itself lives off-heap,
-      # so leave most of the limit to the page cache.
-      - ES_JAVA_OPTS=-Xms8g -Xmx8g
+      # Heap at half the container limit (ES guidance); the HNSW graph is
+      # read through the page cache, which shares the same 8G cgroup limit
+      # as the SQL backends so no engine gets a bigger cache than another.
+      # Bulk vector indexing is heap-hungry: raise to -Xms8g in a 16g+
+      # container for the initial load, then restore before benchmarking.
+      - ES_JAVA_OPTS=-Xms4g -Xmx4g
     ports:
       - "9200:9200"
     volumes:
@@ -140,9 +143,9 @@ services:
       resources:
         limits:
           cpus: "4"
-          memory: 48G
+          memory: 8G
     cpus: 4
-    mem_limit: 48g
+    mem_limit: 8g
 
 volumes:
   paradedb_data:
