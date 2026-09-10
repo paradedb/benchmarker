@@ -60,8 +60,11 @@ parquet shards of ~100k rows plus the held-out query set).
   from `_source`**: 10M × 1024 floats as stored JSON would add ~100GB of
   `_source` alone. The indexed vector values (~41GB) remain on disk.
 - The schema's `_id` column becomes the ES document id, not a source field.
-- `num_candidates` is the recall knob (`-e ES_NUM_CANDIDATES=...`, default
-  40 to match the pg-side `hnsw.ef_search` starting point).
+- `num_candidates` is the recall knob (`-e ES_NUM_CANDIDATES=...`). Default
+  150 = the measured 95% recall@10 operating point on the 10m single-segment
+  index. Measured curve (measure_recall.py, 100 held-out queries):
+  10 → 0.579, 20 → 0.717, 40 → 0.835, 80 → 0.895, 150 → 0.951,
+  300 → 0.966, 600 → 0.984, 1000 → 0.989.
 - ES defaults to `int8_hnsw` quantization for dense_vector; this mapping pins
   full-precision `hnsw` for apples-to-apples recall with pgvector. Switch
   `index_options.type` to `int8_hnsw` to benchmark the quantized default.
