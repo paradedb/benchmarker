@@ -21,6 +21,17 @@ const backends = db.backends({
       color: "blue",
     },
     {
+      // Filtered scenario needs its own probe operating point; GUCs are
+      // per-connection, so it rides a second connection string.
+      type: "paradedb",
+      alias: "paradedb_filtered",
+      connection:
+        __ENV.PARADEDB_FILTERED_URL ||
+        `postgres://postgres:postgres@localhost:5432/benchmark_1m?options=-c%20paradedb.vector_cluster_max_probe%3D${__ENV.PDB_FILTERED_PROBE || "0.035"}`,
+      container: __ENV.PARADEDB_CONTAINER || "paradedb",
+      color: "purple",
+    },
+    {
       type: "elasticsearch",
       alias: "elasticsearch",
       connection: __ENV.ELASTICSEARCH_URL || "http://localhost:9200",
@@ -49,11 +60,27 @@ const scenarios = {
     startTime: timer.advanceAndGet(),
     exec: "elasticsearchKnn",
   },
+  paradedb_knn_filtered: {
+    executor: "constant-vus",
+    vus: 5,
+    duration: timer.duration(),
+    startTime: timer.advanceAndGet(),
+    exec: "paradedbKnnFiltered",
+    tags: { chart: "knn_filtered" },
+  },
+  elasticsearch_knn_filtered: {
+    executor: "constant-vus",
+    vus: 5,
+    duration: timer.duration(),
+    startTime: timer.advanceAndGet(),
+    exec: "elasticsearchKnnFiltered",
+    tags: { chart: "knn_filtered" },
+  },
 };
 
 export const collectMetrics = backends.addDockerMetricsCollector(
   scenarios,
-  "150s",
+  "300s",
 );
 
 export const options = { scenarios };
@@ -73,6 +100,43 @@ export function paradedbKnn() {
 // Measured 95% recall@10 operating point on the 1m 33-segment index,
 // matched to paradedb's max_probe=0.035 (see README).
 const ES_NUM_CANDIDATES = Number(__ENV.ES_NUM_CANDIDATES || 80);
+
+// Filtered kNN: the paradedb.com performance-section shape — a ~1%-selective
+// full-text filter ('battle') gating the vector search. Mirrors upstream
+// knn_top10_1pct.sql; ground truth is the 1pct variant.
+const FILTER_TERM = __ENV.FILTER_TERM || "battle";
+
+const PARADEDB_KNN_FILTERED = `
+  SELECT _id, title
+  FROM cohere_wiki
+  WHERE text ||| '${FILTER_TERM}'
+  ORDER BY emb <=> $1::vector(1024)
+  LIMIT 10
+`;
+
+export function paradedbKnnFiltered() {
+  backends.get("paradedb_filtered").query(PARADEDB_KNN_FILTERED, vectors.next());
+}
+
+const ES_FILTERED_CANDIDATES = Number(__ENV.ES_FILTERED_CANDIDATES || 80);
+
+export function elasticsearchKnnFiltered() {
+  backends.get("elasticsearch").query(
+    JSON.stringify({
+      knn: {
+        field: "emb",
+        query_vector: JSON.parse(vectors.next()),
+        k: 10,
+        num_candidates: ES_FILTERED_CANDIDATES,
+        filter: { match: { text: FILTER_TERM } },
+      },
+      size: 10,
+      _source: false,
+      fields: ["title"],
+    }),
+    "cohere_wiki",
+  );
+}
 
 export function elasticsearchKnn() {
   backends.get("elasticsearch").query(
