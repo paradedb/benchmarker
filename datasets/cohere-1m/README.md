@@ -49,15 +49,18 @@ python3 measure_recall_pdb.py --db benchmark_1m --ground-truth ground_truth_top1
 
 ## Measured recall@10 (1m, 100 held-out queries)
 
-Elasticsearch (33-segment index, as-loaded — no force-merge):
-10 → 0.688, 20 → 0.828, 40 → 0.914, **80 → 0.955**, 150 → 0.975, 300 → 0.985
+Measured against the current indexes (both cover `text` for the filtered
+shape; ES as-loaded multi-segment, no force-merge).
 
-ParadeDB (pg_search vector index):
-0.005 → 0.880, 0.01 → 0.887, 0.02 → 0.918, 0.03 → 0.947, **0.035 → 0.958**,
-0.05 → 0.968, 0.1 → 0.982
+Unfiltered — ES: 40 → 0.890, 80 → 0.949, 95 → 0.961, 110 → 0.962,
+150 → 0.975. ParadeDB: 0.03 → 0.954, **0.035 → 0.959**, 0.04 → 0.964.
+Matched defaults: ES `num_candidates=95` (0.961) vs
+`paradedb.vector_cluster_max_probe=0.035` (0.959).
 
-Matched ~95% operating points (the configured defaults):
-ES `num_candidates=80` (0.955) vs `paradedb.vector_cluster_max_probe=0.035` (0.958).
+Filtered (1%-selective `text` filter, 'battle'): both engines saturate —
+ES 1.000 from `num_candidates=40`, ParadeDB 1.000 from `max_probe=0.05`
+(the defaults). The filter leaves ~10k eligible docs, so top-10 recall is
+effectively exact on both sides.
 
 pgvector is excluded from the 1m comparison (HNSW build wants the whole
 ~5GB graph in maintenance_work_mem and was cut rather than sized around);

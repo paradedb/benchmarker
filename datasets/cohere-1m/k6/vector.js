@@ -27,7 +27,7 @@ const backends = db.backends({
       alias: "paradedb_filtered",
       connection:
         __ENV.PARADEDB_FILTERED_URL ||
-        `postgres://postgres:postgres@localhost:5432/benchmark_1m?options=-c%20paradedb.vector_cluster_max_probe%3D${__ENV.PDB_FILTERED_PROBE || "0.035"}`,
+        `postgres://postgres:postgres@localhost:5432/benchmark_1m?options=-c%20paradedb.vector_cluster_max_probe%3D${__ENV.PDB_FILTERED_PROBE || "0.05"}`,
       container: __ENV.PARADEDB_CONTAINER || "paradedb",
       color: "purple",
     },
@@ -101,9 +101,9 @@ export function paradedbKnn() {
   backends.get("paradedb").query(PARADEDB_KNN, vectors.next());
 }
 
-// Measured 95% recall@10 operating point on the 1m 33-segment index,
-// matched to paradedb's max_probe=0.035 (see README).
-const ES_NUM_CANDIDATES = Number(__ENV.ES_NUM_CANDIDATES || 80);
+// Measured ~96% recall@10 operating point on the as-loaded multi-segment
+// index (0.961), matched to paradedb's max_probe=0.035 (0.959). See README.
+const ES_NUM_CANDIDATES = Number(__ENV.ES_NUM_CANDIDATES || 95);
 
 // Filtered kNN: the paradedb.com performance-section shape — a ~1%-selective
 // full-text filter ('battle') gating the vector search. Mirrors upstream
@@ -122,7 +122,9 @@ export function paradedbKnnFiltered() {
   backends.get("paradedb_filtered").query(PARADEDB_KNN_FILTERED, vectors.next());
 }
 
-const ES_FILTERED_CANDIDATES = Number(__ENV.ES_FILTERED_CANDIDATES || 80);
+// Both engines saturate at recall 1.000 on the 1%-filtered shape (the
+// filter leaves ~10k eligible docs); these are the cheapest 1.000 points.
+const ES_FILTERED_CANDIDATES = Number(__ENV.ES_FILTERED_CANDIDATES || 40);
 
 export function elasticsearchKnnFiltered() {
   backends.get("elasticsearch").query(
