@@ -40,7 +40,7 @@ const backends = db.backends({
 
 const vectors = db.terms(JSON.parse(open("./query_vectors.json")));
 
-const timer = db.timer({ duration: "60s", gap: "10s" });
+const timer = db.timer({ duration: __ENV.DURATION || "30s", gap: "2s" });
 
 // Closed-model VU count; latency claims use 1 (vu1 closed), raise for
 // throughput probing (-e VUS=5).
