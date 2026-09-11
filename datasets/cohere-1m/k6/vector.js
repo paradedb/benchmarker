@@ -45,24 +45,28 @@ const vectors = db.terms(JSON.parse(open("./query_vectors.json")));
 
 const timer = db.timer({ duration: "60s", gap: "10s" });
 
+// Closed-model VU count; latency claims use 1 (vu1 closed), raise for
+// throughput probing (-e VUS=5).
+const VUS = Number(__ENV.VUS || 1);
+
 const scenarios = {
   paradedb_knn: {
     executor: "constant-vus",
-    vus: 5,
+    vus: VUS,
     duration: timer.duration(),
     startTime: timer.get(),
     exec: "paradedbKnn",
   },
   elasticsearch_knn: {
     executor: "constant-vus",
-    vus: 5,
+    vus: VUS,
     duration: timer.duration(),
     startTime: timer.advanceAndGet(),
     exec: "elasticsearchKnn",
   },
   paradedb_knn_filtered: {
     executor: "constant-vus",
-    vus: 5,
+    vus: VUS,
     duration: timer.duration(),
     startTime: timer.advanceAndGet(),
     exec: "paradedbKnnFiltered",
@@ -70,7 +74,7 @@ const scenarios = {
   },
   elasticsearch_knn_filtered: {
     executor: "constant-vus",
-    vus: 5,
+    vus: VUS,
     duration: timer.duration(),
     startTime: timer.advanceAndGet(),
     exec: "elasticsearchKnnFiltered",
