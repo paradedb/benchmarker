@@ -22,19 +22,16 @@ import time
 import urllib.request
 
 
-def knn_ids(url, index, vector, k, num_candidates):
-    body = json.dumps(
-        {
-            "knn": {
-                "field": "emb",
-                "query_vector": vector,
-                "k": k,
-                "num_candidates": num_candidates,
-            },
-            "size": k,
-            "_source": False,
-        }
-    ).encode()
+def knn_ids(url, index, vector, k, num_candidates, filter_term=None):
+    knn = {
+        "field": "emb",
+        "query_vector": vector,
+        "k": k,
+        "num_candidates": num_candidates,
+    }
+    if filter_term:
+        knn["filter"] = {"match": {"text": filter_term}}
+    body = json.dumps({"knn": knn, "size": k, "_source": False}).encode()
     req = urllib.request.Request(
         f"{url}/{index}/_search?request_cache=false",
         body,
@@ -52,6 +49,7 @@ def main():
     parser.add_argument("--vectors", default="query_vectors.json")
     parser.add_argument("--ground-truth", default="ground_truth_top10_10m.json")
     parser.add_argument("--candidates", default="10,20,40,80,150,300,600,1000")
+    parser.add_argument("--filter-term", help="full-text filter gating the kNN (1pct shape)")
     args = parser.parse_args()
 
     with open(args.vectors) as f:
@@ -67,7 +65,7 @@ def main():
         overlap = 0
         start = time.time()
         for qid, vector in enumerate(vectors, start=1):
-            ids = knn_ids(args.url, args.index, vector, k, n)
+            ids = knn_ids(args.url, args.index, vector, k, n, args.filter_term)
             overlap += len(set(ids) & truth[qid])
         avg_ms = (time.time() - start) * 1000 / len(vectors)
         recall = overlap / (len(vectors) * k)

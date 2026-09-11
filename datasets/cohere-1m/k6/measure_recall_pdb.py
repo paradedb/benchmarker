@@ -21,12 +21,16 @@ import subprocess
 import time
 
 
-def run_point(psql_cmd, probe, vectors, k):
+def run_point(psql_cmd, probe, vectors, k, filter_term=None):
+    if filter_term:
+        where = f"text ||| '{filter_term}'"
+    else:
+        where = "_id @@@ paradedb.all()"
     lines = [f"SET paradedb.vector_cluster_max_probe TO {probe};"]
     for qid, vec in enumerate(vectors, start=1):
         lines.append(f"\\echo Q:{qid}")
         lines.append(
-            "SELECT _id FROM cohere_wiki WHERE _id @@@ paradedb.all() "
+            f"SELECT _id FROM cohere_wiki WHERE {where} "
             f"ORDER BY emb <=> '{vec}'::vector(1024) LIMIT {k};"
         )
     script = "\n".join(lines)
@@ -59,6 +63,7 @@ def main():
     parser.add_argument("--vectors", default="query_vectors.json")
     parser.add_argument("--ground-truth", default="ground_truth_top10_10m.json")
     parser.add_argument("--probes", default="0.01,0.02,0.05,0.1,0.2,0.5")
+    parser.add_argument("--filter-term", help="full-text filter gating the kNN (1pct shape)")
     args = parser.parse_args()
 
     if args.psql:
@@ -80,7 +85,7 @@ def main():
 
     for probe in args.probes.split(","):
         start = time.time()
-        results = run_point(psql_cmd, float(probe), vectors, k)
+        results = run_point(psql_cmd, float(probe), vectors, k, args.filter_term)
         avg_ms = (time.time() - start) * 1000 / len(vectors)
         overlap = sum(len(set(ids) & truth[qid]) for qid, ids in results.items())
         recall = overlap / (len(truth) * k)

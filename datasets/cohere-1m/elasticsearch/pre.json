@@ -10,7 +10,7 @@
     "properties": {
       "url": { "type": "keyword", "index": false },
       "title": { "type": "text", "index": false },
-      "text": { "type": "text", "index": false },
+      "text": { "type": "text", "analyzer": "english" },
       "emb": {
         "type": "dense_vector",
         "dims": 1024,
