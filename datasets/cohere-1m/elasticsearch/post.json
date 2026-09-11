@@ -4,10 +4,5 @@
     "endpoint": "_settings",
     "body": { "index": { "refresh_interval": "1s" } }
   },
-  { "endpoint": "_refresh" },
-  {
-    "endpoint": "_forcemerge",
-    "params": { "max_num_segments": 1 },
-    "timeout": "2h"
-  }
+  { "endpoint": "_refresh" }
 ]
