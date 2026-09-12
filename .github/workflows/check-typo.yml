@@ -28,9 +28,8 @@ jobs:
 
       # The `skip` parameter is a total mess, read up before adding.
       # https://github.com/codespell-project/codespell/issues/1915
-      - name: Check Typo using codespell
-        uses: codespell-project/actions-codespell@v2
+      - name: Check Typo
+        uses: paradedb/actions/check-typo@a024855293e56a720daa69e6648d023dd0cb9f77
         with:
-          check_filenames: true
-          ignore_words_file: .codespellignore
-          skip: "./go.sum,./datasets/sample/data.csv"
+          ignore-words-file: .codespellignore
+          skip: ./go.sum,./datasets/sample/data.csv
