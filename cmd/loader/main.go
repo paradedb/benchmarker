@@ -125,7 +125,7 @@ Usage:
   loader help
 
 Commands:
-  load    Run pre.sql/json, bulk load CSV, run post.sql/json
+  load    Run pre.sql/json, bulk load parquet or CSV data (one file or one per table), run post.sql/json
   drop    Drop tables/indexes for the dataset
   pull    Download dataset from S3 to ./datasets/<name>/ (auto-extracts .tar.gz/.tgz)
   help    Show this help message
@@ -181,9 +181,9 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int) 
 		os.Exit(1)
 	}
 
-	csvPath := filepath.Join(datasetDir, "data.csv")
-	if _, err := os.Stat(csvPath); err != nil {
-		fmt.Printf("Error locating data.csv: %v\n", err)
+	tables, err := resolveTableData(datasetDir, schema)
+	if err != nil {
+		fmt.Printf("Error locating data file: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -218,6 +218,12 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int) 
 
 			fmt.Printf("\n=== %s ===\n", strings.ToUpper(loader.Name()))
 
+			if err := loader.ValidateSchema(schema); err != nil {
+				fmt.Printf("Schema validation FAILED: %v\n", err)
+				overallFailed = true
+				return
+			}
+
 			// Run pre
 			fmt.Print("Running pre... ")
 			start := time.Now()
@@ -228,25 +234,27 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int) 
 			}
 			fmt.Printf("OK (%.2fs)\n", time.Since(start).Seconds())
 
-			// Load data
-			if workers > 1 {
-				fmt.Printf("Loading data (batch size: %d, workers: %d)... ", batchSize, workers)
-			} else {
-				fmt.Printf("Loading data (batch size: %d)... ", batchSize)
+			// Load data, one table at a time
+			for _, td := range tables {
+				if workers > 1 {
+					fmt.Printf("Loading %s (batch size: %d, workers: %d)... ", td.label, batchSize, workers)
+				} else {
+					fmt.Printf("Loading %s (batch size: %d)... ", td.label, batchSize)
+				}
+				start = time.Now()
+				count, err := loader.Load(ctx, td.schema, td.path, batchSize, workers)
+				if err != nil {
+					fmt.Printf("FAILED: %v\n", err)
+					overallFailed = true
+					return
+				}
+				elapsed := time.Since(start).Seconds()
+				rate := 0.0
+				if elapsed > 0 {
+					rate = float64(count) / elapsed
+				}
+				fmt.Printf("OK (%d rows, %.2fs, %.0f rows/sec)\n", count, elapsed, rate)
 			}
-			start = time.Now()
-			count, err := loader.Load(ctx, schema, csvPath, batchSize, workers)
-			if err != nil {
-				fmt.Printf("FAILED: %v\n", err)
-				overallFailed = true
-				return
-			}
-			elapsed := time.Since(start).Seconds()
-			rate := 0.0
-			if elapsed > 0 {
-				rate = float64(count) / elapsed
-			}
-			fmt.Printf("OK (%d rows, %.2fs, %.0f rows/sec)\n", count, elapsed, rate)
 
 			// Run post
 			fmt.Print("Running post... ")
@@ -300,6 +308,79 @@ func runDrop(datasetDir string, backendName string) {
 	}
 }
 
+type dataCandidate struct {
+	path string
+	dir  bool
+}
+
+func locateData(candidates []dataCandidate, missing string) (string, error) {
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate.path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("checking %s: %w", candidate.path, err)
+		}
+		if candidate.dir && !info.IsDir() {
+			return "", fmt.Errorf("%s exists but is not a directory", candidate.path)
+		}
+		if !candidate.dir && info.IsDir() {
+			return "", fmt.Errorf("%s exists but is a directory", candidate.path)
+		}
+		return candidate.path, nil
+	}
+	return "", fmt.Errorf("%s", missing)
+}
+
+// locateDataFile finds a single-table dataset's data, preferring a single
+// parquet file, then CSV, then a data/ directory of parquet shards.
+func locateDataFile(datasetDir string) (string, error) {
+	return locateData([]dataCandidate{
+		{path: filepath.Join(datasetDir, "data.parquet")},
+		{path: filepath.Join(datasetDir, "data.csv")},
+		{path: filepath.Join(datasetDir, "data"), dir: true},
+	}, fmt.Sprintf("no data.parquet, data.csv, or data/ directory found in %s", datasetDir))
+}
+
+// locateTableDataFile finds one table's data in a multi-table dataset, with
+// the same preference order under data/: <table>.parquet, <table>.csv, then a
+// <table>/ directory of parquet shards.
+func locateTableDataFile(datasetDir, table string) (string, error) {
+	dataDir := filepath.Join(datasetDir, "data")
+	return locateData([]dataCandidate{
+		{path: filepath.Join(dataDir, table+".parquet")},
+		{path: filepath.Join(dataDir, table+".csv")},
+		{path: filepath.Join(dataDir, table), dir: true},
+	}, fmt.Sprintf("no data/%s.parquet, data/%s.csv, or data/%s/ directory found in %s", table, table, table, datasetDir))
+}
+
+// tableData pairs one table's schema with the data file it loads from.
+type tableData struct {
+	schema *backends.Schema
+	path   string
+	label  string
+}
+
+func resolveTableData(datasetDir string, schema *backends.Schema) ([]tableData, error) {
+	if len(schema.Tables) == 0 {
+		path, err := locateDataFile(datasetDir)
+		if err != nil {
+			return nil, err
+		}
+		return []tableData{{schema: schema, path: path, label: "data"}}, nil
+	}
+	out := make([]tableData, 0, len(schema.Tables))
+	for _, ts := range schema.TableSchemas() {
+		path, err := locateTableDataFile(datasetDir, ts.Table)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, tableData{schema: ts, path: path, label: ts.Table})
+	}
+	return out, nil
+}
+
 func loadSchema(datasetDir string) (*backends.Schema, error) {
 	schemaPath := filepath.Join(datasetDir, "schema.yaml")
 	data, err := os.ReadFile(schemaPath)
@@ -312,7 +393,11 @@ func loadSchema(datasetDir string) (*backends.Schema, error) {
 		return nil, fmt.Errorf("parsing schema.yaml: %w", err)
 	}
 
-	if schema.Table == "" {
+	if err := schema.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid schema.yaml: %w", err)
+	}
+
+	if len(schema.Tables) == 0 && schema.Table == "" {
 		schema.Table = "documents"
 	}
 

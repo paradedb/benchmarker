@@ -7,7 +7,7 @@ A dataset is a self-contained directory with everything needed to load data and 
 ```text
 datasets/sample/
 ├── schema.yaml              # Column names and types
-├── data.csv                 # Source data
+├── data.csv                 # Source data (or data.parquet)
 ├── paradedb/
 │   ├── pre.sql              # Create tables, set up schema
 │   └── post.sql             # Create indexes, VACUUM ANALYZE
@@ -43,7 +43,89 @@ columns:
   id: uuid
   title: text
   content: text
+  emb: vector(768)
 ```
+
+Supported column types: `text`/`varchar`, `bigint`, `integer`, `smallint`,
+`boolean`, `timestamp`, `jsonb`, `uuid`, arrays of the integer and text types,
+and `vector(n)` (pgvector; ParadeDB and PostgreSQL only).
+
+Normalized datasets declare a `tables` list instead of top-level
+`table`/`columns` (the two forms cannot be mixed):
+
+```yaml
+tables:
+  - table: posts
+    columns:
+      id: integer
+      title: text
+  - table: comments
+    columns:
+      id: integer
+      post_id: integer
+      text: text
+```
+
+## Data Files
+
+For single-table datasets, source data lives in `data.csv` or `data.parquet`
+at the dataset root, or in a `data/` directory holding sharded parquet files;
+the loader prefers a single parquet file, then CSV, then the shard directory.
+CSV cells hold array and vector values as JSON (e.g. `"[0.1,0.2]"`). Parquet
+columns map directly: scalars to their Go types, `list<float>` to `vector(n)`.
+
+Multi-table datasets keep each table's data under `data/`, resolved per table
+with the same preference order: `data/<table>.parquet`, `data/<table>.csv`,
+then a `data/<table>/` directory of parquet shards. Tables load sequentially
+in `tables` order, into the target named by each entry's `table`.
+
+Backend `pre` and `post` scripts may create or index additional tables beyond
+those the CLI bulk-import path loads.
+
+## Loader Support Matrix
+
+| Backend | CSV scalar columns | Parquet scalar columns | `vector(n)` columns | Multi-table load/drop | Cross-table (join) queries |
+| --- | --- | --- | --- | --- | --- |
+| ParadeDB | Yes | Yes | Yes | Yes | Yes |
+| PostgreSQL | Yes | Yes | Yes | Yes | Yes |
+| ClickHouse | Yes | Yes | No | Yes | Yes (no BM25 scoring) |
+| Elasticsearch | Yes | Yes | Yes (`dense_vector`) | Yes (one index per table) | No |
+| OpenSearch | Yes | Yes | Yes (`knn_vector` mapping) | Yes (one index per table) | No |
+| MongoDB | Yes | Yes | No | Yes (one collection per table) | No (driver is `$search`-only) |
+
+The CLI validates vector schemas before running backend `pre` scripts. A dataset
+with `vector(n)` columns will fail early for unsupported backends instead of
+passing vector values into drivers that cannot encode them. Vector dimensions
+are checked against `vector(n)` before insert. For Elasticsearch/OpenSearch the
+vector arrives as a plain JSON float array; the backend `pre.json` must define
+the matching `dense_vector`/`knn_vector` field, and a schema column named `_id`
+becomes the document id rather than a source field.
+
+Consistency caveat for cross-backend comparisons: the Postgres-family backends
+are transactional and read-your-writes, while Elasticsearch and OpenSearch are
+near-real-time — documents only become searchable after a refresh, and there
+are no multi-document transactions. That makes them a fit when the workload is
+append-only and absolute correctness of reads isn't required; benchmark
+numbers implicitly compare against that weaker consistency model, so loads
+always refresh (see each dataset's `post.json`) before queries run.
+
+Multi-table loading works for every backend because type conversion happens in
+the shared row-source layer before each driver's insert: SQL backends insert
+into the named table, Elasticsearch/OpenSearch bulk into an index named after
+the table, and MongoDB into a collection named after it. Whether the loaded
+tables can then be *queried together* depends on the backend: SQL backends
+support joins in k6 query scripts, Elasticsearch and OpenSearch have no
+cross-index joins, and the MongoDB driver only issues single-`$search`
+aggregation pipelines (no `$lookup`).
+
+Column types map to Go values once for all backends (`smallint` → `int16`,
+`integer` → `int32`, `bigint` → `int64`, and so on), so backend DDL must use
+the matching width — e.g. a `smallint` schema column should be `SMALLINT` in
+Postgres-family `pre.sql` and `Int16` in ClickHouse.
+
+The k6 `db.loader().openDocuments()` helper is separate from the CLI loader: it
+is still a CSV-only reader for ingest and update workloads and does not apply
+`schema.yaml` type conversion.
 
 ## Pre/Post Scripts
 

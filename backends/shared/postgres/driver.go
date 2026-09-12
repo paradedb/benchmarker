@@ -11,9 +11,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pgvector/pgvector-go"
 	"github.com/nickbruun/pgsplit"
 	"github.com/paradedb/benchmarker/backends"
 	"github.com/paradedb/benchmarker/metrics"
+	pgxvector "github.com/pgvector/pgvector-go/pgx"
 )
 
 // ConfigQuery is a custom SQL query whose result is captured during CaptureConfig.
@@ -49,6 +51,12 @@ func New(connString string) (backends.Driver, error) {
 	config.MaxConnLifetime = 30 * time.Minute
 	config.MaxConnIdleTime = 5 * time.Minute
 
+	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		// Best-effort: fails harmlessly when the vector extension is not installed.
+		_ = pgxvector.RegisterTypes(ctx, conn)
+		return nil
+	}
+
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, err
@@ -68,6 +76,13 @@ func (d *Driver) Close() error {
 // Pool returns the underlying connection pool for custom queries.
 func (d *Driver) Pool() *pgxpool.Pool {
 	return d.pool
+}
+
+// ReloadTypes re-establishes pooled connections so AfterConnect type
+// registration sees extensions created after the pool first connected.
+func (d *Driver) ReloadTypes(ctx context.Context) error {
+	d.pool.Reset()
+	return nil
 }
 
 // SetExtraGUCs sets additional GUCs to capture in CaptureConfig.
@@ -118,8 +133,22 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 	return count, rows.Err()
 }
 
+// wrapVectors converts neutral []float32 vector values (as produced by the
+// shared row-source layer) into pgvector.Vector in place, which the registered
+// pgx codec binary-encodes for vector(n) columns.
+func wrapVectors(rows [][]any) {
+	for _, row := range rows {
+		for i, value := range row {
+			if v, ok := value.([]float32); ok {
+				row[i] = pgvector.NewVector(v)
+			}
+		}
+	}
+}
+
 // Insert bulk inserts rows using COPY.
 func (d *Driver) Insert(ctx context.Context, table string, cols []string, rows [][]any) (int, error) {
+	wrapVectors(rows)
 	count, err := d.pool.CopyFrom(ctx,
 		pgx.Identifier{table},
 		cols,
@@ -134,6 +163,7 @@ func (d *Driver) Update(ctx context.Context, table string, keyCols []string, col
 	if len(rows) == 0 {
 		return 0, nil
 	}
+	wrapVectors(rows)
 
 	// Build value columns (everything not in keyCols)
 	keySet := make(map[string]bool, len(keyCols))
