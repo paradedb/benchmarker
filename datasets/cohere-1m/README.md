@@ -58,9 +58,11 @@ Matched defaults: ES `num_candidates=95` (0.961) vs
 `paradedb.vector_cluster_max_probe=0.035` (0.959).
 
 Filtered (1%-selective `text` filter, 'battle'): both engines saturate —
-ES 1.000 from `num_candidates=40`, ParadeDB 1.000 from `max_probe=0.05`
-(the defaults). The filter leaves ~10k eligible docs, so top-10 recall is
-effectively exact on both sides.
+ES 0.999 at `num_candidates=20` / 1.000 from 40; ParadeDB 0.999 at
+`max_probe=0.02` / 1.000 from 0.05. The filter leaves ~10k eligible docs,
+so top-10 recall is effectively exact on both sides. Defaults pin the
+matched 0.999 pair (ES 20, pdb 0.02) — the leanest measured points, so
+neither engine pays for recall headroom the comparison can't see.
 
 pgvector is excluded from the 1m comparison (HNSW build wants the whole
 ~5GB graph in maintenance_work_mem and was cut rather than sized around);
