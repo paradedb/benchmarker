@@ -24,7 +24,7 @@ const backends = db.backends({
       alias: "paradedb_filtered",
       connection:
         __ENV.PARADEDB_FILTERED_URL ||
-        `postgres://postgres:postgres@localhost:5432/benchmark?options=-c%20paradedb.vector_cluster_max_probe%3D${__ENV.PDB_FILTERED_PROBE || "0.05"}`,
+        `postgres://postgres:postgres@localhost:5432/benchmark?options=-c%20paradedb.vector_cluster_max_probe%3D${__ENV.PDB_FILTERED_PROBE || "0.02"}`,
       container: __ENV.PARADEDB_CONTAINER || "paradedb",
       color: "purple",
     },
@@ -119,9 +119,11 @@ export function paradedbKnnFiltered() {
   backends.get("paradedb_filtered").query(PARADEDB_KNN_FILTERED, vectors.next());
 }
 
-// Both engines saturate at recall 1.000 on the 1%-filtered shape (the
-// filter leaves ~10k eligible docs); these are the cheapest 1.000 points.
-const ES_FILTERED_CANDIDATES = Number(__ENV.ES_FILTERED_CANDIDATES || 40);
+// Both engines saturate on the 1%-filtered shape (the filter leaves ~10k
+// eligible docs); matched at 0.999 on the leanest measured points so
+// neither pays probe/candidate work for recall no chart can show
+// (pdb max_probe=0.02 -> 0.999, ES num_candidates=20 -> 0.999).
+const ES_FILTERED_CANDIDATES = Number(__ENV.ES_FILTERED_CANDIDATES || 20);
 
 export function elasticsearchKnnFiltered() {
   backends.get("elasticsearch").query(
