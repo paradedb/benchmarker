@@ -3,7 +3,6 @@ package backends
 
 import (
 	"context"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,10 +18,55 @@ import (
 	"go.k6.io/k6/js/modules"
 )
 
-// Schema defines the dataset schema from schema.yaml
+// Schema defines the dataset schema from schema.yaml. A dataset is either
+// single-table (top-level table and columns) or multi-table (a tables list
+// with one entry per table); the two forms cannot be mixed.
 type Schema struct {
 	Table   string            `yaml:"table"`
 	Columns map[string]string `yaml:"columns"`
+	Tables  []Schema          `yaml:"tables"`
+}
+
+// TableSchemas returns one single-table schema per table to load: the schema
+// itself for single-table datasets, or each tables entry for multi-table ones.
+func (s *Schema) TableSchemas() []*Schema {
+	if len(s.Tables) == 0 {
+		return []*Schema{s}
+	}
+	out := make([]*Schema, len(s.Tables))
+	for i := range s.Tables {
+		out[i] = &s.Tables[i]
+	}
+	return out
+}
+
+// Validate checks the structural rules for a schema: the single- and
+// multi-table forms cannot be mixed, and every tables entry needs a unique
+// name and its own columns.
+func (s *Schema) Validate() error {
+	if len(s.Tables) == 0 {
+		return nil
+	}
+	if s.Table != "" || len(s.Columns) > 0 {
+		return fmt.Errorf("cannot mix top-level table/columns with a tables list")
+	}
+	seen := make(map[string]bool, len(s.Tables))
+	for i, t := range s.Tables {
+		if t.Table == "" {
+			return fmt.Errorf("tables[%d] has no table name", i)
+		}
+		if len(t.Columns) == 0 {
+			return fmt.Errorf("table %q has no columns", t.Table)
+		}
+		if len(t.Tables) > 0 {
+			return fmt.Errorf("table %q: tables entries cannot be nested", t.Table)
+		}
+		if seen[t.Table] {
+			return fmt.Errorf("duplicate table %q", t.Table)
+		}
+		seen[t.Table] = true
+	}
+	return nil
 }
 
 // BackendConfig holds all configuration for a backend.
@@ -335,14 +379,88 @@ func (c *K6Client) Close() {
 	c.driver.Close()
 }
 
+// normalizeSchemaType lowercases a schema type and drops any type modifier,
+// so "vector(768)" and "VARCHAR(255)" match their base type names.
+func normalizeSchemaType(schemaType string) string {
+	normalized := strings.ToLower(strings.TrimSpace(schemaType))
+	if i := strings.IndexByte(normalized, '('); i >= 0 {
+		normalized = strings.TrimSpace(normalized[:i])
+	}
+	return normalized
+}
+
+func vectorDimension(schemaType string) (int, bool, error) {
+	if normalizeSchemaType(schemaType) != "vector" {
+		return 0, false, nil
+	}
+
+	start := strings.IndexByte(schemaType, '(')
+	if start < 0 {
+		return 0, false, nil
+	}
+	end := strings.IndexByte(schemaType[start+1:], ')')
+	if end < 0 {
+		return 0, false, fmt.Errorf("invalid vector type %q: missing closing parenthesis", schemaType)
+	}
+	end += start + 1
+	if trailing := strings.TrimSpace(schemaType[end+1:]); trailing != "" {
+		return 0, false, fmt.Errorf("invalid vector type %q: unexpected trailing text %q", schemaType, trailing)
+	}
+
+	rawDim := strings.TrimSpace(schemaType[start+1 : end])
+	dim, err := strconv.Atoi(rawDim)
+	if err != nil || dim < 1 {
+		return 0, false, fmt.Errorf("invalid vector dimension %q in %q", rawDim, schemaType)
+	}
+	return dim, true, nil
+}
+
+func validateVectorDimension(length int, schemaType string) error {
+	dim, ok, err := vectorDimension(schemaType)
+	if err != nil || !ok {
+		return err
+	}
+	if length != dim {
+		return fmt.Errorf("vector dimension mismatch: schema %s expects %d values, got %d", schemaType, dim, length)
+	}
+	return nil
+}
+
+func vectorColumns(schema *Schema) []string {
+	if schema == nil {
+		return nil
+	}
+	cols := make([]string, 0)
+	for col, schemaType := range schema.Columns {
+		if normalizeSchemaType(schemaType) == "vector" {
+			cols = append(cols, col)
+		}
+	}
+	sort.Strings(cols)
+	return cols
+}
+
+func backendSupportsVectorColumns(name string) bool {
+	switch name {
+	case "paradedb", "postgres":
+		return true
+	case "elasticsearch", "opensearch":
+		// dense_vector / knn_vector mappings; []float32 values marshal as
+		// plain JSON arrays in the bulk payload.
+		return true
+	default:
+		return false
+	}
+}
+
 // convertValue converts a raw CSV string value to the appropriate Go type based on schema type.
 func convertValue(rawValue, schemaType string) (any, error) {
 	// Strip null bytes (invalid in PostgreSQL text)
 	rawValue = strings.ReplaceAll(rawValue, "\x00", "")
 
-	schemaType = strings.ToLower(schemaType)
+	normalizedType := normalizeSchemaType(schemaType)
 	if rawValue == "" {
-		switch schemaType {
+		switch normalizedType {
 		case "text", "varchar", "char", "character varying", "string":
 			return "", nil
 		default:
@@ -350,7 +468,7 @@ func convertValue(rawValue, schemaType string) (any, error) {
 		}
 	}
 
-	switch schemaType {
+	switch normalizedType {
 	case "bigint", "int8":
 		v, err := strconv.ParseInt(rawValue, 10, 64)
 		if err != nil {
@@ -364,6 +482,13 @@ func convertValue(rawValue, schemaType string) (any, error) {
 			return nil, fmt.Errorf("invalid integer %q: %w", rawValue, err)
 		}
 		return int32(v), nil
+
+	case "smallint", "int2":
+		v, err := strconv.ParseInt(rawValue, 10, 16)
+		if err != nil {
+			return nil, fmt.Errorf("invalid smallint %q: %w", rawValue, err)
+		}
+		return int16(v), nil
 
 	case "boolean", "bool":
 		switch strings.ToLower(rawValue) {
@@ -417,6 +542,16 @@ func convertValue(rawValue, schemaType string) (any, error) {
 		}
 		return obj, nil
 
+	case "vector":
+		var arr []float32
+		if err := json.Unmarshal([]byte(rawValue), &arr); err != nil {
+			return nil, fmt.Errorf("invalid vector %q: %w", rawValue, err)
+		}
+		if err := validateVectorDimension(len(arr), schemaType); err != nil {
+			return nil, err
+		}
+		return arr, nil
+
 	default:
 		// text, varchar, etc - return as-is
 		return rawValue, nil
@@ -445,10 +580,10 @@ func schemaColumnsInOrder(schema *Schema, headers []string) ([]string, error) {
 	}
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		return nil, fmt.Errorf("schema columns missing from CSV: %s", strings.Join(missing, ", "))
+		return nil, fmt.Errorf("schema columns missing from data file: %s", strings.Join(missing, ", "))
 	}
 	if len(cols) == 0 {
-		return nil, fmt.Errorf("no schema columns matched CSV headers")
+		return nil, fmt.Errorf("no schema columns matched data file headers")
 	}
 
 	return cols, nil
@@ -487,8 +622,56 @@ func (l *CLILoader) ensureDriver() error {
 
 func (l *CLILoader) Name() string { return l.name }
 
+// ValidateSchema checks whether this backend can load every schema column type,
+// covering each table of a multi-table schema.
+func (l *CLILoader) ValidateSchema(schema *Schema) error {
+	if schema == nil {
+		return fmt.Errorf("schema has no columns")
+	}
+	if err := schema.Validate(); err != nil {
+		return err
+	}
+	for _, ts := range schema.TableSchemas() {
+		if err := l.validateTableSchema(ts); err != nil {
+			if len(schema.Tables) > 0 {
+				return fmt.Errorf("table %q: %w", ts.Table, err)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *CLILoader) validateTableSchema(schema *Schema) error {
+	if len(schema.Columns) == 0 {
+		return fmt.Errorf("schema has no columns")
+	}
+	if cols := vectorColumns(schema); len(cols) > 0 && !backendSupportsVectorColumns(l.name) {
+		return fmt.Errorf("backend %q does not support vector columns: %s (supported backends: paradedb, postgres, elasticsearch, opensearch)",
+			l.name, strings.Join(cols, ", "))
+	}
+	for col, schemaType := range schema.Columns {
+		if _, _, err := vectorDimension(schemaType); err != nil {
+			return fmt.Errorf("column %q: %w", col, err)
+		}
+	}
+	return nil
+}
+
+// TypeReloader is implemented by drivers whose connections cache database type
+// information that can be invalidated by pre scripts (e.g. CREATE EXTENSION).
+type TypeReloader interface {
+	ReloadTypes(ctx context.Context) error
+}
+
 func (l *CLILoader) RunPre(ctx context.Context, dir string, schema *Schema) error {
-	return l.execFile(ctx, filepath.Join(dir, "pre."+l.fileType))
+	if err := l.execFile(ctx, filepath.Join(dir, "pre."+l.fileType)); err != nil {
+		return err
+	}
+	if reloader, ok := l.driver.(TypeReloader); ok {
+		return reloader.ReloadTypes(ctx)
+	}
+	return nil
 }
 
 func (l *CLILoader) RunPost(ctx context.Context, dir string, schema *Schema) error {
@@ -511,7 +694,10 @@ func (l *CLILoader) execFile(ctx context.Context, path string) error {
 	return l.driver.Exec(ctx, string(data))
 }
 
-func (l *CLILoader) Load(ctx context.Context, schema *Schema, csvPath string, batchSize int, workers int) (int, error) {
+func (l *CLILoader) Load(ctx context.Context, schema *Schema, dataPath string, batchSize int, workers int) (int, error) {
+	if err := l.ValidateSchema(schema); err != nil {
+		return 0, err
+	}
 	if err := l.ensureDriver(); err != nil {
 		return 0, err
 	}
@@ -522,28 +708,13 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, csvPath string, ba
 		batchSize = 1
 	}
 
-	file, err := os.Open(csvPath)
+	source, err := OpenRowSource(dataPath, schema)
 	if err != nil {
 		return 0, err
 	}
-	defer file.Close()
+	defer source.Close()
 
-	reader := csv.NewReader(file)
-	headers, err := reader.Read()
-	if err != nil {
-		return 0, err
-	}
-
-	// Map headers to column indices
-	headerIdx := make(map[string]int)
-	for i, h := range headers {
-		headerIdx[h] = i
-	}
-
-	cols, err := schemaColumnsInOrder(schema, headers)
-	if err != nil {
-		return 0, err
-	}
+	cols := source.Columns()
 
 	target := schema.Table
 	if target == "" {
@@ -621,32 +792,14 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, csvPath string, ba
 	}
 
 	batch := make([][]any, 0, batchSize)
-	rowNum := 1 // header row
-rowLoop:
 	for {
-		record, err := reader.Read()
+		row, err := source.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			setErr(fmt.Errorf("failed to read CSV row %d from %q: %w", rowNum+1, csvPath, err))
+			setErr(err)
 			break
-		}
-		rowNum++
-
-		row := make([]any, len(cols))
-		for i, col := range cols {
-			idx, ok := headerIdx[col]
-			if !ok || idx >= len(record) {
-				row[i] = nil
-				continue
-			}
-			value, err := convertValue(record[idx], schema.Columns[col])
-			if err != nil {
-				setErr(fmt.Errorf("row %d column %q: %w", rowNum, col, err))
-				break rowLoop
-			}
-			row[i] = value
 		}
 		batch = append(batch, row)
 
@@ -700,11 +853,22 @@ func (l *CLILoader) Drop(ctx context.Context, schema *Schema) error {
 		return err
 	}
 
-	target := "documents"
-	if schema != nil && schema.Table != "" {
-		target = schema.Table
+	if schema == nil {
+		return l.dropTarget(ctx, "documents")
 	}
+	for _, ts := range schema.TableSchemas() {
+		target := ts.Table
+		if target == "" {
+			target = "documents"
+		}
+		if err := l.dropTarget(ctx, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
+func (l *CLILoader) dropTarget(ctx context.Context, target string) error {
 	switch l.fileType {
 	case "sql":
 		table, err := safeSQLIdentifier(target)
