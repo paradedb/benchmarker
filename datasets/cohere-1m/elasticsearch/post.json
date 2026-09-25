@@ -1,0 +1,8 @@
+[
+  {
+    "index": "cohere_wiki",
+    "endpoint": "_settings",
+    "body": { "index": { "refresh_interval": "1s" } }
+  },
+  { "endpoint": "_refresh" }
+]
