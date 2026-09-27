@@ -139,13 +139,13 @@ Backends:
   ` + strings.Join(backends.RegisteredBackends(), ", ") + `
 
 Options:
-  --backend <name>   Load/drop specific backend (default: all backends)
-  --batch-size <n>   Rows per batch (default: 10000)
-  --workers <n>      Parallel workers (default: 1)
+  --backend <name>           Load/drop specific backend (default: all backends)
+  --batch-size <n>           Rows per batch (default: 10000)
+  --workers <n>              Parallel workers (default: 1)
   --max-extracted-bytes <n>  Maximum decompressed tar stream bytes (default 107374182400)
-  --dataset <name>   Dataset name for pull command
-  --source <url>     S3 source URL (s3://bucket/prefix/)
-  --anonymous        Use anonymous access for public S3 buckets
+  --dataset <name>           Dataset name for pull command
+  --source <url>             S3 source URL (s3://bucket/prefix/)
+  --anonymous                Use anonymous access for public S3 buckets
 
 Environment Variables:
   PARADEDB_URL       ParadeDB connection string
