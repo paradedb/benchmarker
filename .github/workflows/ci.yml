@@ -87,7 +87,7 @@ jobs:
       - name: Install Gosec
         run: go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
 
-      # Enforce the audited rules; expand after reviewing the remaining ruleset.
+      # Enforce the audited rules.
       - name: Run Gosec
         run: gosec -include=G304,G402,G306,G301,G110,G404 ./...
 
