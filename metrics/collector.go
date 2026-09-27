@@ -150,11 +150,13 @@ func CapturePrePostScripts(alias, backendType, datasetPath, fileType string) {
 	}
 
 	preFile := filepath.Join(datasetPath, backendType, "pre."+fileType)
+	// #nosec G304 -- Dataset and backend script paths come from the locally executed benchmark configuration.
 	if data, err := os.ReadFile(preFile); err == nil {
 		config["pre_script"] = string(data)
 	}
 
 	postFile := filepath.Join(datasetPath, backendType, "post."+fileType)
+	// #nosec G304 -- Dataset and backend script paths come from the locally executed benchmark configuration.
 	if data, err := os.ReadFile(postFile); err == nil {
 		config["post_script"] = string(data)
 	}

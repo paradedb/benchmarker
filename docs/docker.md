@@ -60,6 +60,6 @@ docker compose --profile all up -d
 
 ## TLS
 
-Elasticsearch runs with TLS enabled by default (self-signed certificates). The driver skips certificate verification automatically (`ELASTICSEARCH_SKIP_TLS_VERIFY` defaults to `true`). Set it to `false` if you're connecting to a cluster with valid certificates.
+Both drivers verify HTTPS certificates and hostnames using the system certificate store. For a private or self-signed CA, install that CA in the system trust store before connecting. TLS verification cannot be disabled; `OPENSEARCH_SKIP_TLS_VERIFY=true` now returns an error.
 
-For OpenSearch, TLS is disabled in the Docker Compose config. If connecting to an external OpenSearch cluster with self-signed HTTPS, set `OPENSEARCH_SKIP_TLS_VERIFY=true`.
+The bundled Docker Compose services use HTTP with TLS disabled for local benchmarking.

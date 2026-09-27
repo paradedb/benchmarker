@@ -1,7 +1,7 @@
 # workflows/ci.yml
 #
 # CI
-# Run formatting, linting, tests, and build checks for Go changes.
+# Run formatting, linting, security, tests, and build checks for Go changes.
 
 name: CI
 
@@ -70,6 +70,26 @@ jobs:
 
       - name: Run lint
         run: golangci-lint run --timeout=5m
+
+  security:
+    name: Gosec
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
+
+      # Enforce the audited rules.
+      - name: Run Gosec
+        run: gosec -include=G304,G402,G306,G301,G110,G404 ./...
 
   test:
     name: Test

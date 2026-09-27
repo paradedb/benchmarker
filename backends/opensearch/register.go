@@ -2,6 +2,7 @@
 package opensearch
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -24,7 +25,6 @@ func init() {
 
 func driverConfig() elastic.DriverConfig {
 	return elastic.DriverConfig{
-		SkipTLSVerify:    envBool(skipTLSVerifyEnv),
 		VersionInfoField: "distribution",
 	}
 }
@@ -43,5 +43,8 @@ func envBool(name string) bool {
 
 // New creates a new OpenSearch driver.
 func New(connString string) (backends.Driver, error) {
+	if envBool(skipTLSVerifyEnv) {
+		return nil, fmt.Errorf("%s is no longer supported; trust the server CA in the system certificate store", skipTLSVerifyEnv)
+	}
 	return elastic.New(connString, driverConfig())
 }

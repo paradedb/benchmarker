@@ -39,6 +39,7 @@ func main() {
 	pullCmd := flag.NewFlagSet("pull", flag.ContinueOnError)
 	pullDataset := pullCmd.String("dataset", "", "Dataset name (creates ./datasets/<name>/)")
 	pullSource := pullCmd.String("source", "", "S3 source URL (s3://bucket/prefix/)")
+	pullMaxBytes := pullCmd.Int64("max-extracted-bytes", 100<<30, "Maximum decompressed tar stream size in bytes (default 100 GiB)")
 	pullAnonymous := pullCmd.Bool("anonymous", false, "Use anonymous access for public buckets")
 
 	if len(os.Args) < 2 {
@@ -106,7 +107,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Usage: loader pull --dataset <name> --source s3://bucket/prefix/")
 			os.Exit(1)
 		}
-		runPull(*pullDataset, *pullSource, *pullAnonymous)
+		if *pullMaxBytes <= 0 {
+			fmt.Fprintln(os.Stderr, "Error: --max-extracted-bytes must be positive")
+			os.Exit(1)
+		}
+		runPull(*pullDataset, *pullSource, *pullAnonymous, *pullMaxBytes)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Error: unknown command: %s\n", os.Args[1])
@@ -134,12 +139,13 @@ Backends:
   ` + strings.Join(backends.RegisteredBackends(), ", ") + `
 
 Options:
-  --backend <name>   Load/drop specific backend (default: all backends)
-  --batch-size <n>   Rows per batch (default: 10000)
-  --workers <n>      Parallel workers (default: 1)
-  --dataset <name>   Dataset name for pull command
-  --source <url>     S3 source URL (s3://bucket/prefix/)
-  --anonymous        Use anonymous access for public S3 buckets
+  --backend <name>           Load/drop specific backend (default: all backends)
+  --batch-size <n>           Rows per batch (default: 10000)
+  --workers <n>              Parallel workers (default: 1)
+  --max-extracted-bytes <n>  Maximum decompressed tar stream bytes (default 107374182400)
+  --dataset <name>           Dataset name for pull command
+  --source <url>             S3 source URL (s3://bucket/prefix/)
+  --anonymous                Use anonymous access for public S3 buckets
 
 Environment Variables:
   PARADEDB_URL       ParadeDB connection string
@@ -302,6 +308,7 @@ func runDrop(datasetDir string, backendName string) {
 
 func loadSchema(datasetDir string) (*backends.Schema, error) {
 	schemaPath := filepath.Join(datasetDir, "schema.yaml")
+	// #nosec G304 -- Schema path is selected by the local loader CLI.
 	data, err := os.ReadFile(schemaPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading schema.yaml: %w", err)
@@ -323,7 +330,7 @@ func loadSchema(datasetDir string) (*backends.Schema, error) {
 // S3 Pull
 // ============================================================================
 
-func runPull(datasetName, sourceURL string, anonymous bool) {
+func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes int64) {
 	bucket, prefix, err := parseS3URL(sourceURL)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
@@ -359,13 +366,20 @@ func runPull(datasetName, sourceURL string, anonymous bool) {
 	client := s3.NewFromConfig(cfg)
 
 	if isTarGzKey(prefix) {
-		if err := pullTarGz(ctx, client, bucket, prefix, destDir); err != nil {
+		if err := pullTarGz(ctx, client, bucket, prefix, destDir, maxExtractedBytes); err != nil {
 			fmt.Printf("Error: %v\n", err)
 			os.Exit(1)
 		}
 		writeDatasetManifest(destDir, sourceURL)
 		return
 	}
+
+	root, err := os.OpenRoot(destDir)
+	if err != nil {
+		fmt.Printf("Error opening destination: %v\n", err)
+		os.Exit(1)
+	}
+	defer root.Close()
 
 	var objects []string
 	paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
@@ -406,7 +420,7 @@ func runPull(datasetName, sourceURL string, anonymous bool) {
 			continue
 		}
 
-		if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+		if err := root.MkdirAll(filepath.Dir(relPath), 0750); err != nil {
 			fmt.Printf("  Error creating directory for %s: %v\n", relPath, err)
 			failed++
 			continue
@@ -422,7 +436,7 @@ func runPull(datasetName, sourceURL string, anonymous bool) {
 			continue
 		}
 
-		f, err := os.Create(localPath)
+		f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if err != nil {
 			resp.Body.Close()
 			fmt.Printf("  Error creating %s: %v\n", localPath, err)
@@ -465,7 +479,7 @@ func writeDatasetManifest(destDir, sourceURL string) {
 		time.Now().UTC().Format(time.RFC3339),
 	)
 	path := filepath.Join(destDir, "dataset.yaml")
-	if err := os.WriteFile(path, []byte(manifest), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(manifest), 0600); err != nil {
 		fmt.Printf("Warning: failed to write %s: %v\n", path, err)
 		return
 	}
@@ -478,7 +492,7 @@ func writeDatasetManifest(destDir, sourceURL string) {
 func prepareDestDir(destDir string) error {
 	info, err := os.Lstat(destDir)
 	if os.IsNotExist(err) {
-		return os.MkdirAll(destDir, 0755)
+		return os.MkdirAll(destDir, 0750)
 	}
 	if err != nil {
 		return err
@@ -504,7 +518,7 @@ func isTarGzKey(key string) bool {
 	return strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz")
 }
 
-func pullTarGz(ctx context.Context, client *s3.Client, bucket, key, destDir string) error {
+func pullTarGz(ctx context.Context, client *s3.Client, bucket, key, destDir string, maxBytes int64) error {
 	resp, err := client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -514,13 +528,27 @@ func pullTarGz(ctx context.Context, client *s3.Client, bucket, key, destDir stri
 	}
 	defer resp.Body.Close()
 
-	gz, err := gzip.NewReader(resp.Body)
+	return extractTarGz(resp.Body, destDir, maxBytes)
+}
+
+func extractTarGz(src io.Reader, destDir string, maxBytes int64) error {
+	if maxBytes <= 0 {
+		return fmt.Errorf("decompression limit must be positive")
+	}
+	root, err := os.OpenRoot(destDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	gz, err := gzip.NewReader(src)
 	if err != nil {
 		return fmt.Errorf("opening gzip stream: %w", err)
 	}
 	defer gz.Close()
 
-	tr := tar.NewReader(gz)
+	// Limit the entire decompressed stream, including skipped entries and tar metadata.
+	limited := &archiveBudgetReader{reader: gz, remaining: maxBytes}
+	tr := tar.NewReader(limited)
 	var extracted, skipped int
 	var totalBytes int64
 
@@ -549,22 +577,25 @@ func pullTarGz(ctx context.Context, client *s3.Client, bucket, key, destDir stri
 		}
 
 		if hdr.Typeflag == tar.TypeDir {
-			if err := os.MkdirAll(localPath, 0755); err != nil {
+			if err := root.MkdirAll(relPath, 0750); err != nil {
 				return fmt.Errorf("creating dir %s: %w", relPath, err)
 			}
 			continue
 		}
 
-		if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+		if err := root.MkdirAll(filepath.Dir(relPath), 0750); err != nil {
 			return fmt.Errorf("creating dir for %s: %w", relPath, err)
 		}
 
-		f, err := os.Create(localPath)
+		f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if err != nil {
 			return fmt.Errorf("creating %s: %w", localPath, err)
 		}
-		n, err := io.Copy(f, tr)
-		f.Close()
+		n, err := io.CopyN(f, tr, hdr.Size)
+		closeErr := f.Close()
+		if err == nil {
+			err = closeErr
+		}
 		if err != nil {
 			return fmt.Errorf("writing %s: %w", localPath, err)
 		}
@@ -572,6 +603,11 @@ func pullTarGz(ctx context.Context, client *s3.Client, bucket, key, destDir stri
 		totalBytes += n
 		extracted++
 		fmt.Printf("  %s (%s)\n", relPath, formatBytes(n))
+	}
+
+	// Drain through the same budget to validate the gzip checksum and trailing data.
+	if _, err := io.Copy(io.Discard, limited); err != nil {
+		return fmt.Errorf("finishing archive: %w", err)
 	}
 
 	fmt.Printf("\nComplete: %d files extracted (%.2f MB)", extracted, float64(totalBytes)/1024/1024)
@@ -646,4 +682,31 @@ func formatBytes(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// archiveBudgetReader fails instead of returning EOF when the decompressed
+// stream exceeds its budget, so tar cannot mistake a limit for clean completion.
+type archiveBudgetReader struct {
+	reader    io.Reader
+	remaining int64
+}
+
+func (r *archiveBudgetReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if r.remaining == 0 {
+		var probe [1]byte
+		n, err := r.reader.Read(probe[:])
+		if n > 0 {
+			return 0, fmt.Errorf("archive exceeds decompression limit")
+		}
+		return 0, err
+	}
+	if int64(len(p)) > r.remaining {
+		p = p[:r.remaining]
+	}
+	n, err := r.reader.Read(p)
+	r.remaining -= int64(n)
+	return n, err
 }

@@ -19,7 +19,6 @@ func init() {
 // New creates a new Elasticsearch driver.
 func New(connString string) (backends.Driver, error) {
 	return elastic.New(connString, elastic.DriverConfig{
-		SkipTLSVerify:    false,
 		VersionInfoField: "build_flavor",
 	})
 }

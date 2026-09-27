@@ -5,7 +5,6 @@ package elasticsearch
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,7 +20,6 @@ import (
 
 // DriverConfig holds backend-specific configuration.
 type DriverConfig struct {
-	SkipTLSVerify    bool   // Allows self-signed HTTPS endpoints in development.
 	VersionInfoField string // "build_flavor" for ES, "distribution" for OS
 }
 
@@ -35,9 +33,6 @@ type Driver struct {
 // New creates a new Elasticsearch/OpenSearch driver.
 func New(address string, config DriverConfig) (backends.Driver, error) {
 	transport := &http.Transport{}
-	if config.SkipTLSVerify {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	}
 	return &Driver{
 		address: strings.TrimSuffix(address, "/"),
 		client:  &http.Client{Timeout: 15 * time.Minute, Transport: transport},

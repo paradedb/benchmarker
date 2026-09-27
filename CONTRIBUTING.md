@@ -14,7 +14,7 @@ Ideal issues for external contributors include well-scoped, individual features 
 
 ### Prerequisites
 
-- **Go 1.24.5+**
+- **Go 1.26.0+**
 - **Docker & Docker Compose**
 - **golangci-lint**
 
