@@ -69,6 +69,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 
 	// Capture dataset.yaml (written by `loader pull`) if present.
 	if datasetPath != "" {
+		// #nosec G304 -- Paths come from the locally executed benchmark configuration or CLI script argument.
 		if data, err := os.ReadFile(filepath.Join(datasetPath, "dataset.yaml")); err == nil {
 			metrics.RegisterRunCapture("dataset_yaml", string(data))
 		}
@@ -280,6 +281,7 @@ func readRunningScript() (source, path string) {
 		if err != nil {
 			continue
 		}
+		// #nosec G304 -- Paths come from the locally executed benchmark configuration or CLI script argument.
 		data, err := os.ReadFile(abs)
 		if err != nil {
 			continue

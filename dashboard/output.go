@@ -308,7 +308,7 @@ func (o *Output) Stop() error {
 			jsonData, err := marshalExportJSON(data)
 			if err == nil {
 				filename := base + ".json"
-				if err := os.WriteFile(filename, jsonData, 0644); err == nil {
+				if err := os.WriteFile(filename, jsonData, 0600); err == nil {
 					fmt.Printf("\n📊 Dashboard JSON saved to: %s\n", filename)
 					fmt.Printf("   View with: dashboard-viewer %s\n", filename)
 				}
@@ -1297,6 +1297,7 @@ func readMetaEnv() map[string]interface{} {
 	}
 	data := []byte(raw)
 	if strings.HasPrefix(raw, "@") {
+		// #nosec G304 -- Input paths are selected by the local CLI or BENCHMARKER_META environment variable.
 		b, err := os.ReadFile(raw[1:])
 		if err != nil {
 			return nil
@@ -1315,6 +1316,7 @@ func readMetaEnv() map[string]interface{} {
 // env vars (or defaults), so the same export can be viewed with different settings.
 // Optional notes parameter adds a notes section below the title.
 func ServeFile(filename string, notes ...string) error {
+	// #nosec G304 -- Input paths are selected by the local CLI or BENCHMARKER_META environment variable.
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
@@ -1389,6 +1391,7 @@ func ServeFile(filename string, notes ...string) error {
 // env vars (or defaults).
 // Optional notes parameter adds a notes section below the title.
 func ExportStandalone(jsonFile, outputFile string, notes ...string) error {
+	// #nosec G304 -- Input paths are selected by the local CLI or BENCHMARKER_META environment variable.
 	jsonData, err := os.ReadFile(jsonFile)
 	if err != nil {
 		return fmt.Errorf("failed to read JSON file: %w", err)
@@ -1440,7 +1443,7 @@ func emitStandaloneHTML(rawData map[string]interface{}, outputFile string, broad
 	}
 	html = strings.Replace(html, "</head>", dataScript+"\n</head>", 1)
 
-	if err := os.WriteFile(outputFile, []byte(html), 0644); err != nil {
+	if err := os.WriteFile(outputFile, []byte(html), 0600); err != nil {
 		return fmt.Errorf("failed to write output file: %w", err)
 	}
 	return nil

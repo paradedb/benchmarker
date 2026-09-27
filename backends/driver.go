@@ -500,6 +500,7 @@ func (l *CLILoader) execFile(ctx context.Context, path string) error {
 		return err
 	}
 
+	// #nosec G304 -- Dataset CSV and setup script paths are selected by the local loader CLI.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -522,6 +523,7 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, csvPath string, ba
 		batchSize = 1
 	}
 
+	// #nosec G304 -- Dataset CSV and setup script paths are selected by the local loader CLI.
 	file, err := os.Open(csvPath)
 	if err != nil {
 		return 0, err

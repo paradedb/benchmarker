@@ -105,5 +105,6 @@ func (t *Terms) Next() string {
 
 // Random returns a random term.
 func (t *Terms) Random() string {
+	// #nosec G404 -- Randomness selects benchmark search terms, never credentials or security tokens.
 	return t.terms[rand.IntN(t.size)]
 }

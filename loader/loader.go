@@ -90,6 +90,7 @@ func (l *Loader) OpenDocuments(filePath string) *DocumentReader {
 		return reader
 	}
 
+	// #nosec G304 -- Dataset and script paths are explicitly selected by the locally executed benchmark script.
 	file, err := os.Open(filePath)
 	if err != nil {
 		return l.throwConfigErrorf("openDocuments: failed to open %q: %v", filePath, err)
@@ -262,6 +263,7 @@ func parseColumns(config map[string]interface{}, filePath string) ([]string, err
 		}
 	}
 
+	// #nosec G304 -- Dataset and script paths are explicitly selected by the locally executed benchmark script.
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -281,6 +283,7 @@ func parseColumns(config map[string]interface{}, filePath string) ([]string, err
 
 // readCSVDocuments reads documents from a CSV file.
 func readCSVDocuments(filePath string) ([]map[string]interface{}, error) {
+	// #nosec G304 -- Dataset and script paths are explicitly selected by the locally executed benchmark script.
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -322,6 +325,7 @@ func readCSVDocuments(filePath string) ([]map[string]interface{}, error) {
 
 // readFile reads a file and returns its contents as a string.
 func readFile(path string) (string, error) {
+	// #nosec G304 -- Dataset and script paths are explicitly selected by the locally executed benchmark script.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err

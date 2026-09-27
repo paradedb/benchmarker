@@ -50,3 +50,9 @@ For S3 pulls, the AWS SDK uses its standard credential chain (environment variab
 ## Dataset Structure
 
 See [Datasets](datasets.md) for full details on directory structure, schema format, and pre/post script formats.
+
+### Archive extraction limits
+
+S3 `.tar.gz` and `.tgz` downloads are limited to 100 GiB of decompressed data by default, including tar metadata, skipped entries, and trailing data. Set `--max-extracted-bytes <positive-byte-count>` on `loader pull` to choose a different budget for your dataset. Exceeding the limit fails the pull; remove the partial destination before retrying.
+
+Downloads cannot escape the destination through parent paths or symlinks, and duplicate file entries are rejected. New files use mode `0600` and new directories use `0750`.
