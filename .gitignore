@@ -14,6 +14,13 @@ datasets/cohere-1m/data/
 datasets/cohere-1m/queries/
 datasets/cohere-1m/dataset.yaml
 datasets/cohere-1m/k6/query_vectors.json
+!datasets/sift-10m
+datasets/sift-10m/data
+datasets/sift-10m/queries
+datasets/sift-10m/dataset.yaml
+datasets/sift-10m/k6/query_vectors.json
+datasets/sift-10m/k6/ground_truth_top10.json
+datasets/sift-10m/k6/results/
 
 # Build outputs
 *.exe
