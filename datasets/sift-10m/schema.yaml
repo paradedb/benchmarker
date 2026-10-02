@@ -1,0 +1,4 @@
+table: sift
+columns:
+  _id: text
+  emb: vector(128)
