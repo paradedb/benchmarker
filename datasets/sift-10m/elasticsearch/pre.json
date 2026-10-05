@@ -1,0 +1,21 @@
+{
+  "index": "sift",
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "refresh_interval": "-1",
+    "index": { "mode": "vectordb_document" }
+  },
+  "mappings": {
+    "properties": {
+      "emb": {
+        "type": "dense_vector",
+        "dims": 128,
+        "element_type": "bfloat16",
+        "index": true,
+        "similarity": "l2_norm",
+        "index_options": { "type": "int8_hnsw", "m": 16, "ef_construction": 100 }
+      }
+    }
+  }
+}

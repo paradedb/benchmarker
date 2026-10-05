@@ -11,12 +11,15 @@ and scores them against the exact top-k ground truth.
 
 Query ids are 0-based positions in query_vectors.json (see
 make_query_vectors.py). Stdlib only; paradedb is reached through
-`docker exec psql` (or --psql), so no driver is needed on the host.
+`docker exec psql` (or --psql) and elasticsearch over HTTP, so no driver is
+needed on the host.
 
 Usage:
     python3 measure_recall.py collect --backend paradedb [--limit 1000] \
         [--set paradedb.vector_cluster_max_probe=0.02]
-    python3 measure_recall.py compare results/paradedb.json [...]
+    python3 measure_recall.py collect --backend elasticsearch \
+        [--num-candidates 100] [--out results/es-100.json]
+    python3 measure_recall.py compare results/paradedb.json results/elasticsearch.json
 """
 
 import argparse
@@ -24,6 +27,7 @@ import json
 import os
 import subprocess
 import time
+import urllib.request
 
 K = 10
 
@@ -70,8 +74,33 @@ def collect_paradedb(args, vectors):
     return results
 
 
+def collect_elasticsearch(args, vectors):
+    # Keep in sync with elasticsearchKnn in vector.js.
+    results = {}
+    for qid, vector in enumerate(vectors):
+        body = json.dumps({
+            "knn": {
+                "field": "emb",
+                "query_vector": json.loads(vector),
+                "k": K,
+                "num_candidates": args.num_candidates,
+            },
+            "size": K,
+            "_source": False,
+        }).encode()
+        req = urllib.request.Request(
+            f"{args.url}/{args.index}/_search?request_cache=false",
+            body,
+            {"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req) as resp:
+            results[qid] = [hit["_id"] for hit in json.load(resp)["hits"]["hits"]]
+    return results
+
+
 ADAPTERS = {
     "paradedb": collect_paradedb,
+    "elasticsearch": collect_elasticsearch,
 }
 
 
@@ -122,13 +151,21 @@ def main():
     c.add_argument("--limit", type=int, default=1000, help="number of queries to run")
     c.add_argument("--vectors", default="query_vectors.json")
     c.add_argument("--out", help="default: results/<backend>.json")
-    c.add_argument("--container", default="paradedb")
-    c.add_argument("--db", default="benchmark")
-    c.add_argument("--user", default="postgres")
-    c.add_argument("--psql", help="run this psql command instead of docker exec")
-    c.add_argument(
+    pdb = c.add_argument_group("paradedb")
+    pdb.add_argument("--container", default="paradedb")
+    pdb.add_argument("--db", default="benchmark")
+    pdb.add_argument("--user", default="postgres")
+    pdb.add_argument("--psql", help="run this psql command instead of docker exec")
+    pdb.add_argument(
         "--set", action="append", default=[], metavar="GUC=VALUE",
         help="session setting override (repeatable)",
+    )
+    es = c.add_argument_group("elasticsearch")
+    es.add_argument("--url", default="http://localhost:9200")
+    es.add_argument("--index", default="sift")
+    es.add_argument(
+        "--num-candidates", type=int, default=100,
+        help="match ES_NUM_CANDIDATES in vector.js",
     )
     c.set_defaults(func=collect)
 

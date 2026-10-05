@@ -1,6 +1,6 @@
 services:
   paradedb:
-    image: paradedb/paradedb:v0.26.0-rc.4-pg18
+    image: ${PARADEDB_IMAGE:-paradedb/paradedb:v0.26.0-rc.4-pg18}
     container_name: paradedb
     shm_size: 6g
     privileged: true
@@ -24,21 +24,24 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "6"
-          memory: 12G
+          cpus: "${PARADEDB_CPUS:-6}"
+          memory: ${PARADEDB_MEM_LIMIT:-12g}
         reservations:
           cpus: "2"
-          memory: 8G
-    cpus: 6
-    mem_limit: 12g
+    cpus: ${PARADEDB_CPUS:-6}
+    mem_limit: ${PARADEDB_MEM_LIMIT:-12g}
+    # Parallelism follows PARADEDB_CPUS: the pool gets every CPU, and a single
+    # query or index build gets PARADEDB_CPUS - 1 workers plus its leader.
+    # Compose can't do arithmetic, so set PG_PARALLEL_WORKERS alongside
+    # PARADEDB_CPUS when changing it.
     command:
       - "postgres"
       - "-c"
       - "shared_preload_libraries=pg_search,pg_cron"
       - "-c"
-      - "shared_buffers=8GB"
+      - "shared_buffers=${PG_SHARED_BUFFERS:-8GB}"
       - "-c"
-      - "effective_cache_size=10GB"
+      - "effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-10GB}"
       - "-c"
       - "work_mem=256MB"
       - "-c"
@@ -48,19 +51,55 @@ services:
       - "-c"
       - "wal_buffers=256MB"
       - "-c"
-      - "max_wal_size=8GB"
+      - "max_wal_size=1GB"
       - "-c"
       - "random_page_cost=1.1"
       - "-c"
       - "effective_io_concurrency=200"
       - "-c"
-      - "max_parallel_workers_per_gather=2"
+      - "max_parallel_workers_per_gather=${PG_PARALLEL_WORKERS:-5}"
       - "-c"
-      - "max_parallel_workers=2"
+      - "max_parallel_maintenance_workers=${PG_PARALLEL_WORKERS:-5}"
+      - "-c"
+      - "max_parallel_workers=${PARADEDB_CPUS:-6}"
       - "-c"
       - "max_worker_processes=16"
       - "-c"
       - "jit=off"
 
+  # Opt-in (`--profile elasticsearch`): both engines at the default 12g don't
+  # fit a 16GiB Docker VM together.
+  elasticsearch:
+    image: ${ELASTICSEARCH_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:9.5.3}
+    container_name: elasticsearch
+    profiles: ["elasticsearch"]
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      # Heap at a third of the container limit: the HNSW graph and raw vectors
+      # are read off-heap through the page cache, bounded by the same limit.
+      - ES_JAVA_OPTS=-Xms${ES_HEAP:-4g} -Xmx${ES_HEAP:-4g}
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200 >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          cpus: "6"
+          memory: ${ELASTICSEARCH_MEM_LIMIT:-12g}
+    cpus: 6
+    mem_limit: ${ELASTICSEARCH_MEM_LIMIT:-12g}
+
 volumes:
   paradedb_data:
+  elasticsearch_data:

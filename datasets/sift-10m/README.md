@@ -1,12 +1,14 @@
 # SIFT 10M — Vector Benchmark (unfiltered, L2)
 
-Unfiltered top-10 kNN over 10M SIFT descriptors (128d, L2 distance) on the
-ParadeDB (pg_search) vector index, container capped at 12g / 6 CPUs with
+Unfiltered top-10 kNN over 10M SIFT descriptors (128d, L2 distance):
+ParadeDB (pg_search IVF vector index) vs Elasticsearch (`dense_vector` HNSW).
+Each engine's container is capped at 12g / 6 CPUs. ParadeDB runs
 `shared_buffers=8GB`: the IVF build needs a segment's ~5GB of vectors to fit
 in shared buffers, so the Docker VM needs at least 16GB (e.g.
-`colima start --memory 16`).
+`colima start --memory 16`) — enough for one engine at a time at these
+limits, which is why Elasticsearch is behind a compose profile.
 
-Table `sift` with columns `_id` and `emb vector(128)`.
+ParadeDB table / Elasticsearch index `sift` with `_id` and `emb` (128d).
 
 ## Getting the data
 
@@ -49,16 +51,85 @@ docker compose -f datasets/sift-10m/docker-compose.yml up -d
 ./bin/loader load --backend paradedb --workers 4 --batch-size 5000 ./datasets/sift-10m
 ```
 
-The compose file pins `paradedb/paradedb:v0.26.0-rc.4-pg18`: `vector_router`
-and `paradedb.vector_recall_target` don't exist in 0.25.x.
+The compose file defaults to `paradedb/paradedb:v0.26.0-rc.4-pg18`:
+`vector_router` and `paradedb.vector_recall_target` don't exist in released
+0.25.x. To benchmark a pg_search build from source, build an image with
+paradedb's `docker/Dockerfile.source` and override the default:
+
+```bash
+docker build -f docker/Dockerfile.source \
+  --build-arg BASE_IMAGE=paradedb/paradedb:v0.26.0-rc.4-pg18 \
+  -t paradedb-source:main-<sha> .   # from a paradedb checkout
+PARADEDB_IMAGE=paradedb-source:main-<sha> \
+  docker compose -f datasets/sift-10m/docker-compose.yml up -d
+```
 
 `post.sql` builds the index with `vector_router = 'ivf'` and
-`target_segment_count = 8`, then sets the recall knobs on the database:
+`target_segment_count = 1`, then sets the recall knobs on the database:
 `paradedb.vector_cluster_max_probe = 0.01` and
 `paradedb.vector_recall_target = 0.95`.
 
-With 8 segments and `shared_buffers=2GB` the load took ~63s (160k rows/s)
-and the index build ~471s, producing a 9.4GB index.
+Postgres parallelism follows the CPU limit: `max_parallel_workers` is
+`PARADEDB_CPUS` (default 6), and `max_parallel_workers_per_gather` /
+`max_parallel_maintenance_workers` are `PG_PARALLEL_WORKERS` (default 5, so
+each query or build is a leader plus 5 workers). Change both together, e.g.
+`PARADEDB_CPUS=4 PG_PARALLEL_WORKERS=3`.
+
+The load takes ~63s (160k rows/s). With 8 segments and `shared_buffers=2GB`
+the index build took ~471s (9.4GB index); the single-segment build takes
+~26min on 6 CPUs (12GB index).
+
+### Elasticsearch
+
+```bash
+docker compose -f datasets/sift-10m/docker-compose.yml stop paradedb
+docker compose -f datasets/sift-10m/docker-compose.yml --profile elasticsearch up -d elasticsearch
+./bin/loader load --backend elasticsearch --workers 4 --batch-size 5000 ./datasets/sift-10m
+```
+
+Elasticsearch 9.5.3 on the free Basic license, configured as close to
+Elastic Cloud's Vector Database projects as Basic allows:
+
+- `index.mode: vectordb_document`, which Vector Database projects force on
+  every index. It excludes vectors from `_source`, preloads the vector files
+  (`vex`, `veq`, `veb`, `cenivf`) into the page cache when the index opens,
+  and runs merges in parallel without I/O throttling.
+- `element_type: bfloat16` and `int8_hnsw` (m=16, ef_construction=100,
+  `l2_norm`): the defaults this mode picks on Basic, pinned so the mapping
+  doesn't change with the license.
+- Cloud's default index type is `bbq_disk` (k-means partitions + binary
+  quantization, the closest analog to ParadeDB's IVF router). It needs an
+  Enterprise license: on Basic the mapping is accepted, but indexing fails
+  with `current license is non-compliant for [bbq_disk]`. To benchmark it,
+  start the 30-day trial first
+  (`curl -X POST 'localhost:9200/_license/start_trial?acknowledge=true'`)
+  and set `index_options.type` to `bbq_disk`.
+
+`post.json` force-merges to one segment to match ParadeDB's
+`target_segment_count = 1`; the merge rebuilds the HNSW graph over all 10M
+vectors, so expect it to take longer than the load (6h request timeout).
+Heap is 4g (`ES_HEAP`) of the 12g limit (`ELASTICSEARCH_MEM_LIMIT`); the
+graph, int8 vectors and bfloat16 raw vectors are read off-heap through the
+page cache. The preload runs when the index opens, so restarting the
+container leaves it warm; drop caches after the restart to test it cold.
+
+## Cache size
+
+The compose defaults (`shared_buffers=8GB`, 12g container) are what the
+index build needs. Searching an already-built index doesn't, so the cache
+can be shrunk below the ~12GB index + ~5GB heap without rebuilding — the
+container limit must shrink too, since the OS page cache is bounded only by
+it:
+
+```bash
+PG_SHARED_BUFFERS=2GB PG_EFFECTIVE_CACHE_SIZE=4GB PARADEDB_MEM_LIMIT=4g \
+  docker compose -f datasets/sift-10m/docker-compose.yml up -d
+colima ssh -- sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
+```
+
+Check `buffer_reads` in `paradedb.vector_stats` output to confirm queries
+actually miss. On macOS, Colima's disk image can sit in the host page cache,
+so out-of-cache latencies are optimistic compared with a Linux host.
 
 ## Recall
 
@@ -75,14 +146,28 @@ python3 measure_recall.py compare results/paradedb.json
 
 `collect` uses the settings `post.sql` put on the database; pass
 `--set paradedb.vector_cluster_max_probe=0.02` (repeatable) to try other
-values for a single run. `compare` accepts several results files, so
-backends added later are scored side by side.
+values for a single run.
+
+Elasticsearch's recall knob is `num_candidates`, sent per query. Sweep it,
+then set the matching `ES_NUM_CANDIDATES` for k6:
+
+```bash
+for n in 50 100 200 400; do
+  python3 measure_recall.py collect --backend elasticsearch \
+    --num-candidates $n --out results/es-$n.json
+done
+python3 measure_recall.py compare results/paradedb.json results/es-*.json
+```
 
 ## Run
 
 ```bash
 ./k6 run --out dashboard=live,json,html datasets/sift-10m/k6/vector.js
 ```
+
+Scenarios run in staggered phases for each engine in `BACKENDS` (default
+`paradedb,elasticsearch`); with one engine up at a time, run them
+separately, e.g. `-e BACKENDS=elasticsearch -e ES_NUM_CANDIDATES=200`.
 
 ## Measured recall@10
 
