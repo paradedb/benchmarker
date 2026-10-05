@@ -105,9 +105,13 @@ Elastic Cloud's Vector Database projects as Basic allows:
   (`curl -X POST 'localhost:9200/_license/start_trial?acknowledge=true'`)
   and set `index_options.type` to `bbq_disk`.
 
-`post.json` force-merges to one segment to match ParadeDB's
-`target_segment_count = 1`; the merge rebuilds the HNSW graph over all 10M
-vectors, so expect it to take longer than the load (6h request timeout).
+Segments are left to Elasticsearch's background merges, with no force-merge.
+Elastic's
+[kNN tuning guide](https://www.elastic.co/docs/deploy-manage/production-guidance/optimize-performance/approximate-knn-search#reduce-the-number-of-index-segments)
+recommends bulk loading with `refresh_interval: -1` "instead of force
+merging", which `pre.json` does. `post.json` then restores the default
+refresh interval and refreshes. Merges keep running after the loader exits,
+so wait until `GET _cat/segments/sift?v` stops changing before benchmarking.
 Heap is 4g (`ES_HEAP`) of the 12g limit (`ELASTICSEARCH_MEM_LIMIT`); the
 graph, int8 vectors and bfloat16 raw vectors are read off-heap through the
 page cache. The preload runs when the index opens, so restarting the

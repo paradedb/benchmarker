@@ -2,14 +2,7 @@
   {
     "index": "sift",
     "endpoint": "_settings",
-    "body": { "index": { "refresh_interval": "1s" } }
-  },
-  { "index": "sift", "endpoint": "_refresh" },
-  {
-    "index": "sift",
-    "endpoint": "_forcemerge",
-    "params": { "max_num_segments": 1 },
-    "timeout": "6h"
+    "body": { "index": { "refresh_interval": null } }
   },
   { "index": "sift", "endpoint": "_refresh" }
 ]
