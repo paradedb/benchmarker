@@ -88,9 +88,9 @@ Backends use a **registry pattern** with factory functions:
 
 ### Metrics Flow
 
-`metrics/results.go` registers k6 metrics (`query_duration`, `query_hits`, `ingest_duration`, `ingest_docs`, `update_duration`, `update_docs`, `backend_init`, `scenario_started`), all tagged with `backend=<name>`. `K6Client.Query()` and `K6Client.InsertBatch()` time operations and push samples to k6's metric engine.
+`metrics/results.go` registers k6 metrics (`query_duration`, `query_hits`, `ingest_duration`, `ingest_docs`, `update_duration`, `update_docs`, `update_errors`, `backend_init`, `scenario_started`), all tagged with `backend=<name>`. `K6Client.Query()`, `K6Client.InsertBatch()`, and `K6Client.UpdateBatch()` time operations and push samples to k6's metric engine.
 
-`metrics/collector.go` reads Docker container stats via `/var/run/docker.sock` and emits `container_cpu_percent` and `container_memory_bytes` gauges.
+`metrics/collector.go` reads Docker container stats through the active local Docker context (falling back to `/var/run/docker.sock`) and emits `container_cpu_percent` and `container_memory_bytes` gauges.
 
 ## Adding a Backend
 

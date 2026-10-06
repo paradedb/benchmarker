@@ -24,9 +24,11 @@ import (
 
 // Backends holds all configured backend clients.
 type Backends struct {
-	vu      modules.VU
-	clients map[string]*backends.K6Client
-	Metrics *metrics.Collector `js:"metrics"`
+	vu                 modules.VU
+	clients            map[string]*backends.K6Client
+	telemetryProviders map[string]backends.TelemetryProvider
+	telemetryCollector *backendTelemetryCollector
+	Metrics            *metrics.Collector `js:"metrics"`
 }
 
 // Get returns a backend client by its alias/name.
@@ -57,8 +59,9 @@ func (m *ModuleInstance) configErrorf(format string, args ...interface{}) {
 // newBackends creates a new backends registry with the specified configuration.
 func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	b := &Backends{
-		vu:      m.vu,
-		clients: make(map[string]*backends.K6Client),
+		vu:                 m.vu,
+		clients:            make(map[string]*backends.K6Client),
+		telemetryProviders: make(map[string]backends.TelemetryProvider),
 	}
 	var enabledContainers []string
 	ctx := context.Background()
@@ -173,6 +176,9 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 
 		client := backends.NewK6Client(m.vu, driver, alias)
 		b.clients[alias] = client
+		if provider, ok := driver.(backends.TelemetryProvider); ok && provider.TelemetryEnabled() {
+			b.telemetryProviders[alias] = provider
+		}
 		if container != "" {
 			enabledContainers = append(enabledContainers, container)
 		}
@@ -195,27 +201,39 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	return b
 }
 
-// Collect collects metrics from all enabled containers.
-// Includes a 500ms sleep to avoid polling too frequently.
+// Collect collects Docker and backend-provided database telemetry on the
+// dedicated metrics collector VU. Includes a 500ms sleep to avoid polling too
+// frequently when no Docker containers are configured.
 func (b *Backends) Collect() map[string]interface{} {
+	b.telemetryCollector.collect(time.Now())
+	var result map[string]interface{}
 	if b.Metrics != nil {
-		result := b.Metrics.Collect()
-		time.Sleep(500 * time.Millisecond)
-		return result
+		result = b.Metrics.Collect()
 	}
-	return nil
+	time.Sleep(500 * time.Millisecond)
+	return result
 }
 
-// AddDockerMetricsCollector adds a metrics_collector scenario to the given
-// scenarios object. Pass a Timer or a duration string (e.g. "500s").
+// AddMetricsCollector adds one dedicated collector VU for Docker and
+// backend-provided database telemetry. Workload scenarios opt into database
+// telemetry with tags: { backend: "alias" }.
 // Returns a function that the script should export as collectMetrics:
 //
-//	export const collectMetrics = backends.addDockerMetricsCollector(scenarios, timer);
+//	export const collectMetrics = backends.addMetricsCollector(scenarios, timer);
+func (b *Backends) AddMetricsCollector(call sobek.FunctionCall) sobek.Value {
+	return b.addMetricsCollector(call, "addMetricsCollector")
+}
+
+// AddDockerMetricsCollector is retained as a backwards-compatible alias.
 func (b *Backends) AddDockerMetricsCollector(call sobek.FunctionCall) sobek.Value {
+	return b.addMetricsCollector(call, "addDockerMetricsCollector")
+}
+
+func (b *Backends) addMetricsCollector(call sobek.FunctionCall, method string) sobek.Value {
 	rt := b.vu.Runtime()
 
 	if len(call.Arguments) < 2 {
-		common.Throw(rt, fmt.Errorf("addDockerMetricsCollector requires (scenarios, timer|duration)"))
+		common.Throw(rt, fmt.Errorf("%s requires (scenarios, timer|duration)", method))
 		return sobek.Undefined()
 	}
 
@@ -235,6 +253,28 @@ func (b *Backends) AddDockerMetricsCollector(call sobek.FunctionCall) sobek.Valu
 		} else {
 			dur = call.Arguments[1].String()
 		}
+	}
+	collectorDuration, err := time.ParseDuration(dur)
+	if err != nil || collectorDuration <= 0 {
+		common.Throw(rt, fmt.Errorf("%s received invalid duration %q", method, dur))
+		return sobek.Undefined()
+	}
+
+	exported, ok := scenarios.Export().(map[string]interface{})
+	if !ok {
+		common.Throw(rt, fmt.Errorf("%s scenarios must be an object", method))
+		return sobek.Undefined()
+	}
+	b.telemetryCollector, err = newBackendTelemetryCollector(
+		exported, b.telemetryProviders, len(b.clients), collectorDuration,
+	)
+	if err != nil {
+		common.Throw(rt, fmt.Errorf("%s: %w", method, err))
+		return sobek.Undefined()
+	}
+	if b.telemetryCollector != nil {
+		collectorDuration += telemetryFinalGrace
+		dur = collectorDuration.String()
 	}
 
 	if err := scenarios.Set("metrics_collector", rt.ToValue(map[string]interface{}{

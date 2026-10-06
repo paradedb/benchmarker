@@ -6,10 +6,12 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,10 +48,17 @@ type Output struct {
 	broadcastInterval time.Duration
 	timelineWindow    time.Duration
 
-	// Output toggles parsed from --out dashboard=<live,json,html>
-	liveEnabled bool
-	exportJSON  bool
-	exportHTML  bool
+	// Output toggles parsed from --out dashboard=<live,json,html,query_csv>
+	liveEnabled       bool
+	exportJSON        bool
+	exportHTML        bool
+	exportQueryCSV    bool
+	exportDir         string
+	exportPrefix      string
+	queryCSVMaxSeries int
+	queryCSVSeries    int
+	queryCSVDropped   uint64
+	queryCSVError     string
 }
 
 // DashboardData holds all metrics for the dashboard.
@@ -72,23 +81,25 @@ type ContainerMetrics struct {
 
 // RunMetrics holds metrics for a single run/phase.
 type RunMetrics struct {
-	Name            string                   `json:"name"`
-	Backend         string                   `json:"backend"`   // Backend alias emitted in k6 metric tags
-	Container       string                   `json:"container"` // Docker container name for resource metrics
-	Alias           string                   `json:"alias"`     // User-defined alias for this backend instance
-	Color           string                   `json:"color"`     // Custom color for this backend
-	Chart           string                   `json:"chart"`     // Chart group for separating graphs
-	Latencies       []float64                `json:"latencies"`
-	Timeline        []TimelinePoint          `json:"timeline"`
-	IngestRate      []TimeValue              `json:"ingestRate"`    // Docs/sec timeline
-	TotalIngested   int64                    `json:"totalIngested"` // Total docs ingested
-	FirstIngestTime int64                    `json:"-"`             // Timestamp of the first ingest sample
-	LastIngestTime  int64                    `json:"-"`             // For rate calculation
-	LastIngestDocs  int64                    `json:"-"`             // For rate calculation
-	Queries         map[string]*QueryMetrics `json:"-"`             // Per-query breakdown
-	StartTime       int64                    `json:"startTime"`
-	EndTime         int64                    `json:"endTime"`
-	LastUpdateTime  int64                    `json:"-"` // Track last update for end detection
+	Name            string                    `json:"name"`
+	Backend         string                    `json:"backend"`   // Backend alias emitted in k6 metric tags
+	Container       string                    `json:"container"` // Docker container name for resource metrics
+	Alias           string                    `json:"alias"`     // User-defined alias for this backend instance
+	Color           string                    `json:"color"`     // Custom color for this backend
+	Chart           string                    `json:"chart"`     // Chart group for separating graphs
+	Latencies       []float64                 `json:"latencies"`
+	Timeline        []TimelinePoint           `json:"timeline"`
+	IngestRate      []TimeValue               `json:"ingestRate"`    // Docs/sec timeline
+	TotalIngested   int64                     `json:"totalIngested"` // Total docs ingested
+	FirstIngestTime int64                     `json:"-"`             // Timestamp of the first ingest sample
+	LastIngestTime  int64                     `json:"-"`             // For rate calculation
+	LastIngestDocs  int64                     `json:"-"`             // For rate calculation
+	Queries         map[string]*QueryMetrics  `json:"-"`             // Per-query breakdown
+	QueryCSV        map[string]*queryCSVStats `json:"-"`             // Bounded statistics grouped by query_id
+	StartTime       int64                     `json:"startTime"`
+	EndTime         int64                     `json:"endTime"`
+	LastUpdateTime  int64                     `json:"-"` // Track last update for end detection
+	UpdateMetrics   *UpdateMetrics            `json:"-"`
 }
 
 // QueryMetrics holds metrics for a specific query type within a run.
@@ -102,14 +113,37 @@ type QueryMetrics struct {
 	StartTime int64           `json:"-"`
 	EndTime   int64           `json:"-"`
 
-	// Timestamps track when each latency sample arrived (parallel to Latencies slice)
-	Timestamps    []int64 `json:"-"`
-	LastPointTime int64   `json:"-"` // Tracks the last consumed index for no-window mode
+	// Timestamps track query completion times (parallel to Latencies).
+	Timestamps          []int64 `json:"-"`
+	TimelineSampleCount int     `json:"-"`
+	timelineWindowStart int
+	liveStats           liveLatencyStats
+	timelineHistogram   latencyHistogram
+}
+
+func newQueryMetrics(name string) *QueryMetrics {
+	return &QueryMetrics{Name: name}
+}
+
+// recordLatency keeps raw export data and bounded live aggregation in sync.
+// The caller owns the output lock for the complete operation.
+func (qm *QueryMetrics) recordLatency(value float64, sampleTime int64) {
+	if qm.StartTime == 0 {
+		qm.StartTime = sampleTime
+	}
+	if count := len(qm.Timestamps); count > 0 && sampleTime < qm.Timestamps[count-1] {
+		sampleTime = qm.Timestamps[count-1]
+	}
+	qm.EndTime = sampleTime
+	qm.Latencies = append(qm.Latencies, value)
+	qm.Timestamps = append(qm.Timestamps, sampleTime)
+	qm.liveStats.record(value)
 }
 
 // TimelinePoint is a point in time with aggregated metrics.
 type TimelinePoint struct {
 	Time  int64   `json:"time"`
+	Mean  float64 `json:"mean"`
 	P50   float64 `json:"p50"`
 	P90   float64 `json:"p90"`
 	P95   float64 `json:"p95"`
@@ -122,6 +156,41 @@ type TimelinePoint struct {
 type TimeValue struct {
 	Time  int64   `json:"time"`
 	Value float64 `json:"value"`
+}
+
+// UpdateMetrics holds raw k6 update samples for JSON exports and bounded live
+// latency statistics for dashboard summaries.
+type UpdateMetrics struct {
+	Duration  []TimeValue `json:"duration"`
+	Documents []TimeValue `json:"documents"`
+	Errors    []TimeValue `json:"errors"`
+
+	liveStats      liveLatencyStats
+	totalDocuments float64
+	totalErrors    float64
+}
+
+func newUpdateMetrics() *UpdateMetrics {
+	return &UpdateMetrics{
+		Duration:  []TimeValue{},
+		Documents: []TimeValue{},
+		Errors:    []TimeValue{},
+	}
+}
+
+func (m *UpdateMetrics) summary() map[string]interface{} {
+	percentiles := m.liveStats.histogram.percentiles()
+	return map[string]interface{}{
+		"attempts":  len(m.Duration),
+		"documents": m.totalDocuments,
+		"errors":    m.totalErrors,
+		"min":       m.liveStats.min,
+		"max":       m.liveStats.max,
+		"mean":      percentiles.mean,
+		"p50":       percentiles.p50,
+		"p95":       percentiles.p95,
+		"p99":       percentiles.p99,
+	}
 }
 
 // Constants for timing thresholds
@@ -171,10 +240,11 @@ func (o *Output) getOrCreateRun(runName, backend string, tags map[string]string)
 
 // parseOutputModes parses the comma-separated keyword list from
 // --out dashboard=<modes>. Empty arg defaults to live only. Recognized
-// keywords are "live", "json", "html"; anything else is an error.
-func parseOutputModes(arg string) (live, exportJSON, exportHTML bool, err error) {
+// keywords are "live", "json", "html", and "query_csv"; anything else is
+// an error.
+func parseOutputModes(arg string) (live, exportJSON, exportHTML, exportQueryCSV bool, err error) {
 	if strings.TrimSpace(arg) == "" {
-		return true, false, false, nil
+		return true, false, false, false, nil
 	}
 	for _, raw := range strings.Split(arg, ",") {
 		switch strings.TrimSpace(raw) {
@@ -184,11 +254,36 @@ func parseOutputModes(arg string) (live, exportJSON, exportHTML bool, err error)
 			exportJSON = true
 		case "html":
 			exportHTML = true
+		case "query_csv":
+			exportQueryCSV = true
 		default:
-			return false, false, false, fmt.Errorf("unknown dashboard output mode %q (expected live, json, or html)", raw)
+			return false, false, false, false, fmt.Errorf("unknown dashboard output mode %q (expected live, json, html, or query_csv)", raw)
 		}
 	}
-	return live, exportJSON, exportHTML, nil
+	return live, exportJSON, exportHTML, exportQueryCSV, nil
+}
+
+func dashboardExportPrefix() (string, error) {
+	prefix := os.Getenv("DASHBOARD_EXPORT_PREFIX")
+	if prefix == "" {
+		return "dashboard", nil
+	}
+	for _, char := range prefix {
+		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' ||
+			char >= '0' && char <= '9' || strings.ContainsRune("._-", char) {
+			continue
+		}
+		return "", fmt.Errorf("DASHBOARD_EXPORT_PREFIX may contain only letters, numbers, periods, underscores, and hyphens")
+	}
+	return prefix, nil
+}
+
+func dashboardExportDir() string {
+	dir := os.Getenv("DASHBOARD_EXPORT_DIR")
+	if dir == "" {
+		return "."
+	}
+	return filepath.Clean(dir)
 }
 
 // New creates a new dashboard output.
@@ -205,9 +300,23 @@ func New(params output.Params) (output.Output, error) {
 		}
 	}
 
-	live, exportJSON, exportHTML, err := parseOutputModes(params.ConfigArgument)
+	live, exportJSON, exportHTML, exportQueryCSV, err := parseOutputModes(params.ConfigArgument)
 	if err != nil {
 		return nil, err
+	}
+	queryCSVMaxSeries, err := dashboardQueryCSVMaxSeries(exportQueryCSV)
+	if err != nil {
+		return nil, err
+	}
+	exportPrefix, err := dashboardExportPrefix()
+	if err != nil {
+		return nil, err
+	}
+	exportDir := dashboardExportDir()
+	if exportJSON || exportHTML || exportQueryCSV {
+		if err := os.MkdirAll(exportDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create dashboard export directory %s: %w", exportDir, err)
+		}
 	}
 
 	return &Output{
@@ -220,6 +329,10 @@ func New(params output.Params) (output.Output, error) {
 		liveEnabled:       live,
 		exportJSON:        exportJSON,
 		exportHTML:        exportHTML,
+		exportQueryCSV:    exportQueryCSV,
+		exportDir:         exportDir,
+		exportPrefix:      exportPrefix,
+		queryCSVMaxSeries: queryCSVMaxSeries,
 		data: &DashboardData{
 			StartTime:  time.Now(),
 			Runs:       make(map[string]*RunMetrics),
@@ -239,6 +352,9 @@ func (o *Output) Description() string {
 	}
 	if o.exportHTML {
 		parts = append(parts, "html export")
+	}
+	if o.exportQueryCSV {
+		parts = append(parts, "per-query csv export")
 	}
 	if len(parts) == 0 {
 		return "Dashboard (no outputs enabled)"
@@ -297,18 +413,28 @@ func (o *Output) Stop() error {
 		o.broadcast()
 	}
 
-	if o.exportJSON || o.exportHTML {
+	var stopErr error
+	if o.exportJSON || o.exportHTML || o.exportQueryCSV {
 		o.mu.RLock()
-		data := o.getExportData()
+		var data map[string]interface{}
+		if o.exportJSON || o.exportHTML {
+			data = o.getExportData()
+		}
+		var queryCSVData []byte
+		if o.exportQueryCSV {
+			queryCSVData, stopErr = marshalQueryCSV(o.data)
+		}
+		queryCSVDropped := o.queryCSVDropped
+		queryCSVError := o.queryCSVError
 		o.mu.RUnlock()
 
-		base := fmt.Sprintf("dashboard_%s", time.Now().Format("2006-01-02_15-04-05"))
+		base := filepath.Join(o.exportDir, fmt.Sprintf("%s_%s", o.exportPrefix, time.Now().Format("2006-01-02_15-04-05")))
 
 		if o.exportJSON {
 			jsonData, err := marshalExportJSON(data)
 			if err == nil {
 				filename := base + ".json"
-				if err := os.WriteFile(filename, jsonData, 0600); err == nil {
+				if err := os.WriteFile(filename, jsonData, 0o600); err == nil {
 					fmt.Printf("\n📊 Dashboard JSON saved to: %s\n", filename)
 					fmt.Printf("   View with: dashboard-viewer %s\n", filename)
 				}
@@ -321,6 +447,21 @@ func (o *Output) Stop() error {
 				fmt.Printf("\n📊 Dashboard HTML saved to: %s\n", filename)
 			}
 		}
+
+		if o.exportQueryCSV && stopErr == nil {
+			filename := base + "_queries.csv"
+			if err := os.WriteFile(filename, queryCSVData, 0o600); err != nil {
+				stopErr = fmt.Errorf("write query CSV %s: %w", filename, err)
+			} else {
+				fmt.Printf("\n📊 Per-query CSV saved to: %s\n", filename)
+			}
+		}
+		if queryCSVDropped > 0 {
+			if queryCSVError == "" {
+				queryCSVError = "query CSV series limit exceeded"
+			}
+			stopErr = errors.Join(stopErr, fmt.Errorf("%s; dropped %d query samples", queryCSVError, queryCSVDropped))
+		}
 		fmt.Println()
 	}
 
@@ -328,11 +469,11 @@ func (o *Output) Stop() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := o.server.Shutdown(ctx); err != nil && err != http.ErrServerClosed {
-			return err
+			stopErr = errors.Join(stopErr, err)
 		}
 	}
 
-	return nil
+	return stopErr
 }
 
 func (o *Output) loop() {
@@ -367,6 +508,7 @@ func (o *Output) flush() {
 			name := sample.Metric.Name
 			value := sample.Value
 			tags := sample.Tags.Map()
+			sampleTime := sample.Time.UnixMilli()
 
 			switch {
 			case name == "backend_init":
@@ -424,9 +566,11 @@ func (o *Output) flush() {
 				rm := o.getOrCreateRun(runName, backend, tags)
 				rm.Latencies = append(rm.Latencies, value)
 				if rm.StartTime == 0 {
-					rm.StartTime = sample.Time.UnixMilli()
+					rm.StartTime = sampleTime
 				}
-				rm.LastUpdateTime = now
+				if sampleTime > rm.LastUpdateTime {
+					rm.LastUpdateTime = sampleTime
+				}
 
 				// Track per-query metrics
 				queryName := tags["query"]
@@ -435,15 +579,10 @@ func (o *Output) flush() {
 				}
 				if queryName != "" {
 					if rm.Queries[queryName] == nil {
-						rm.Queries[queryName] = &QueryMetrics{Name: queryName}
+						rm.Queries[queryName] = newQueryMetrics(queryName)
 					}
 					qm := rm.Queries[queryName]
-					if qm.StartTime == 0 {
-						qm.StartTime = sample.Time.UnixMilli()
-					}
-					qm.EndTime = sample.Time.UnixMilli()
-					qm.Latencies = append(qm.Latencies, value)
-					qm.Timestamps = append(qm.Timestamps, now)
+					qm.recordLatency(value, sampleTime)
 					if qm.VUs == 0 || qm.Executor == "" {
 						if info := metrics.GetScenarioInfo(queryName); info != nil {
 							if qm.VUs == 0 {
@@ -454,6 +593,9 @@ func (o *Output) flush() {
 							}
 						}
 					}
+				}
+				if o.exportQueryCSV {
+					o.recordQueryCSV(rm, tags["query_id"], value)
 				}
 
 			case name == "query_hits":
@@ -484,6 +626,34 @@ func (o *Output) flush() {
 					}
 				}
 
+			case name == "update_duration" || name == "update_docs" || name == "update_errors":
+				backend := tags["backend"]
+				if backend == "" {
+					continue
+				}
+				rm := o.getOrCreateRun(getRunName(backend, tags), backend, tags)
+				if rm.UpdateMetrics == nil {
+					rm.UpdateMetrics = newUpdateMetrics()
+				}
+				if rm.StartTime == 0 {
+					rm.StartTime = sampleTime
+				}
+				if sampleTime > rm.LastUpdateTime {
+					rm.LastUpdateTime = sampleTime
+				}
+				point := TimeValue{Time: sampleTime, Value: value}
+				switch name {
+				case "update_duration":
+					rm.UpdateMetrics.Duration = append(rm.UpdateMetrics.Duration, point)
+					rm.UpdateMetrics.liveStats.record(value)
+				case "update_docs":
+					rm.UpdateMetrics.Documents = append(rm.UpdateMetrics.Documents, point)
+					rm.UpdateMetrics.totalDocuments += value
+				case "update_errors":
+					rm.UpdateMetrics.Errors = append(rm.UpdateMetrics.Errors, point)
+					rm.UpdateMetrics.totalErrors += value
+				}
+
 			case name == "container_cpu_percent":
 				container := tags["container"]
 				if container == "" {
@@ -493,7 +663,7 @@ func (o *Output) flush() {
 				if o.data.Containers[container] == nil {
 					o.data.Containers[container] = &ContainerMetrics{Name: container}
 				}
-				o.data.Containers[container].CPU = append(o.data.Containers[container].CPU, TimeValue{Time: sample.Time.UnixMilli(), Value: value})
+				o.data.Containers[container].CPU = append(o.data.Containers[container].CPU, TimeValue{Time: sampleTime, Value: value})
 
 			case name == "container_memory_bytes":
 				container := tags["container"]
@@ -504,7 +674,7 @@ func (o *Output) flush() {
 				if o.data.Containers[container] == nil {
 					o.data.Containers[container] = &ContainerMetrics{Name: container}
 				}
-				o.data.Containers[container].Memory = append(o.data.Containers[container].Memory, TimeValue{Time: sample.Time.UnixMilli(), Value: value})
+				o.data.Containers[container].Memory = append(o.data.Containers[container].Memory, TimeValue{Time: sampleTime, Value: value})
 
 			case name == "ingest_docs":
 				backend := tags["backend"]
@@ -522,12 +692,14 @@ func (o *Output) flush() {
 				rm := o.getOrCreateRun(runName, backend, tags)
 				rm.TotalIngested += int64(value)
 				if rm.FirstIngestTime == 0 {
-					rm.FirstIngestTime = sample.Time.UnixMilli()
+					rm.FirstIngestTime = sampleTime
 				}
 				if rm.StartTime == 0 {
-					rm.StartTime = sample.Time.UnixMilli()
+					rm.StartTime = sampleTime
 				}
-				rm.LastUpdateTime = now
+				if sampleTime > rm.LastUpdateTime {
+					rm.LastUpdateTime = sampleTime
+				}
 			}
 		}
 	}
@@ -537,7 +709,7 @@ func (o *Output) flush() {
 		o.updateIngestRate(rm, now)
 		// Update per-query timelines
 		for _, qm := range rm.Queries {
-			o.updateQueryTimeline(qm, now)
+			o.updateQueryTimeline(qm)
 		}
 		// Mark run ended after inactivity timeout.
 		if rm.EndTime == 0 && rm.LastUpdateTime > 0 && (now-rm.LastUpdateTime) > runEndTimeoutMs {
@@ -552,27 +724,28 @@ func (o *Output) flush() {
 // statistically meaningful sample sizes.
 // When timelineWindow == 0, uses non-overlapping buckets: each point covers only
 // new samples since the last point (original behavior).
-func (o *Output) updateQueryTimeline(qm *QueryMetrics, now int64) {
-	if len(qm.Latencies) == 0 {
+func (o *Output) updateQueryTimeline(qm *QueryMetrics) {
+	sampleCount := min(len(qm.Latencies), len(qm.Timestamps))
+	if sampleCount <= qm.TimelineSampleCount {
 		return
 	}
+	pointTime := qm.Timestamps[sampleCount-1]
 
 	if o.timelineWindow > 0 {
-		// Sliding window mode: gather all samples within the window
-		windowStart := now - o.timelineWindow.Milliseconds()
-		var windowLatencies []float64
-		var windowHits []int64
-		for i, ts := range qm.Timestamps {
-			if ts >= windowStart {
-				windowLatencies = append(windowLatencies, qm.Latencies[i])
-				if i < len(qm.HitCounts) {
-					windowHits = append(windowHits, qm.HitCounts[i])
-				}
-			}
+		// Sliding window mode: add new samples and evict expired samples from
+		// a fixed-size histogram. The raw arrays provide the expiry queue.
+		for i := qm.TimelineSampleCount; i < sampleCount; i++ {
+			qm.timelineHistogram.record(qm.Latencies[i])
 		}
-		if len(windowLatencies) == 0 {
-			return
+		windowStart := pointTime - o.timelineWindow.Milliseconds()
+		for qm.timelineWindowStart < sampleCount && qm.Timestamps[qm.timelineWindowStart] <= windowStart {
+			qm.timelineHistogram.remove(qm.Latencies[qm.timelineWindowStart])
+			qm.timelineWindowStart++
 		}
+		percentiles := qm.timelineHistogram.percentiles()
+		hitEnd := min(sampleCount, len(qm.HitCounts))
+		hitStart := min(qm.timelineWindowStart, hitEnd)
+		windowHits := qm.HitCounts[hitStart:hitEnd]
 
 		var avgHits float64
 		if len(windowHits) > 0 {
@@ -584,37 +757,27 @@ func (o *Output) updateQueryTimeline(qm *QueryMetrics, now int64) {
 		}
 
 		qm.Timeline = append(qm.Timeline, TimelinePoint{
-			Time:  now,
-			P50:   percentile(windowLatencies, 50),
-			P90:   percentile(windowLatencies, 90),
-			P95:   percentile(windowLatencies, 95),
-			P99:   percentile(windowLatencies, 99),
-			Count: len(windowLatencies),
+			Time:  pointTime,
+			Mean:  percentiles.mean,
+			P50:   percentiles.p50,
+			P90:   percentiles.p90,
+			P95:   percentiles.p95,
+			P99:   percentiles.p99,
+			Count: int(qm.timelineHistogram.count),
 			Hits:  avgHits,
 		})
 	} else {
 		// Non-overlapping bucket mode: only new samples since last point
-		lastIdx := 0
-		if len(qm.Timeline) > 0 {
-			lastCount := 0
-			for _, tp := range qm.Timeline {
-				lastCount += tp.Count
-			}
-			lastIdx = lastCount
+		lastIdx := qm.TimelineSampleCount
+		qm.timelineHistogram.reset()
+		for i := lastIdx; i < sampleCount; i++ {
+			qm.timelineHistogram.record(qm.Latencies[i])
 		}
-
-		if lastIdx >= len(qm.Latencies) {
-			return
-		}
-
-		recent := qm.Latencies[lastIdx:]
-		if len(recent) == 0 {
-			return
-		}
+		percentiles := qm.timelineHistogram.percentiles()
 
 		var avgHits float64
-		if len(qm.HitCounts) > lastIdx {
-			recentHits := qm.HitCounts[lastIdx:]
+		if hitEnd := min(sampleCount, len(qm.HitCounts)); hitEnd > lastIdx {
+			recentHits := qm.HitCounts[lastIdx:hitEnd]
 			if len(recentHits) > 0 {
 				var sum int64
 				for _, h := range recentHits {
@@ -625,15 +788,17 @@ func (o *Output) updateQueryTimeline(qm *QueryMetrics, now int64) {
 		}
 
 		qm.Timeline = append(qm.Timeline, TimelinePoint{
-			Time:  now,
-			P50:   percentile(recent, 50),
-			P90:   percentile(recent, 90),
-			P95:   percentile(recent, 95),
-			P99:   percentile(recent, 99),
-			Count: len(recent),
+			Time:  pointTime,
+			Mean:  percentiles.mean,
+			P50:   percentiles.p50,
+			P90:   percentiles.p90,
+			P95:   percentiles.p95,
+			P99:   percentiles.p99,
+			Count: int(qm.timelineHistogram.count),
 			Hits:  avgHits,
 		})
 	}
+	qm.TimelineSampleCount = sampleCount
 }
 
 // updateIngestRate calculates docs/sec for the last interval.
@@ -678,6 +843,10 @@ func queryDurationSeconds(qm *QueryMetrics) float64 {
 
 func (o *Output) broadcast() {
 	o.mu.RLock()
+	if len(o.clients) == 0 {
+		o.mu.RUnlock()
+		return
+	}
 	data, _ := json.Marshal(o.getSummary())
 	o.mu.RUnlock()
 
@@ -760,23 +929,25 @@ func (o *Output) getSummary() map[string]interface{} {
 				queryQPS = float64(len(qm.Latencies)) / queryDuration
 			}
 
+			percentiles, minLatency, maxLatency := queryLatencyStats(qm)
 			queries[qName] = map[string]interface{}{
 				"name":     qm.Name,
 				"vus":      qm.VUs,
 				"executor": qm.Executor,
 				"count":    len(qm.Latencies),
 				"qps":      queryQPS,
-				"min":      minVal(qm.Latencies),
-				"max":      maxVal(qm.Latencies),
-				"p50":      percentile(qm.Latencies, 50),
-				"p95":      percentile(qm.Latencies, 95),
-				"p99":      percentile(qm.Latencies, 99),
+				"min":      minLatency,
+				"max":      maxLatency,
+				"mean":     percentiles.mean,
+				"p50":      percentiles.p50,
+				"p95":      percentiles.p95,
+				"p99":      percentiles.p99,
 				"timeline": qm.Timeline,
 				"query":    queryPattern,
 			}
 		}
 
-		runs[name] = map[string]interface{}{
+		run := map[string]interface{}{
 			"name":          rm.Name,
 			"backend":       rm.Backend,
 			"container":     rm.Container,
@@ -789,6 +960,10 @@ func (o *Output) getSummary() map[string]interface{} {
 			"queries":       queries,
 			"startTime":     rm.StartTime,
 		}
+		if rm.UpdateMetrics != nil {
+			run["updates"] = rm.UpdateMetrics.summary()
+		}
+		runs[name] = run
 	}
 
 	// Build containers data
@@ -816,6 +991,9 @@ func (o *Output) getSummary() map[string]interface{} {
 	}
 	if meta := readMetaEnv(); meta != nil {
 		out["meta"] = meta
+	}
+	if telemetry := metrics.GetBackendTelemetry(); len(telemetry) > 0 {
+		out["telemetry"] = telemetry
 	}
 	addRunCaptures(out)
 	return out
@@ -863,7 +1041,7 @@ func (o *Output) getExportData() map[string]interface{} {
 			endTime = now
 		}
 
-		runs[name] = map[string]interface{}{
+		run := map[string]interface{}{
 			"name":          rm.Name,
 			"backend":       rm.Backend,
 			"container":     rm.Container,
@@ -876,6 +1054,11 @@ func (o *Output) getExportData() map[string]interface{} {
 			"endTime":       endTime,
 			"queries":       queries,
 		}
+		if rm.UpdateMetrics != nil {
+			run["updates"] = rm.UpdateMetrics.summary()
+			run["updateMetrics"] = rm.UpdateMetrics
+		}
+		runs[name] = run
 	}
 
 	containers := make(map[string]interface{})
@@ -898,6 +1081,9 @@ func (o *Output) getExportData() map[string]interface{} {
 	}
 	if meta := readMetaEnv(); meta != nil {
 		out["meta"] = meta
+	}
+	if telemetry := metrics.GetBackendTelemetry(); len(telemetry) > 0 {
+		out["telemetry"] = telemetry
 	}
 	addRunCaptures(out)
 	return out
@@ -932,9 +1118,12 @@ func aggregateExportData(rawData map[string]interface{}, broadcast, window time.
 
 		run := make(map[string]interface{})
 		for k, v := range rm {
-			if k != "queries" {
+			if k != "queries" && k != "updateMetrics" {
 				run[k] = v
 			}
+		}
+		if updateSummary := summarizeRawUpdateMetrics(rm["updateMetrics"]); updateSummary != nil {
+			run["updates"] = updateSummary
 		}
 
 		// Get run timing
@@ -981,6 +1170,7 @@ func aggregateExportData(rawData map[string]interface{}, broadcast, window time.
 				"qps":      queryQPS,
 				"min":      minVal(latencies),
 				"max":      maxVal(latencies),
+				"mean":     meanVal(latencies),
 				"p50":      percentile(latencies, 50),
 				"p95":      percentile(latencies, 95),
 				"p99":      percentile(latencies, 99),
@@ -1079,6 +1269,7 @@ func buildTimeline(latencies []float64, timestamps []int64, hitCounts []int64, b
 
 		timeline = append(timeline, TimelinePoint{
 			Time:  t,
+			Mean:  meanVal(windowLat),
 			P50:   percentile(windowLat, 50),
 			P90:   percentile(windowLat, 90),
 			P95:   percentile(windowLat, 95),
@@ -1139,6 +1330,80 @@ func jsonInt64Slice(m map[string]interface{}, key string) []int64 {
 		return out
 	}
 	return nil
+}
+
+func summarizeRawUpdateMetrics(raw interface{}) map[string]interface{} {
+	var durations, documents, errors []TimeValue
+	switch value := raw.(type) {
+	case *UpdateMetrics:
+		durations = value.Duration
+		documents = value.Documents
+		errors = value.Errors
+	case map[string]interface{}:
+		durations = jsonTimeValues(value["duration"])
+		documents = jsonTimeValues(value["documents"])
+		errors = jsonTimeValues(value["errors"])
+	default:
+		return nil
+	}
+
+	latencies := make([]float64, len(durations))
+	for i, point := range durations {
+		latencies[i] = point.Value
+	}
+	var documentCount, errorCount float64
+	for _, point := range documents {
+		documentCount += point.Value
+	}
+	for _, point := range errors {
+		errorCount += point.Value
+	}
+	return map[string]interface{}{
+		"attempts":  len(durations),
+		"documents": documentCount,
+		"errors":    errorCount,
+		"min":       minVal(latencies),
+		"max":       maxVal(latencies),
+		"mean":      meanVal(latencies),
+		"p50":       percentile(latencies, 50),
+		"p95":       percentile(latencies, 95),
+		"p99":       percentile(latencies, 99),
+	}
+}
+
+func jsonTimeValues(raw interface{}) []TimeValue {
+	switch values := raw.(type) {
+	case []TimeValue:
+		return values
+	case []interface{}:
+		result := make([]TimeValue, 0, len(values))
+		for _, value := range values {
+			point, ok := value.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			result = append(result, TimeValue{
+				Time:  jsonInt64(point, "time"),
+				Value: jsonFloat64(point, "value"),
+			})
+		}
+		return result
+	}
+	return nil
+}
+
+func jsonFloat64(m map[string]interface{}, key string) float64 {
+	switch value := m[key].(type) {
+	case float64:
+		return value
+	case float32:
+		return float64(value)
+	case int:
+		return float64(value)
+	case int64:
+		return float64(value)
+	}
+	return 0
 }
 
 func (o *Output) handleSSE(w http.ResponseWriter, r *http.Request) {
@@ -1214,6 +1479,31 @@ func percentile(values []float64, p float64) float64 {
 		idx = len(sorted) - 1
 	}
 	return sorted[idx]
+}
+
+func meanVal(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, value := range values {
+		sum += value
+	}
+	return sum / float64(len(values))
+}
+
+func queryLatencyStats(qm *QueryMetrics) (latencyPercentiles, float64, float64) {
+	if qm.liveStats.histogram.count > 0 {
+		return qm.liveStats.histogram.percentiles(), qm.liveStats.min, qm.liveStats.max
+	}
+	if len(qm.Latencies) == 0 {
+		return latencyPercentiles{}, 0, 0
+	}
+	var stats liveLatencyStats
+	for _, latency := range qm.Latencies {
+		stats.record(latency)
+	}
+	return stats.histogram.percentiles(), stats.min, stats.max
 }
 
 func minVal(values []float64) float64 {

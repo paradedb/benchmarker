@@ -25,14 +25,12 @@ const scenarios = {
     duration: "30s",
     startTime: timer.get(),
     exec: "queryTest",
+    tags: { backend: "paradedb" },
   },
 };
 
-// 4. Add Docker metrics collector
-export const collectMetrics = backends.addDockerMetricsCollector(
-  scenarios,
-  timer,
-);
+// 4. Add the dedicated Docker/database metrics collector
+export const collectMetrics = backends.addMetricsCollector(scenarios, timer);
 
 export const options = { scenarios };
 
@@ -54,8 +52,8 @@ The `db` module (`k6/x/database`) provides:
 
 | Function                      | Returns     | Description                                                                                                                                                                               |
 | ----------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `db.backends(config)`         | `Backends`  | Initializes backend drivers and Docker metrics collector from config                                                                                                                      |
-| `db.metrics(config)`          | `Collector` | Creates a standalone Docker container metrics collector (use `backends.addDockerMetricsCollector()` instead for most cases)                                                               |
+| `db.backends(config)`         | `Backends`  | Initializes backend drivers and their optional telemetry providers                                                                                                                        |
+| `db.metrics(config)`          | `Collector` | Creates a standalone Docker container metrics collector (use `backends.addMetricsCollector()` instead for most cases)                                                                     |
 | `db.timer({ duration, gap })` | `Timer`     | Creates a phase timer for staggering scenarios                                                                                                                                            |
 | `db.loader()`                 | `Loader`    | Creates a CSV-only document reader for ingest or update benchmarks                                                                                                                        |
 | `db.terms(data)`              | `Terms`     | Loads a JSON array of query strings to avoid caching bias. `terms.next()` cycles sequentially, `terms.random()` picks randomly. Accepts a JSON string via `open()` or a k6 `SharedArray`. |
@@ -112,7 +110,7 @@ The framework is database-agnostic - the current backends and datasets are focus
 
 ## Benchmark Patterns
 
-[Scenarios](https://grafana.com/docs/k6/latest/using-k6/scenarios/) control how your test runs. Every benchmark needs at least one query/ingest scenario. Use `backends.addDockerMetricsCollector()` to add Docker CPU/memory monitoring - it adds the scenario and returns the collect function in one call.
+[Scenarios](https://grafana.com/docs/k6/latest/using-k6/scenarios/) control how your test runs. Every benchmark needs at least one query/ingest scenario. Use `backends.addMetricsCollector()` to add Docker and backend-provided database monitoring—it adds the scenario and returns the collect function in one call.
 
 ### Executors
 
@@ -153,12 +151,10 @@ const scenarios = {
     vus: 5,
     duration: "30s",
     exec: "pdbQuery",
+    tags: { backend: "paradedb" },
   },
 };
-export const collectMetrics = backends.addDockerMetricsCollector(
-  scenarios,
-  "35s",
-);
+export const collectMetrics = backends.addMetricsCollector(scenarios, "35s");
 
 export const options = { scenarios };
 
@@ -187,6 +183,7 @@ const scenarios = {
     duration: "30s",
     startTime: timer.get(),
     exec: "pdbQuery",
+    tags: { backend: "paradedb" },
   },
   // get() again - parallel scenario in the same phase
   pdb_count: {
@@ -195,6 +192,7 @@ const scenarios = {
     duration: "30s",
     startTime: timer.get(),
     exec: "pdbCount",
+    tags: { backend: "paradedb" },
   },
   // advanceAndGet() moves to the next phase ("35s")
   es_query: {
@@ -203,6 +201,7 @@ const scenarios = {
     duration: "30s",
     startTime: timer.advanceAndGet(),
     exec: "esQuery",
+    tags: { backend: "elasticsearch" },
   },
   es_count: {
     executor: "constant-vus",
@@ -210,22 +209,54 @@ const scenarios = {
     duration: "30s",
     startTime: timer.get(),
     exec: "esCount",
+    tags: { backend: "elasticsearch" },
   },
 };
 
 // Adds a metrics_collector scenario covering the full test duration
-export const collectMetrics = backends.addDockerMetricsCollector(
-  scenarios,
-  timer,
-);
+export const collectMetrics = backends.addMetricsCollector(scenarios, timer);
 
 export const options = { scenarios };
 ```
 
 - `get()` - returns the current phase's startTime (auto-advances on first call); use for the first scenario and for parallel scenarios in the same phase
 - `advanceAndGet()` / `next()` - advances to the next phase and returns its startTime; use when starting a new phase
-- `backends.addDockerMetricsCollector(scenarios, timer)` - adds a `metrics_collector` scenario covering the full test duration
-- Also accepts a duration string: `backends.addDockerMetricsCollector(scenarios, "500s")`
+- `backends.addMetricsCollector(scenarios, timer)` - adds a `metrics_collector` scenario covering the full test duration
+- Also accepts a duration string: `backends.addMetricsCollector(scenarios, "500s")`
+- `backends.addDockerMetricsCollector()` remains available as a compatibility alias
+
+Docker collection follows the local CLI configuration: `DOCKER_CONTEXT` takes
+precedence, then a Unix-socket `DOCKER_HOST`, then the active context in
+`$DOCKER_CONFIG/config.json`, with `/var/run/docker.sock` as the fallback.
+
+### Database telemetry
+
+ParadeDB and PostgreSQL register repeating telemetry queries alongside their
+ordinary backend configuration. Add a `backend` scenario tag to associate a
+native k6 workload window with the configured backend alias:
+
+```javascript
+const scenarios = {
+  pdb: {
+    executor: "constant-vus",
+    vus: 5,
+    duration: "30s",
+    exec: "pdbQuery",
+    tags: { backend: "paradedb" },
+  },
+};
+```
+
+The dedicated collector VU captures a baseline, polls once per second, and
+takes a final sample. Counter series are exported relative to the baseline;
+gauges retain their current values. PostgreSQL currently provides search-index
+I/O, WAL, database, background-writer, checkpointer, `pg_stat_io`, and activity
+series. They are shown in generic dashboard charts and written under
+`telemetry` in dashboard JSON/HTML exports.
+
+For sequential timer windows, keep a non-zero `gap`. The collector uses that
+gap to finalize the previous backend and capture the next backend's baseline
+before its measured workload starts.
 
 ### Pattern 3: Parallel Query + Ingest
 
@@ -250,6 +281,7 @@ const scenarios = {
     duration: "30s",
     startTime: timer.get(),
     exec: "pdbQuery",
+    tags: { backend: "paradedb" },
   },
   pdb_ingest: {
     executor: "constant-arrival-rate",
@@ -260,6 +292,7 @@ const scenarios = {
     preAllocatedVUs: 2,
     exec: "ingest",
     env: { BACKEND: "paradedb" },
+    tags: { backend: "paradedb" },
   },
   // Elasticsearch: query + ingest in parallel
   es_query: {
@@ -268,6 +301,7 @@ const scenarios = {
     duration: "30s",
     startTime: timer.advanceAndGet(),
     exec: "esQuery",
+    tags: { backend: "elasticsearch" },
   },
   es_ingest: {
     executor: "constant-arrival-rate",
@@ -278,12 +312,10 @@ const scenarios = {
     preAllocatedVUs: 2,
     exec: "ingest",
     env: { BACKEND: "elasticsearch" },
+    tags: { backend: "elasticsearch" },
   },
 };
-export const collectMetrics = backends.addDockerMetricsCollector(
-  scenarios,
-  timer,
-);
+export const collectMetrics = backends.addMetricsCollector(scenarios, timer);
 
 export const options = { scenarios };
 
@@ -325,7 +357,7 @@ const scenarios = {
     duration: "30s",
     startTime: timer.get(),
     exec: "pdbSingleTerm",
-    tags: { chart: "single_term_topk" },
+    tags: { backend: "paradedb", chart: "single_term_topk" },
   },
   es_single_term: {
     executor: "constant-vus",
@@ -333,7 +365,7 @@ const scenarios = {
     duration: "30s",
     startTime: timer.advanceAndGet(),
     exec: "esSingleTerm",
-    tags: { chart: "single_term_topk" },
+    tags: { backend: "elasticsearch", chart: "single_term_topk" },
   },
   // Count queries - grouped on a separate chart
   pdb_count: {
@@ -342,7 +374,7 @@ const scenarios = {
     duration: "30s",
     startTime: timer.advanceAndGet(),
     exec: "pdbCount",
-    tags: { chart: "count" },
+    tags: { backend: "paradedb", chart: "count" },
   },
   es_count: {
     executor: "constant-vus",
@@ -350,13 +382,10 @@ const scenarios = {
     duration: "30s",
     startTime: timer.advanceAndGet(),
     exec: "esCount",
-    tags: { chart: "count" },
+    tags: { backend: "elasticsearch", chart: "count" },
   },
 };
-export const collectMetrics = backends.addDockerMetricsCollector(
-  scenarios,
-  timer,
-);
+export const collectMetrics = backends.addMetricsCollector(scenarios, timer);
 
 export const options = { scenarios };
 ```
@@ -380,12 +409,10 @@ const scenarios = {
       { duration: "30s", target: 0 }, // Ramp down
     ],
     exec: "queryTest",
+    tags: { backend: "paradedb" },
   },
 };
-export const collectMetrics = backends.addDockerMetricsCollector(
-  scenarios,
-  "220s",
-);
+export const collectMetrics = backends.addMetricsCollector(scenarios, "220s");
 
 export const options = { scenarios };
 ```
