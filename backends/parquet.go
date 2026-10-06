@@ -31,6 +31,7 @@ type parquetSource struct {
 }
 
 func openParquetSource(path string, schema *Schema) (RowSource, error) {
+	// #nosec G304 -- Dataset paths are selected by the local loader CLI.
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err

@@ -11,10 +11,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/pgvector/pgvector-go"
 	"github.com/nickbruun/pgsplit"
 	"github.com/paradedb/benchmarker/backends"
 	"github.com/paradedb/benchmarker/metrics"
+	"github.com/pgvector/pgvector-go"
 	pgxvector "github.com/pgvector/pgvector-go/pgx"
 )
 

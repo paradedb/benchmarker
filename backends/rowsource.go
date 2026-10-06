@@ -50,6 +50,7 @@ type csvSource struct {
 }
 
 func openCSVSource(path string, schema *Schema) (RowSource, error) {
+	// #nosec G304 -- Dataset CSV paths are selected by the local loader CLI.
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
