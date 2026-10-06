@@ -32,6 +32,7 @@ func main() {
 	loadBackend := loadCmd.String("backend", "", "Specific backend ("+strings.Join(backends.RegisteredBackends(), ", ")+")")
 	loadBatchSize := loadCmd.Int("batch-size", 10000, "Batch size for bulk loading")
 	loadWorkers := loadCmd.Int("workers", 1, "Number of parallel workers")
+	loadPostOnly := loadCmd.Bool("post-only", false, "Skip pre and data load; only run post (reuses data already in the backend)")
 
 	dropCmd := flag.NewFlagSet("drop", flag.ContinueOnError)
 	dropBackend := dropCmd.String("backend", "", "Specific backend to drop")
@@ -69,7 +70,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Usage: loader load [--backend <name>] <dataset-dir>")
 			os.Exit(1)
 		}
-		runLoad(loadCmd.Arg(0), *loadBackend, *loadBatchSize, *loadWorkers)
+		runLoad(loadCmd.Arg(0), *loadBackend, *loadBatchSize, *loadWorkers, *loadPostOnly)
 
 	case "drop":
 		if err := dropCmd.Parse(os.Args[2:]); err != nil {
@@ -124,7 +125,7 @@ func printUsage() {
 	fmt.Println(`Loader - Bulk load data into search backends
 
 Usage:
-  loader load [--backend <name>] [--batch-size <n>] [--workers <n>] <dataset-dir>
+  loader load [--backend <name>] [--batch-size <n>] [--workers <n>] [--post-only] <dataset-dir>
   loader drop [--backend <name>] <dataset-dir>
   loader pull --dataset <name> --source <s3-url> [--anonymous]
   loader help
@@ -142,6 +143,7 @@ Options:
   --backend <name>           Load/drop specific backend (default: all backends)
   --batch-size <n>           Rows per batch (default: 10000)
   --workers <n>              Parallel workers (default: 1)
+  --post-only                Skip pre and data load; only run post against existing data
   --max-extracted-bytes <n>  Maximum decompressed tar stream bytes (default 107374182400)
   --dataset <name>           Dataset name for pull command
   --source <url>             S3 source URL (s3://bucket/prefix/)
@@ -160,6 +162,7 @@ Environment Variables:
 Examples:
   loader load --backend paradedb ./datasets/sample
   loader load --backend paradedb --workers 4 ./datasets/sample
+  loader load --backend paradedb --post-only ./datasets/sample      # rebuild indexes only
   loader load ./datasets/sample                                    # all backends
   loader drop --backend paradedb ./datasets/sample
   loader pull --dataset large --source s3://mybucket/datasets/large/
@@ -180,17 +183,20 @@ func getConnection(name string) string {
 	return cfg.DefaultConn
 }
 
-func runLoad(datasetDir string, backendName string, batchSize int, workers int) {
+func runLoad(datasetDir string, backendName string, batchSize int, workers int, postOnly bool) {
 	schema, err := loadSchema(datasetDir)
 	if err != nil {
 		fmt.Printf("Error loading schema: %v\n", err)
 		os.Exit(1)
 	}
 
-	tables, err := resolveTableData(datasetDir, schema)
-	if err != nil {
-		fmt.Printf("Error locating data file: %v\n", err)
-		os.Exit(1)
+	var tables []tableData
+	if !postOnly {
+		tables, err = resolveTableData(datasetDir, schema)
+		if err != nil {
+			fmt.Printf("Error locating data file: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	var loaders []*backends.CLILoader
@@ -230,15 +236,19 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int) 
 				return
 			}
 
-			// Run pre
-			fmt.Print("Running pre... ")
-			start := time.Now()
-			if err := loader.RunPre(ctx, dir, schema); err != nil {
-				fmt.Printf("FAILED: %v\n", err)
-				overallFailed = true
-				return
+			var start time.Time
+			if postOnly {
+				fmt.Println("Skipping pre and data load (--post-only)")
+			} else {
+				fmt.Print("Running pre... ")
+				start = time.Now()
+				if err := loader.RunPre(ctx, dir, schema); err != nil {
+					fmt.Printf("FAILED: %v\n", err)
+					overallFailed = true
+					return
+				}
+				fmt.Printf("OK (%.2fs)\n", time.Since(start).Seconds())
 			}
-			fmt.Printf("OK (%.2fs)\n", time.Since(start).Seconds())
 
 			// Load data, one table at a time
 			for _, td := range tables {
