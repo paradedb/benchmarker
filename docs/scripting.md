@@ -392,6 +392,41 @@ export const options = { scenarios };
 
 Scenarios with the same `chart` tag appear on the same dashboard chart. Scenarios without a `chart` tag all share the default chart.
 
+### Warmup ramps
+
+Define the entire load shape as one native k6 ramping scenario and tag it with
+`warmup: "true"`. The first stage becomes the warmup; every later stage is
+measured on the same dashboard chart:
+
+```javascript
+const scenarios = {
+  search: {
+    executor: "ramping-vus",
+    startVUs: 1,
+    stages: [
+      { duration: "30s", target: 5 }, // warmup
+      { duration: "60s", target: 5 }, // measured
+      { duration: "10s", target: 0 }, // measured
+    ],
+    exec: "queryTest",
+    tags: { backend: "paradedb", chart: "search", warmup: "true" },
+  },
+};
+```
+
+The live dashboard shows wall-clock progress through the first stage using the
+same warmup bar as the PlanetScale dashboard. Query, ingest, update, and
+database telemetry results from that stage are not measured. Every operation
+that begins during warmup receives the same absolute deadline at the first
+stage boundary, so context-aware database drivers cancel in-flight work before
+measurement begins. Warmup-only results and warmup state are omitted from JSON,
+standalone HTML data, and `query_csv`.
+
+The extension does not create or transform scenarios. You define the ramp and
+k6 controls its load shape; the tag only gives the first stage its warmup
+semantics. A tagged scenario must use `ramping-vus` or
+`ramping-arrival-rate` and have a non-empty first stage.
+
 ### Pattern 5: Ramping Load
 
 Gradually increase load to find the breaking point or measure behavior under varying concurrency:

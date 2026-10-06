@@ -213,7 +213,8 @@ type K6Client struct {
 	vu          modules.VU
 	backend     string
 	timeout     time.Duration
-	initialized bool // Track if backend_init has been emitted
+	initialized bool   // Track if backend_init has been emitted
+	scenario    string // Last scenario_started signal emitted by this VU
 }
 
 // NewK6Client creates a k6 client that wraps a driver.
@@ -230,24 +231,64 @@ func (c *K6Client) SetTimeout(seconds int) {
 
 // emitInitMetrics emits initialization metrics on first call to signal dashboard.
 func (c *K6Client) emitInitMetrics() {
-	if c.initialized {
+	if !c.initialized {
+		c.initialized = true
+		metrics.EmitBackendInit(c.vu, c.backend)
+	}
+
+	state := c.vu.State()
+	if state == nil || state.Tags == nil {
 		return
 	}
-	c.initialized = true
-	metrics.EmitBackendInit(c.vu, c.backend)
+	scenario, ok := state.Tags.GetCurrentValues().Tags.Get("scenario")
+	if !ok || scenario == "" || scenario == c.scenario {
+		return
+	}
+	c.scenario = scenario
+	metrics.CaptureScenarioInfo(c.vu)
 	metrics.EmitScenarioStarted(c.vu, c.backend)
+}
+
+// operationContext gives every operation that starts during warmup the same
+// absolute first-stage deadline. A client timeout can shorten that deadline,
+// but can never let work cross it.
+func (c *K6Client) operationContext(phase metrics.WarmupPhase, timeout time.Duration) (context.Context, context.CancelFunc) {
+	ctx := context.Background()
+	if phase.Active && c.vu != nil && c.vu.Context() != nil {
+		ctx = c.vu.Context()
+	}
+
+	var deadline time.Time
+	if phase.Active {
+		deadline = phase.Deadline
+	}
+	if timeout > 0 {
+		timeoutDeadline := time.Now().Add(timeout)
+		if deadline.IsZero() || timeoutDeadline.Before(deadline) {
+			deadline = timeoutDeadline
+		}
+	}
+	if !deadline.IsZero() {
+		return context.WithDeadline(ctx, deadline)
+	}
+	return context.WithCancel(ctx)
+}
+
+func (c *K6Client) finishWarmup(phase metrics.WarmupPhase) bool {
+	if !phase.Active {
+		return false
+	}
+	metrics.EmitWarmupProgress(c.vu, c.backend, phase)
+	return !time.Now().Before(phase.Deadline)
 }
 
 // Query executes a query and emits metrics.
 func (c *K6Client) Query(query string, args ...any) map[string]interface{} {
 	c.emitInitMetrics()
 
-	ctx := context.Background()
-	var cancel context.CancelFunc
-	if c.timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, c.timeout)
-		defer cancel()
-	}
+	warmup := metrics.GetWarmupPhase(c.vu)
+	ctx, cancel := c.operationContext(warmup, c.timeout)
+	defer cancel()
 
 	// Capture query pattern - for ES/OS style queries (index, queryObj), serialize the query object
 	queryPattern := strings.TrimSpace(query)
@@ -259,29 +300,39 @@ func (c *K6Client) Query(query string, args ...any) map[string]interface{} {
 		}
 	}
 	metrics.CaptureQueryPattern(c.vu, c.backend, queryPattern)
-	metrics.CaptureScenarioInfo(c.vu)
 
 	start := time.Now()
 	hits, err := c.driver.Query(ctx, query, args...)
 	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
-
-	if err != nil {
-		fmt.Printf("[%s] query error: %v\n", c.backend, err)
+	result := &metrics.QueryResult{LatencyMs: latencyMs}
+	if c.finishWarmup(warmup) {
 		return map[string]interface{}{
-			"hits":      0,
-			"latencyMs": latencyMs,
-			"error":     err.Error(),
+			"hits":            int64(0),
+			"latencyMs":       latencyMs,
+			"deadlineReached": true,
 		}
 	}
 
-	result := &metrics.QueryResult{Hits: int64(hits), LatencyMs: latencyMs}
-	result.Emit(ctx, c.vu, c.backend)
+	if err != nil {
+		result.Error = err.Error()
+		if !warmup.Active {
+			result.Emit(ctx, c.vu, c.backend)
+		}
+		fmt.Printf("[%s] query error: %v\n", c.backend, err)
+		return result.ToMap()
+	}
+
+	result.Hits = int64(hits)
+	if !warmup.Active {
+		result.Emit(ctx, c.vu, c.backend)
+	}
 	return result.ToMap()
 }
 
 // InsertBatch inserts documents and emits metrics.
 func (c *K6Client) InsertBatch(table string, docs []map[string]interface{}) map[string]interface{} {
 	c.emitInitMetrics()
+	warmup := metrics.GetWarmupPhase(c.vu)
 
 	if len(docs) == 0 {
 		return map[string]interface{}{"rows": 0, "latencyMs": 0.0}
@@ -303,22 +354,33 @@ func (c *K6Client) InsertBatch(table string, docs []map[string]interface{}) map[
 		rows[i] = row
 	}
 
-	ctx := context.Background()
+	ctx, cancel := c.operationContext(warmup, 0)
+	defer cancel()
 	start := time.Now()
 	count, err := c.driver.Insert(ctx, table, cols, rows)
 	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
-
-	if err != nil {
-		fmt.Printf("[%s] insert error: %v\n", c.backend, err)
+	result := &metrics.IngestResult{LatencyMs: latencyMs}
+	if c.finishWarmup(warmup) {
 		return map[string]interface{}{
-			"rows":      0,
-			"latencyMs": latencyMs,
-			"error":     err.Error(),
+			"rows":            0,
+			"latencyMs":       latencyMs,
+			"deadlineReached": true,
 		}
 	}
 
-	result := &metrics.IngestResult{Rows: count, LatencyMs: latencyMs}
-	result.Emit(ctx, c.vu, c.backend)
+	if err != nil {
+		result.Error = err.Error()
+		if !warmup.Active {
+			result.Emit(ctx, c.vu, c.backend)
+		}
+		fmt.Printf("[%s] insert error: %v\n", c.backend, err)
+		return result.ToMap()
+	}
+
+	result.Rows = count
+	if !warmup.Active {
+		result.Emit(ctx, c.vu, c.backend)
+	}
 	return result.ToMap()
 }
 
@@ -331,6 +393,7 @@ func (c *K6Client) Insert(table string, doc map[string]interface{}) map[string]i
 // The first column is used as the key for matching existing rows.
 func (c *K6Client) UpdateBatch(table string, docs []map[string]interface{}) map[string]interface{} {
 	c.emitInitMetrics()
+	warmup := metrics.GetWarmupPhase(c.vu)
 
 	if len(docs) == 0 {
 		return map[string]interface{}{"rows": 0, "latencyMs": 0.0}
@@ -358,20 +421,32 @@ func (c *K6Client) UpdateBatch(table string, docs []map[string]interface{}) map[
 		rows[i] = row
 	}
 
-	ctx := context.Background()
+	ctx, cancel := c.operationContext(warmup, 0)
+	defer cancel()
 	start := time.Now()
 	count, err := c.driver.Update(ctx, table, keyCols, allCols, rows)
 	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
 	result := &metrics.UpdateResult{Rows: count, LatencyMs: latencyMs}
+	if c.finishWarmup(warmup) {
+		return map[string]interface{}{
+			"rows":            0,
+			"latencyMs":       latencyMs,
+			"deadlineReached": true,
+		}
+	}
 
 	if err != nil {
 		result.Error = err.Error()
-		result.Emit(ctx, c.vu, c.backend)
+		if !warmup.Active {
+			result.Emit(ctx, c.vu, c.backend)
+		}
 		fmt.Printf("[%s] update error: %v\n", c.backend, err)
 		return result.ToMap()
 	}
 
-	result.Emit(ctx, c.vu, c.backend)
+	if !warmup.Active {
+		result.Emit(ctx, c.vu, c.backend)
+	}
 	return result.ToMap()
 }
 

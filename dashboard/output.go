@@ -99,6 +99,9 @@ type RunMetrics struct {
 	StartTime       int64                     `json:"startTime"`
 	EndTime         int64                     `json:"endTime"`
 	LastUpdateTime  int64                     `json:"-"` // Track last update for end detection
+	WarmupProgress  float64                   `json:"-"`
+	WarmingUp       bool                      `json:"-"`
+	Measured        bool                      `json:"-"`
 	UpdateMetrics   *UpdateMetrics            `json:"-"`
 }
 
@@ -216,6 +219,10 @@ func getRunName(backend string, tags map[string]string) string {
 	return run
 }
 
+func isWarmupTags(tags map[string]string) bool {
+	return tags["warmup"] == "true"
+}
+
 // getOrCreateRun gets or creates a RunMetrics entry for the given run name.
 func (o *Output) getOrCreateRun(runName, backend string, tags map[string]string) *RunMetrics {
 	if o.data.Runs[runName] != nil {
@@ -314,7 +321,7 @@ func New(params output.Params) (output.Output, error) {
 	}
 	exportDir := dashboardExportDir()
 	if exportJSON || exportHTML || exportQueryCSV {
-		if err := os.MkdirAll(exportDir, 0o755); err != nil {
+		if err := os.MkdirAll(exportDir, 0o750); err != nil {
 			return nil, fmt.Errorf("create dashboard export directory %s: %w", exportDir, err)
 		}
 	}
@@ -546,8 +553,28 @@ func (o *Output) flush() {
 
 				runName := getRunName(backend, tags)
 				rm := o.getOrCreateRun(runName, backend, tags)
+				if isWarmupTags(tags) {
+					if !rm.Measured {
+						rm.WarmingUp = true
+					}
+					continue
+				}
+				rm.Measured = true
 				if rm.StartTime == 0 {
 					rm.StartTime = sample.Time.UnixMilli()
+				}
+				rm.WarmingUp = false
+
+			case name == "warmup_progress":
+				backend := tags["backend"]
+				if backend == "" {
+					continue
+				}
+				rm := o.getOrCreateRun(getRunName(backend, tags), backend, tags)
+				progress := math.Max(0, math.Min(100, value))
+				rm.WarmupProgress = math.Max(rm.WarmupProgress, progress)
+				if !rm.Measured {
+					rm.WarmingUp = true
 				}
 
 			case name == "query_duration":
@@ -564,6 +591,8 @@ func (o *Output) flush() {
 
 				runName := getRunName(backend, tags)
 				rm := o.getOrCreateRun(runName, backend, tags)
+				rm.Measured = true
+				rm.WarmingUp = false
 				rm.Latencies = append(rm.Latencies, value)
 				if rm.StartTime == 0 {
 					rm.StartTime = sampleTime
@@ -632,6 +661,8 @@ func (o *Output) flush() {
 					continue
 				}
 				rm := o.getOrCreateRun(getRunName(backend, tags), backend, tags)
+				rm.Measured = true
+				rm.WarmingUp = false
 				if rm.UpdateMetrics == nil {
 					rm.UpdateMetrics = newUpdateMetrics()
 				}
@@ -690,6 +721,8 @@ func (o *Output) flush() {
 
 				runName := getRunName(backend, tags)
 				rm := o.getOrCreateRun(runName, backend, tags)
+				rm.Measured = true
+				rm.WarmingUp = false
 				rm.TotalIngested += int64(value)
 				if rm.FirstIngestTime == 0 {
 					rm.FirstIngestTime = sampleTime
@@ -948,17 +981,19 @@ func (o *Output) getSummary() map[string]interface{} {
 		}
 
 		run := map[string]interface{}{
-			"name":          rm.Name,
-			"backend":       rm.Backend,
-			"container":     rm.Container,
-			"alias":         rm.Alias,
-			"color":         rm.Color,
-			"chart":         rm.Chart,
-			"ingestRate":    rm.IngestRate,
-			"totalIngested": rm.TotalIngested,
-			"avgIngestRate": ingestRate,
-			"queries":       queries,
-			"startTime":     rm.StartTime,
+			"name":           rm.Name,
+			"backend":        rm.Backend,
+			"container":      rm.Container,
+			"alias":          rm.Alias,
+			"color":          rm.Color,
+			"chart":          rm.Chart,
+			"ingestRate":     rm.IngestRate,
+			"totalIngested":  rm.TotalIngested,
+			"avgIngestRate":  ingestRate,
+			"queries":        queries,
+			"startTime":      rm.StartTime,
+			"warmupProgress": rm.WarmupProgress,
+			"warmingUp":      rm.WarmingUp,
 		}
 		if rm.UpdateMetrics != nil {
 			run["updates"] = rm.UpdateMetrics.summary()
@@ -1017,6 +1052,9 @@ func (o *Output) getExportData() map[string]interface{} {
 
 	runs := make(map[string]interface{})
 	for name, rm := range o.data.Runs {
+		if !rm.Measured {
+			continue
+		}
 		queries := make(map[string]interface{})
 		for qName, qm := range rm.Queries {
 			queryPattern := getQueryPattern(rm.Backend, rm.Chart, qName)
