@@ -84,14 +84,14 @@ those the CLI bulk-import path loads.
 
 ## Loader Support Matrix
 
-| Backend | CSV scalar columns | Parquet scalar columns | `vector(n)` columns | Multi-table load/drop | Cross-table (join) queries |
-| --- | --- | --- | --- | --- | --- |
-| ParadeDB | Yes | Yes | Yes | Yes | Yes |
-| PostgreSQL | Yes | Yes | Yes | Yes | Yes |
-| ClickHouse | Yes | Yes | No | Yes | Yes (no BM25 scoring) |
-| Elasticsearch | Yes | Yes | Yes (`dense_vector`) | Yes (one index per table) | No |
-| OpenSearch | Yes | Yes | Yes (`knn_vector` mapping) | Yes (one index per table) | No |
-| MongoDB | Yes | Yes | No | Yes (one collection per table) | No (driver is `$search`-only) |
+| Backend       | CSV scalar columns | Parquet scalar columns | `vector(n)` columns        | Multi-table load/drop          | Cross-table (join) queries    |
+| ------------- | ------------------ | ---------------------- | -------------------------- | ------------------------------ | ----------------------------- |
+| ParadeDB      | Yes                | Yes                    | Yes                        | Yes                            | Yes                           |
+| PostgreSQL    | Yes                | Yes                    | Yes                        | Yes                            | Yes                           |
+| ClickHouse    | Yes                | Yes                    | No                         | Yes                            | Yes (no BM25 scoring)         |
+| Elasticsearch | Yes                | Yes                    | Yes (`dense_vector`)       | Yes (one index per table)      | No                            |
+| OpenSearch    | Yes                | Yes                    | Yes (`knn_vector` mapping) | Yes (one index per table)      | No                            |
+| MongoDB       | Yes                | Yes                    | No                         | Yes (one collection per table) | No (driver is `$search`-only) |
 
 The CLI validates vector schemas before running backend `pre` scripts. A dataset
 with `vector(n)` columns will fail early for unsupported backends instead of
@@ -113,7 +113,7 @@ Multi-table loading works for every backend because type conversion happens in
 the shared row-source layer before each driver's insert: SQL backends insert
 into the named table, Elasticsearch/OpenSearch bulk into an index named after
 the table, and MongoDB into a collection named after it. Whether the loaded
-tables can then be *queried together* depends on the backend: SQL backends
+tables can then be _queried together_ depends on the backend: SQL backends
 support joins in k6 query scripts, Elasticsearch and OpenSearch have no
 cross-index joins, and the MongoDB driver only issues single-`$search`
 aggregation pipelines (no `$lookup`).
