@@ -1,4 +1,6 @@
 -- ParadeDB post-load: build the pg_search vector index.
+DROP INDEX IF EXISTS cohere_wiki_vector_idx;
+
 CREATE INDEX cohere_wiki_vector_idx ON cohere_wiki
 USING paradedb (
     _id,

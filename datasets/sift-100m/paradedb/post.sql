@@ -1,3 +1,5 @@
+DROP INDEX IF EXISTS sift_vector_idx;
+
 CREATE INDEX sift_vector_idx ON sift
 USING paradedb (_id, emb vector_l2_ops)
 WITH (

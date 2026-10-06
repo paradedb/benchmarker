@@ -51,6 +51,13 @@ docker compose -f datasets/sift-10m/docker-compose.yml up -d
 ./bin/loader load --backend paradedb --workers 4 --batch-size 5000 ./datasets/sift-10m
 ```
 
+To rebuild only the index against the rows already in the volume (e.g. after
+changing `post.sql` or the image), skip the table recreate and data load:
+
+```bash
+./bin/loader load --backend paradedb --post-only ./datasets/sift-10m
+```
+
 The compose file defaults to `paradedb/paradedb:v0.26.0-pg18`:
 `vector_router` and `paradedb.vector_recall_target` don't exist before
 0.26. To benchmark a pg_search build from source, build an image with
