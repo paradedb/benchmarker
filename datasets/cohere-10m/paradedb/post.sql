@@ -1,15 +1,12 @@
 -- ParadeDB post-load: build the pg_search vector index.
--- `bm25` is the permanent alias for the `paradedb` access method.
 CREATE INDEX cohere_wiki_vector_idx ON cohere_wiki
-USING bm25 (
+USING paradedb (
     _id,
     (text::pdb.unicode_words('stemmer=english', 'stopwords_language=english')),
     emb vector_cosine_ops
 ) WITH (
-    key_field = '_id',
-    centroid_ratio = 0.01,
-    target_segment_count = 8,
-    cluster_replication = 1
+    target_segment_count = 10,
+    vector_router = 'ivf'
 );
 
 -- Recall knob (fraction of the cluster work budget, 1.0 = exhaustive):

@@ -254,11 +254,12 @@ func NewCollector(vu modules.VU, config map[string]interface{}) *Collector {
 		}
 	}
 
-	// Create HTTP client for Docker socket with short timeout
+	// Create HTTP client for the Docker daemon with short timeout
+	network, address := dockerEndpoint()
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", "/var/run/docker.sock")
+				return net.Dial(network, address)
 			},
 		},
 		Timeout: 2 * time.Second,

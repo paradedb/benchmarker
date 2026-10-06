@@ -1,6 +1,6 @@
 services:
   paradedb:
-    image: paradedb/paradedb:v0.25.6-pg18
+    image: ${PARADEDB_IMAGE:-paradedb/paradedb:v0.26.0-pg18}
     container_name: paradedb
     shm_size: 6g
     privileged: true
