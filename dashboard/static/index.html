@@ -146,6 +146,34 @@
         flex-direction: column;
         gap: 8px;
       }
+      .ramp-status {
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border);
+      }
+      .ramp-label {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 6px;
+        color: var(--text-dim);
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+      }
+      .ramp-track {
+        height: 6px;
+        overflow: hidden;
+        background: var(--border);
+        border-radius: 3px;
+      }
+      .ramp-fill {
+        height: 100%;
+        width: 0;
+        background: var(--c1);
+        border-radius: inherit;
+        transition: width 0.2s ease;
+      }
       .query-item {
         background: var(--bg);
         border-radius: 4px;
@@ -1387,8 +1415,8 @@
       }
 
       function hasQueries(run) {
-        // Show run if it has any queries (even without timeline data yet)
-        return Object.keys(run.queries || {}).length > 0;
+        // A ramp creates the backend card before measured samples arrive.
+        return run.ramping || Object.keys(run.queries || {}).length > 0;
       }
 
       function hasQueryTimelines(run) {
@@ -1499,10 +1527,30 @@
               <div class="stat-group-header">
                 <div id="${labelId}" class="stat-group-label" style="color: ${color};">${escapeHtml(getBaseName(name))}</div>${limitsStr}
               </div>
+              <div class="ramp-status" id="${safeNameId}-ramp">
+                <div class="ramp-label">
+                  <span>Ramp</span>
+                  <span id="${safeNameId}-ramp-percent">0%</span>
+                </div>
+                <div class="ramp-track">
+                  <div class="ramp-fill" id="${safeNameId}-ramp-fill" style="background: ${color};"></div>
+                </div>
+              </div>
               <div class="query-details" id="${queryContainerId}"></div>
             `;
               container.appendChild(el);
             }
+
+            const rampEl = document.getElementById(`${safeNameId}-ramp`);
+            const progress = Math.max(
+              0,
+              Math.min(100, Number(run.rampProgress) || 0),
+            );
+            rampEl.style.display = run.ramping ? "block" : "none";
+            document.getElementById(`${safeNameId}-ramp-percent`).textContent =
+              `${Math.floor(progress)}%`;
+            document.getElementById(`${safeNameId}-ramp-fill`).style.width =
+              `${progress}%`;
 
             // Set up config click handler after element is in the DOM.
             // Runs on every update so it works even if config arrives later.

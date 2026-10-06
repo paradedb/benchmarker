@@ -276,10 +276,99 @@ func TestDashboardIncludesMeanUpdatesAndTelemetryUI(t *testing.T) {
 		`function updateUpdateStats(runs)`,
 		`function updateTelemetry(telemetry)`,
 		`database telemetry`,
+		`return run.ramping || Object.keys(run.queries || {}).length > 0`,
+		`<span>Ramp</span>`,
+		`id="${safeNameId}-ramp-percent"`,
+		`rampEl.style.display = run.ramping ? "block" : "none"`,
 	} {
 		if !strings.Contains(content, fragment) {
 			t.Fatalf("dashboard missing UI fragment %q", fragment)
 		}
+	}
+}
+
+func TestRampProgressReplacesWorkloadGraphsUntilMeasurementStarts(t *testing.T) {
+	registry := k6metrics.NewRegistry()
+	started, err := registry.NewMetric("scenario_started", k6metrics.Gauge)
+	if err != nil {
+		t.Fatalf("create scenario started metric: %v", err)
+	}
+	progress, err := registry.NewMetric("ramp_progress", k6metrics.Gauge)
+	if err != nil {
+		t.Fatalf("create ramp progress metric: %v", err)
+	}
+	duration, err := registry.NewMetric("query_duration", k6metrics.Trend, k6metrics.Time)
+	if err != nil {
+		t.Fatalf("create query duration metric: %v", err)
+	}
+	hits, err := registry.NewMetric("query_hits", k6metrics.Gauge)
+	if err != nil {
+		t.Fatalf("create query hits metric: %v", err)
+	}
+	updates, err := registry.NewMetric("update_duration", k6metrics.Trend, k6metrics.Time)
+	if err != nil {
+		t.Fatalf("create update duration metric: %v", err)
+	}
+	ingest, err := registry.NewMetric("ingest_docs", k6metrics.Counter)
+	if err != nil {
+		t.Fatalf("create ingest docs metric: %v", err)
+	}
+
+	rampTags := registry.RootTagSet().
+		With("backend", "paradedb").
+		With("scenario", "warm_search").
+		With("ramp", "true")
+	measuredTags := registry.RootTagSet().
+		With("backend", "paradedb").
+		With("scenario", "measured_search")
+	o := &Output{
+		exportQueryCSV: true,
+		data: &DashboardData{
+			StartTime:  time.Unix(0, 0),
+			Runs:       make(map[string]*RunMetrics),
+			Containers: make(map[string]*ContainerMetrics),
+		},
+	}
+	push := func(tags *k6metrics.TagSet, metric *k6metrics.Metric, value float64, at int64) {
+		o.AddMetricSamples([]k6metrics.SampleContainer{k6metrics.Samples{{
+			TimeSeries: k6metrics.TimeSeries{Metric: metric, Tags: tags},
+			Time:       time.UnixMilli(at),
+			Value:      value,
+		}}})
+		o.flush()
+	}
+
+	push(rampTags, started, 1, 1_000)
+	push(rampTags, duration, 12.5, 1_100)
+	push(rampTags, hits, 10, 1_100)
+	push(rampTags, updates, 5, 1_100)
+	push(rampTags, ingest, 100, 1_100)
+	push(rampTags, progress, 42.5, 1_200)
+
+	run := o.data.Runs["paradedb"]
+	if run == nil || !run.Ramping || run.RampProgress != 42.5 {
+		t.Fatalf("ramp run = %#v", run)
+	}
+	if run.StartTime != 0 || len(run.Queries) != 0 || run.UpdateMetrics != nil || run.TotalIngested != 0 || len(run.QueryCSV) != 0 {
+		t.Fatalf("ramp leaked into measured results: %#v", run)
+	}
+
+	// VUs can be reused between sequential k6 scenarios, so a client may have
+	// already emitted scenario_started during the ramp. The first measured
+	// workload sample must also switch the card from the bar to charts.
+	push(measuredTags, duration, 7.5, 2_000)
+	if run.Ramping || run.StartTime != 2_000 || len(run.Queries["measured_search"].Latencies) != 1 {
+		t.Fatalf("measured run = %#v", run)
+	}
+
+	push(rampTags, progress, 100, 2_200)
+	if run.Ramping || run.RampProgress != 100 {
+		t.Fatalf("late ramp progress changed measured state: %#v", run)
+	}
+
+	summaryRun := o.getSummary()["runs"].(map[string]interface{})["paradedb"].(map[string]interface{})
+	if summaryRun["rampProgress"] != float64(100) || summaryRun["ramping"] != false {
+		t.Fatalf("summary ramp fields = %#v", summaryRun)
 	}
 }
 

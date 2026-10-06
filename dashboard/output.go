@@ -99,6 +99,8 @@ type RunMetrics struct {
 	StartTime       int64                     `json:"startTime"`
 	EndTime         int64                     `json:"endTime"`
 	LastUpdateTime  int64                     `json:"-"` // Track last update for end detection
+	RampProgress    float64                   `json:"rampProgress"`
+	Ramping         bool                      `json:"ramping"`
 	UpdateMetrics   *UpdateMetrics            `json:"-"`
 }
 
@@ -214,6 +216,10 @@ func getRunName(backend string, tags map[string]string) string {
 		run = run + " (" + chart + ")"
 	}
 	return run
+}
+
+func isRampTags(tags map[string]string) bool {
+	return tags["ramp"] == "true"
 }
 
 // getOrCreateRun gets or creates a RunMetrics entry for the given run name.
@@ -546,11 +552,33 @@ func (o *Output) flush() {
 
 				runName := getRunName(backend, tags)
 				rm := o.getOrCreateRun(runName, backend, tags)
+				if isRampTags(tags) {
+					if rm.StartTime == 0 {
+						rm.Ramping = true
+					}
+					continue
+				}
 				if rm.StartTime == 0 {
 					rm.StartTime = sample.Time.UnixMilli()
 				}
+				rm.Ramping = false
+
+			case name == "ramp_progress":
+				backend := tags["backend"]
+				if backend == "" {
+					continue
+				}
+				rm := o.getOrCreateRun(getRunName(backend, tags), backend, tags)
+				progress := math.Max(0, math.Min(100, value))
+				rm.RampProgress = math.Max(rm.RampProgress, progress)
+				if rm.StartTime == 0 {
+					rm.Ramping = true
+				}
 
 			case name == "query_duration":
+				if isRampTags(tags) {
+					continue
+				}
 				backend := tags["backend"]
 				if backend == "" {
 					backend = tags["run"]
@@ -564,6 +592,7 @@ func (o *Output) flush() {
 
 				runName := getRunName(backend, tags)
 				rm := o.getOrCreateRun(runName, backend, tags)
+				rm.Ramping = false
 				rm.Latencies = append(rm.Latencies, value)
 				if rm.StartTime == 0 {
 					rm.StartTime = sampleTime
@@ -599,6 +628,9 @@ func (o *Output) flush() {
 				}
 
 			case name == "query_hits":
+				if isRampTags(tags) {
+					continue
+				}
 				backend := tags["backend"]
 				if backend == "" {
 					backend = tags["run"]
@@ -627,11 +659,15 @@ func (o *Output) flush() {
 				}
 
 			case name == "update_duration" || name == "update_docs" || name == "update_errors":
+				if isRampTags(tags) {
+					continue
+				}
 				backend := tags["backend"]
 				if backend == "" {
 					continue
 				}
 				rm := o.getOrCreateRun(getRunName(backend, tags), backend, tags)
+				rm.Ramping = false
 				if rm.UpdateMetrics == nil {
 					rm.UpdateMetrics = newUpdateMetrics()
 				}
@@ -677,6 +713,9 @@ func (o *Output) flush() {
 				o.data.Containers[container].Memory = append(o.data.Containers[container].Memory, TimeValue{Time: sampleTime, Value: value})
 
 			case name == "ingest_docs":
+				if isRampTags(tags) {
+					continue
+				}
 				backend := tags["backend"]
 				if backend == "" {
 					backend = tags["run"]
@@ -690,6 +729,7 @@ func (o *Output) flush() {
 
 				runName := getRunName(backend, tags)
 				rm := o.getOrCreateRun(runName, backend, tags)
+				rm.Ramping = false
 				rm.TotalIngested += int64(value)
 				if rm.FirstIngestTime == 0 {
 					rm.FirstIngestTime = sampleTime
@@ -959,6 +999,8 @@ func (o *Output) getSummary() map[string]interface{} {
 			"avgIngestRate": ingestRate,
 			"queries":       queries,
 			"startTime":     rm.StartTime,
+			"rampProgress":  rm.RampProgress,
+			"ramping":       rm.Ramping,
 		}
 		if rm.UpdateMetrics != nil {
 			run["updates"] = rm.UpdateMetrics.summary()
@@ -1053,6 +1095,8 @@ func (o *Output) getExportData() map[string]interface{} {
 			"startTime":     rm.StartTime,
 			"endTime":       endTime,
 			"queries":       queries,
+			"rampProgress":  rm.RampProgress,
+			"ramping":       rm.Ramping,
 		}
 		if rm.UpdateMetrics != nil {
 			run["updates"] = rm.UpdateMetrics.summary()

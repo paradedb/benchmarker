@@ -60,7 +60,7 @@ func newBackendTelemetryCollector(
 	if err != nil {
 		return nil, err
 	}
-	if len(windows) == 0 && backendCount == 1 && len(providers) == 1 && totalDuration > 0 {
+	if len(windows) == 0 && !hasTaggedTelemetryWorkload(scenarios, providers) && backendCount == 1 && len(providers) == 1 && totalDuration > 0 {
 		for backend := range providers {
 			windows = []*telemetryWindow{{
 				id: backend + "@0", backend: backend, end: totalDuration,
@@ -100,6 +100,9 @@ func telemetryWindowsFromScenarios(
 			continue
 		}
 		if _, ok := providers[backend]; !ok {
+			continue
+		}
+		if scenarioIsRamp(config) {
 			continue
 		}
 		start, err := optionalDuration(config["startTime"])
@@ -155,6 +158,19 @@ func telemetryWindowsFromScenarios(
 	return merged, nil
 }
 
+func hasTaggedTelemetryWorkload(scenarios map[string]interface{}, providers map[string]backends.TelemetryProvider) bool {
+	for _, raw := range scenarios {
+		config, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, ok := providers[scenarioBackend(config)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func setTelemetryBaselineTimes(windows []*telemetryWindow) {
 	for _, window := range windows {
 		if window.start == 0 {
@@ -180,6 +196,15 @@ func scenarioBackend(config map[string]interface{}) string {
 	}
 	backend, _ := tags["backend"].(string)
 	return backend
+}
+
+func scenarioIsRamp(config map[string]interface{}) bool {
+	tags, ok := config["tags"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	ramp, _ := tags["ramp"].(string)
+	return ramp == "true"
 }
 
 func scenarioDuration(config map[string]interface{}) (time.Duration, error) {

@@ -392,6 +392,37 @@ export const options = { scenarios };
 
 Scenarios with the same `chart` tag appear on the same dashboard chart. Scenarios without a `chart` tag all share the default chart.
 
+### Unmeasured ramp workloads
+
+Tag a native k6 scenario with `ramp: "true"` when it exists to warm the
+backend rather than produce benchmark results:
+
+```javascript
+const scenarios = {
+  warm_search: {
+    executor: "constant-vus",
+    vus: 5,
+    duration: "30s",
+    exec: "queryTest",
+    tags: { backend: "paradedb", ramp: "true" },
+  },
+  measured_search: {
+    executor: "constant-vus",
+    vus: 5,
+    duration: "60s",
+    startTime: "30s",
+    exec: "queryTest",
+    tags: { backend: "paradedb" },
+  },
+};
+```
+
+The dashboard shows k6's native scenario progress as a bar while the ramp is
+running. Query, ingest, and update results from that scenario are not added to
+charts, summaries, database telemetry windows, or `query_csv`. The untagged
+scenario then starts the measured chart normally. This works with any native
+k6 executor; using `ramping-vus` by itself does not make a scenario unmeasured.
+
 ### Pattern 5: Ramping Load
 
 Gradually increase load to find the breaking point or measure behavior under varying concurrency:

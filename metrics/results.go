@@ -22,6 +22,7 @@ var (
 	updateErrors    *metrics.Metric
 	backendInit     *metrics.Metric
 	scenarioStarted *metrics.Metric
+	rampProgress    *metrics.Metric
 	metricsRegOnce  sync.Once
 
 	// Query patterns per backend/chart/scenario (captured on first call)
@@ -85,11 +86,16 @@ func RegisterMetrics(vu modules.VU) {
 		updateErrors, _ = registry.NewMetric("update_errors", metrics.Counter)
 		backendInit, _ = registry.NewMetric("backend_init", metrics.Gauge)
 		scenarioStarted, _ = registry.NewMetric("scenario_started", metrics.Gauge)
+		rampProgress, _ = registry.NewMetric("ramp_progress", metrics.Gauge)
 	})
 }
 
 // emitGaugeMetric is a shared helper for emitting gauge metrics with backend tags.
 func emitGaugeMetric(vu modules.VU, metric *metrics.Metric, backend string) {
+	emitGaugeMetricValue(vu, metric, backend, 1)
+}
+
+func emitGaugeMetricValue(vu modules.VU, metric *metrics.Metric, backend string, value float64) {
 	state := vu.State()
 	if state == nil || metric == nil {
 		return
@@ -108,7 +114,7 @@ func emitGaugeMetric(vu modules.VU, metric *metrics.Metric, backend string) {
 	metrics.PushIfNotDone(ctxPtr, state.Samples, metrics.Sample{
 		TimeSeries: metrics.TimeSeries{Metric: metric, Tags: tags},
 		Time:       time.Now(),
-		Value:      1,
+		Value:      value,
 	})
 }
 
@@ -122,6 +128,48 @@ func EmitBackendInit(vu modules.VU, backend string) {
 // This creates the run entry in the dashboard before any queries complete.
 func EmitScenarioStarted(vu modules.VU, backend string) {
 	emitGaugeMetric(vu, scenarioStarted, backend)
+}
+
+// IsRampWorkload reports whether the current native k6 scenario is an
+// unmeasured ramp. The explicit string value keeps `ramp: "false"` from
+// accidentally suppressing workload metrics.
+func IsRampWorkload(vu modules.VU) bool {
+	if vu == nil {
+		return false
+	}
+	state := vu.State()
+	if state == nil || state.Tags == nil {
+		return false
+	}
+	value, ok := state.Tags.GetCurrentValues().Tags.Get("ramp")
+	return ok && value == "true"
+}
+
+// EmitRampProgress reports the native k6 executor's progress for a scenario
+// tagged with ramp=true. It returns true when the scenario is a ramp, even if
+// k6 has not supplied a progress function, so callers can still suppress the
+// ramp's measured metrics.
+func EmitRampProgress(vu modules.VU, backend string) bool {
+	if !IsRampWorkload(vu) {
+		return false
+	}
+
+	ctx := vu.Context()
+	if ctx == nil {
+		return true
+	}
+	scenario := lib.GetScenarioState(ctx)
+	if scenario == nil || scenario.ProgressFn == nil {
+		return true
+	}
+	progress, _ := scenario.ProgressFn()
+	if progress < 0 {
+		progress = 0
+	} else if progress > 1 {
+		progress = 1
+	}
+	emitGaugeMetricValue(vu, rampProgress, backend, progress*100)
+	return true
 }
 
 func storeQueryPattern(backend, chart, scenario, query string) {
@@ -263,6 +311,9 @@ type QueryResult struct {
 
 // Emit pushes query metrics to k6 with the backend tag.
 func (r *QueryResult) Emit(ctx context.Context, vu modules.VU, backend string) {
+	if EmitRampProgress(vu, backend) {
+		return
+	}
 	if r.Error != "" {
 		return // Don't emit metrics on error
 	}
@@ -311,6 +362,9 @@ type IngestResult struct {
 
 // Emit pushes ingest metrics to k6 with the backend tag.
 func (r *IngestResult) Emit(ctx context.Context, vu modules.VU, backend string) {
+	if EmitRampProgress(vu, backend) {
+		return
+	}
 	if r.Error != "" {
 		return // Don't emit metrics on error
 	}
@@ -359,6 +413,9 @@ type UpdateResult struct {
 
 // Emit pushes update metrics to k6 with the backend tag.
 func (r *UpdateResult) Emit(ctx context.Context, vu modules.VU, backend string) {
+	if EmitRampProgress(vu, backend) {
+		return
+	}
 	state := vu.State()
 	if state == nil {
 		return

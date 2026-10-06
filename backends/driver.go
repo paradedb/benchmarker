@@ -264,17 +264,16 @@ func (c *K6Client) Query(query string, args ...any) map[string]interface{} {
 	start := time.Now()
 	hits, err := c.driver.Query(ctx, query, args...)
 	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
+	result := &metrics.QueryResult{LatencyMs: latencyMs}
 
 	if err != nil {
+		result.Error = err.Error()
+		result.Emit(ctx, c.vu, c.backend)
 		fmt.Printf("[%s] query error: %v\n", c.backend, err)
-		return map[string]interface{}{
-			"hits":      0,
-			"latencyMs": latencyMs,
-			"error":     err.Error(),
-		}
+		return result.ToMap()
 	}
 
-	result := &metrics.QueryResult{Hits: int64(hits), LatencyMs: latencyMs}
+	result.Hits = int64(hits)
 	result.Emit(ctx, c.vu, c.backend)
 	return result.ToMap()
 }
@@ -307,17 +306,16 @@ func (c *K6Client) InsertBatch(table string, docs []map[string]interface{}) map[
 	start := time.Now()
 	count, err := c.driver.Insert(ctx, table, cols, rows)
 	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
+	result := &metrics.IngestResult{LatencyMs: latencyMs}
 
 	if err != nil {
+		result.Error = err.Error()
+		result.Emit(ctx, c.vu, c.backend)
 		fmt.Printf("[%s] insert error: %v\n", c.backend, err)
-		return map[string]interface{}{
-			"rows":      0,
-			"latencyMs": latencyMs,
-			"error":     err.Error(),
-		}
+		return result.ToMap()
 	}
 
-	result := &metrics.IngestResult{Rows: count, LatencyMs: latencyMs}
+	result.Rows = count
 	result.Emit(ctx, c.vu, c.backend)
 	return result.ToMap()
 }

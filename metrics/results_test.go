@@ -92,6 +92,57 @@ func TestQueryResultPreservesQueryIDTag(t *testing.T) {
 	}
 }
 
+func TestRampWorkloadEmitsNativeProgressInsteadOfQueryMetrics(t *testing.T) {
+	registry := k6metrics.NewRegistry()
+	oldDuration, oldHits, oldProgress := queryDuration, queryHits, rampProgress
+	var err error
+	queryDuration, err = registry.NewMetric("query_duration_ramp_test", k6metrics.Trend, k6metrics.Time)
+	if err != nil {
+		t.Fatalf("create query duration metric: %v", err)
+	}
+	queryHits, err = registry.NewMetric("query_hits_ramp_test", k6metrics.Gauge)
+	if err != nil {
+		t.Fatalf("create query hits metric: %v", err)
+	}
+	rampProgress, err = registry.NewMetric("ramp_progress_test", k6metrics.Gauge)
+	if err != nil {
+		t.Fatalf("create ramp progress metric: %v", err)
+	}
+	t.Cleanup(func() {
+		queryDuration, queryHits, rampProgress = oldDuration, oldHits, oldProgress
+	})
+
+	samples := make(chan k6metrics.SampleContainer, 3)
+	state := &lib.State{
+		Samples: samples,
+		Tags: lib.NewVUStateTags(
+			registry.RootTagSet().
+				With("scenario", "warm_search").
+				With("ramp", "true"),
+		),
+	}
+	ctx := lib.WithScenarioState(context.Background(), &lib.ScenarioState{
+		Name: "warm_search",
+		ProgressFn: func() (float64, []string) {
+			return 0.425, nil
+		},
+	})
+	vu := fakeVU{ctx: ctx, state: state}
+
+	(&QueryResult{Hits: 10, LatencyMs: 12.5}).Emit(ctx, vu, "paradedb")
+
+	if len(samples) != 1 {
+		t.Fatalf("ramp emitted %d sample containers, want only progress", len(samples))
+	}
+	sample := (<-samples).GetSamples()[0]
+	if sample.Metric.Name != "ramp_progress_test" || sample.Value != 42.5 {
+		t.Fatalf("ramp sample = %s %v, want ramp_progress_test 42.5", sample.Metric.Name, sample.Value)
+	}
+	if backend, ok := sample.Tags.Get("backend"); !ok || backend != "paradedb" {
+		t.Fatalf("backend tag = %q, %v", backend, ok)
+	}
+}
+
 func TestUpdateResultEmitsDurationForEveryAttemptAndCountsOutcome(t *testing.T) {
 	registry := k6metrics.NewRegistry()
 	var err error

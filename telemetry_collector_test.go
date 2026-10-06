@@ -75,3 +75,53 @@ func TestScenarioDurationUsesMaxDurationForIterationExecutors(t *testing.T) {
 		t.Fatalf("duration = %s, want 45s", duration)
 	}
 }
+
+func TestTelemetryWindowsExcludeExplicitRampWorkloads(t *testing.T) {
+	scenarios := map[string]interface{}{
+		"warm_search": map[string]interface{}{
+			"duration": "30s",
+			"tags": map[string]interface{}{
+				"backend": "paradedb",
+				"ramp":    "true",
+			},
+		},
+		"measured_search": map[string]interface{}{
+			"startTime": "30s",
+			"duration":  "60s",
+			"tags":      map[string]interface{}{"backend": "paradedb"},
+		},
+	}
+	providers := map[string]backends.TelemetryProvider{"paradedb": nil}
+
+	windows, err := telemetryWindowsFromScenarios(scenarios, providers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(windows) != 1 {
+		t.Fatalf("got %d telemetry windows, want only the measured workload", len(windows))
+	}
+	if windows[0].start != 30*time.Second || windows[0].end != 90*time.Second {
+		t.Fatalf("measured telemetry window = %#v, want 30s..90s", windows[0])
+	}
+}
+
+func TestExplicitRampDoesNotEnableFallbackTelemetryWindow(t *testing.T) {
+	scenarios := map[string]interface{}{
+		"warm_search": map[string]interface{}{
+			"duration": "30s",
+			"tags": map[string]interface{}{
+				"backend": "paradedb",
+				"ramp":    "true",
+			},
+		},
+	}
+	providers := map[string]backends.TelemetryProvider{"paradedb": nil}
+
+	collector, err := newBackendTelemetryCollector(scenarios, providers, 1, 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if collector != nil {
+		t.Fatalf("ramp-only workload created telemetry collector: %#v", collector)
+	}
+}
