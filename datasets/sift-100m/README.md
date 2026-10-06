@@ -62,14 +62,14 @@ docker compose -f datasets/sift-100m/docker-compose.yml up -d
 ./bin/loader load --backend paradedb --workers 4 --batch-size 5000 ./datasets/sift-100m
 ```
 
-The compose file defaults to `paradedb/paradedb:v0.26.0-rc.4-pg18`:
-`vector_router` and `paradedb.vector_recall_target` don't exist in released
-0.25.x. To benchmark a pg_search build from source, build an image with
+The compose file defaults to `paradedb/paradedb:v0.26.0-pg18`:
+`vector_router` and `paradedb.vector_recall_target` don't exist before
+0.26. To benchmark a pg_search build from source, build an image with
 paradedb's `docker/Dockerfile.source` and override the default:
 
 ```bash
 docker build -f docker/Dockerfile.source \
-  --build-arg BASE_IMAGE=paradedb/paradedb:v0.26.0-rc.4-pg18 \
+  --build-arg BASE_IMAGE=paradedb/paradedb:v0.26.0-pg18 \
   -t paradedb-source:main-<sha> .   # from a paradedb checkout
 PARADEDB_IMAGE=paradedb-source:main-<sha> \
   docker compose -f datasets/sift-100m/docker-compose.yml up -d
