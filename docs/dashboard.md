@@ -142,19 +142,20 @@ make viewer
 
 The extension emits standard k6 metrics with backend tags:
 
-| Metric                   | Type    | Description                     |
-| ------------------------ | ------- | ------------------------------- |
-| `query_duration`         | Trend   | Query latency in milliseconds   |
-| `query_hits`             | Gauge   | Number of results returned      |
-| `ingest_duration`        | Trend   | Insert latency in milliseconds  |
-| `ingest_docs`            | Counter | Documents inserted              |
-| `update_duration`        | Trend   | Update latency in milliseconds  |
-| `update_docs`            | Counter | Documents updated               |
-| `update_errors`          | Counter | Failed update attempts          |
-| `backend_init`           | Gauge   | Signals a backend is configured |
-| `scenario_started`       | Gauge   | Signals a scenario has begun    |
-| `container_cpu_percent`  | Gauge   | Container CPU usage percentage  |
-| `container_memory_bytes` | Gauge   | Container memory usage          |
+| Metric                   | Type    | Description                                       |
+| ------------------------ | ------- | ------------------------------------------------- |
+| `query_duration`         | Trend   | Query latency in milliseconds                     |
+| `query_hits`             | Gauge   | Number of results returned                        |
+| `ingest_duration`        | Trend   | Insert latency in milliseconds                    |
+| `ingest_docs`            | Counter | Documents inserted                                |
+| `update_duration`        | Trend   | Update latency in milliseconds                    |
+| `update_docs`            | Counter | Documents updated                                 |
+| `update_errors`          | Counter | Failed update attempts                            |
+| `backend_init`           | Gauge   | Signals a backend is configured                   |
+| `scenario_started`       | Gauge   | Signals a scenario has begun                      |
+| `warmup_progress`        | Gauge   | Progress through the first stage of a tagged ramp |
+| `container_cpu_percent`  | Gauge   | Container CPU usage percentage                    |
+| `container_memory_bytes` | Gauge   | Container memory usage                            |
 
 ## Environment Variables
 

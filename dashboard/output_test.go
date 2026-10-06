@@ -276,10 +276,99 @@ func TestDashboardIncludesMeanUpdatesAndTelemetryUI(t *testing.T) {
 		`function updateUpdateStats(runs)`,
 		`function updateTelemetry(telemetry)`,
 		`database telemetry`,
+		`return run.warmingUp || Object.keys(run.queries || {}).length > 0`,
+		`<span>Warmup</span>`,
+		`id="${safeNameId}-warmup-percent"`,
+		`warmupEl.style.display = run.warmingUp ? "block" : "none"`,
 	} {
 		if !strings.Contains(content, fragment) {
 			t.Fatalf("dashboard missing UI fragment %q", fragment)
 		}
+	}
+}
+
+func TestWarmupProgressReplacesWorkloadGraphsUntilMeasurementStarts(t *testing.T) {
+	registry := k6metrics.NewRegistry()
+	started, err := registry.NewMetric("scenario_started", k6metrics.Gauge)
+	if err != nil {
+		t.Fatalf("create scenario started metric: %v", err)
+	}
+	progress, err := registry.NewMetric("warmup_progress", k6metrics.Gauge)
+	if err != nil {
+		t.Fatalf("create warmup progress metric: %v", err)
+	}
+	duration, err := registry.NewMetric("query_duration", k6metrics.Trend, k6metrics.Time)
+	if err != nil {
+		t.Fatalf("create query duration metric: %v", err)
+	}
+	hits, err := registry.NewMetric("query_hits", k6metrics.Gauge)
+	if err != nil {
+		t.Fatalf("create query hits metric: %v", err)
+	}
+	warmupTags := registry.RootTagSet().
+		With("backend", "paradedb").
+		With("scenario", "warm_search").
+		With("chart", "search").
+		With("warmup", "true")
+	o := &Output{
+		exportQueryCSV: true,
+		data: &DashboardData{
+			StartTime:  time.Unix(0, 0),
+			Runs:       make(map[string]*RunMetrics),
+			Containers: make(map[string]*ContainerMetrics),
+		},
+	}
+	push := func(tags *k6metrics.TagSet, metric *k6metrics.Metric, value float64, at int64) {
+		o.AddMetricSamples([]k6metrics.SampleContainer{k6metrics.Samples{{
+			TimeSeries: k6metrics.TimeSeries{Metric: metric, Tags: tags},
+			Time:       time.UnixMilli(at),
+			Value:      value,
+		}}})
+		o.flush()
+	}
+
+	push(warmupTags, started, 1, 1_000)
+	push(warmupTags, progress, 42.5, 1_200)
+
+	runName := "paradedb (search)"
+	run := o.data.Runs[runName]
+	if run == nil || !run.WarmingUp || run.WarmupProgress != 42.5 || run.Measured {
+		t.Fatalf("warmup run = %#v", run)
+	}
+	if run.StartTime != 0 || len(run.Queries) != 0 || run.UpdateMetrics != nil || run.TotalIngested != 0 || len(run.QueryCSV) != 0 {
+		t.Fatalf("warmup leaked into measured results: %#v", run)
+	}
+	liveRun := o.getSummary()["runs"].(map[string]interface{})[runName].(map[string]interface{})
+	if liveRun["warmupProgress"] != 42.5 || liveRun["warmingUp"] != true {
+		t.Fatalf("live warmup fields = %#v", liveRun)
+	}
+	if _, exists := o.getExportData()["runs"].(map[string]interface{})[runName]; exists {
+		t.Fatal("warmup-only run appeared in export data")
+	}
+
+	// The warmup tag remains on every sample in the scenario. The source omits
+	// first-stage workload metrics, then the first second-stage sample switches
+	// this same card from the bar to its charts.
+	push(warmupTags, duration, 7.5, 2_000)
+	push(warmupTags, hits, 10, 2_000)
+	if run.WarmingUp || !run.Measured || run.StartTime != 2_000 || len(run.Queries["warm_search"].Latencies) != 1 {
+		t.Fatalf("measured run = %#v", run)
+	}
+
+	push(warmupTags, progress, 100, 2_200)
+	if run.WarmingUp || run.WarmupProgress != 100 {
+		t.Fatalf("late warmup progress changed measured state: %#v", run)
+	}
+
+	exportRun := o.getExportData()["runs"].(map[string]interface{})[runName].(map[string]interface{})
+	if _, exists := exportRun["warmupProgress"]; exists {
+		t.Fatalf("warmup progress appeared in export: %#v", exportRun)
+	}
+	if _, exists := exportRun["warmingUp"]; exists {
+		t.Fatalf("warmup state appeared in export: %#v", exportRun)
+	}
+	if _, exists := exportRun["queries"].(map[string]interface{})["warm_search"]; !exists {
+		t.Fatalf("measured stages missing from export: %#v", exportRun)
 	}
 }
 

@@ -22,6 +22,7 @@ var (
 	updateErrors    *metrics.Metric
 	backendInit     *metrics.Metric
 	scenarioStarted *metrics.Metric
+	warmupProgress  *metrics.Metric
 	metricsRegOnce  sync.Once
 
 	// Query patterns per backend/chart/scenario (captured on first call)
@@ -85,11 +86,16 @@ func RegisterMetrics(vu modules.VU) {
 		updateErrors, _ = registry.NewMetric("update_errors", metrics.Counter)
 		backendInit, _ = registry.NewMetric("backend_init", metrics.Gauge)
 		scenarioStarted, _ = registry.NewMetric("scenario_started", metrics.Gauge)
+		warmupProgress, _ = registry.NewMetric("warmup_progress", metrics.Gauge)
 	})
 }
 
 // emitGaugeMetric is a shared helper for emitting gauge metrics with backend tags.
 func emitGaugeMetric(vu modules.VU, metric *metrics.Metric, backend string) {
+	emitGaugeMetricValue(vu, metric, backend, 1)
+}
+
+func emitGaugeMetricValue(vu modules.VU, metric *metrics.Metric, backend string, value float64) {
 	state := vu.State()
 	if state == nil || metric == nil {
 		return
@@ -108,7 +114,7 @@ func emitGaugeMetric(vu modules.VU, metric *metrics.Metric, backend string) {
 	metrics.PushIfNotDone(ctxPtr, state.Samples, metrics.Sample{
 		TimeSeries: metrics.TimeSeries{Metric: metric, Tags: tags},
 		Time:       time.Now(),
-		Value:      1,
+		Value:      value,
 	})
 }
 
@@ -122,6 +128,96 @@ func EmitBackendInit(vu modules.VU, backend string) {
 // This creates the run entry in the dashboard before any queries complete.
 func EmitScenarioStarted(vu modules.VU, backend string) {
 	emitGaugeMetric(vu, scenarioStarted, backend)
+}
+
+// IsWarmupWorkload reports whether the current native k6 scenario marks its
+// first ramp stage as an unmeasured warmup. The explicit string value keeps
+// `warmup: "false"` from accidentally enabling warmup handling.
+func IsWarmupWorkload(vu modules.VU) bool {
+	if vu == nil {
+		return false
+	}
+	state := vu.State()
+	if state == nil || state.Tags == nil {
+		return false
+	}
+	value, ok := state.Tags.GetCurrentValues().Tags.Get("warmup")
+	return ok && value == "true"
+}
+
+// WarmupPhase describes the first stage of a tagged native ramp. Active is
+// evaluated when an operation starts; Start and Deadline remain available so
+// that the operation can report progress after its shared deadline fires.
+type WarmupPhase struct {
+	Start    time.Time
+	Deadline time.Time
+	Active   bool
+}
+
+// ProgressAt returns the warmup stage's wall-clock progress as a percentage.
+func (p WarmupPhase) ProgressAt(now time.Time) float64 {
+	duration := p.Deadline.Sub(p.Start)
+	if duration <= 0 || !now.After(p.Start) {
+		return 0
+	}
+	progress := float64(now.Sub(p.Start)) / float64(duration) * 100
+	if progress > 100 {
+		return 100
+	}
+	return progress
+}
+
+func firstRampStageDuration(config lib.ExecutorConfig) time.Duration {
+	switch c := config.(type) {
+	case executor.RampingVUsConfig:
+		if len(c.Stages) > 0 {
+			return c.Stages[0].Duration.TimeDuration()
+		}
+	case *executor.RampingVUsConfig:
+		if len(c.Stages) > 0 {
+			return c.Stages[0].Duration.TimeDuration()
+		}
+	case *executor.RampingArrivalRateConfig:
+		if len(c.Stages) > 0 {
+			return c.Stages[0].Duration.TimeDuration()
+		}
+	}
+	return 0
+}
+
+// GetWarmupPhase returns the first ramp stage when it is currently active.
+// The boundary is based on k6's actual scenario start time rather than on the
+// first VU operation, so every VU receives exactly the same deadline.
+func GetWarmupPhase(vu modules.VU) WarmupPhase {
+	if !IsWarmupWorkload(vu) || vu.Context() == nil {
+		return WarmupPhase{}
+	}
+	scenario := lib.GetScenarioState(vu.Context())
+	state := vu.State()
+	if scenario == nil || state == nil || scenario.StartTime.IsZero() {
+		return WarmupPhase{}
+	}
+	config, ok := state.Options.Scenarios[scenario.Name]
+	if !ok {
+		return WarmupPhase{}
+	}
+	duration := firstRampStageDuration(config)
+	if duration <= 0 {
+		return WarmupPhase{}
+	}
+
+	now := time.Now()
+	deadline := scenario.StartTime.Add(duration)
+	return WarmupPhase{
+		Start:    scenario.StartTime,
+		Deadline: deadline,
+		Active:   !now.Before(scenario.StartTime) && now.Before(deadline),
+	}
+}
+
+// EmitWarmupProgress reports wall-clock progress through the first ramp stage.
+func EmitWarmupProgress(vu modules.VU, backend string, phase WarmupPhase) {
+	emitGaugeMetricValue(vu, warmupProgress, backend, phase.ProgressAt(time.Now()))
 }
 
 func storeQueryPattern(backend, chart, scenario, query string) {

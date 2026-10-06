@@ -2,12 +2,17 @@ package metrics
 
 import (
 	"context"
+	"math"
 	"testing"
+	"time"
 
 	"github.com/grafana/sobek"
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/lib"
+	"go.k6.io/k6/lib/executor"
+	"go.k6.io/k6/lib/types"
 	k6metrics "go.k6.io/k6/metrics"
+	"gopkg.in/guregu/null.v3"
 )
 
 type fakeVU struct {
@@ -88,6 +93,93 @@ func TestQueryResultPreservesQueryIDTag(t *testing.T) {
 			if queryID, ok := sample.Tags.Get("query_id"); !ok || queryID != "source-7:phrase" {
 				t.Fatalf("query_id tag = %q, %v", queryID, ok)
 			}
+		}
+	}
+}
+
+func warmupTestVU(registry *k6metrics.Registry, start time.Time, tagged bool) fakeVU {
+	config := executor.NewRampingVUsConfig("search")
+	config.Stages = []executor.Stage{
+		{Duration: types.NewNullDuration(10*time.Second, true), Target: null.NewInt(5, true)},
+		{Duration: types.NewNullDuration(20*time.Second, true), Target: null.NewInt(5, true)},
+	}
+	tags := registry.RootTagSet().With("scenario", "search")
+	if tagged {
+		tags = tags.With("warmup", "true")
+	}
+	state := &lib.State{
+		Tags: lib.NewVUStateTags(tags),
+		Options: lib.Options{Scenarios: lib.ScenarioConfigs{
+			"search": config,
+		}},
+	}
+	ctx := lib.WithScenarioState(context.Background(), &lib.ScenarioState{
+		Name:      "search",
+		StartTime: start,
+	})
+	return fakeVU{ctx: ctx, state: state}
+}
+
+func TestWarmupPhaseUsesFirstNativeRampStage(t *testing.T) {
+	registry := k6metrics.NewRegistry()
+	start := time.Now().Add(-5 * time.Second)
+	phase := GetWarmupPhase(warmupTestVU(registry, start, true))
+
+	if !phase.Active {
+		t.Fatal("first ramp stage was not recognized as warmup")
+	}
+	if !phase.Deadline.Equal(start.Add(10 * time.Second)) {
+		t.Fatalf("deadline = %s, want %s", phase.Deadline, start.Add(10*time.Second))
+	}
+	if progress := phase.ProgressAt(time.Now()); math.Abs(progress-50) > 1 {
+		t.Fatalf("progress = %v, want approximately 50", progress)
+	}
+
+	if phase := GetWarmupPhase(warmupTestVU(registry, time.Now().Add(-10*time.Second), true)); phase.Active {
+		t.Fatal("second ramp stage was treated as warmup")
+	}
+	if phase := GetWarmupPhase(warmupTestVU(registry, start, false)); phase.Active {
+		t.Fatal("untagged ramp stage was treated as warmup")
+	}
+}
+
+func TestTaggedScenarioResultsEmitAfterWarmup(t *testing.T) {
+	registry := k6metrics.NewRegistry()
+	oldDuration, oldHits := queryDuration, queryHits
+	var err error
+	queryDuration, err = registry.NewMetric("query_duration_warmup_test", k6metrics.Trend, k6metrics.Time)
+	if err != nil {
+		t.Fatalf("create query duration metric: %v", err)
+	}
+	queryHits, err = registry.NewMetric("query_hits_warmup_test", k6metrics.Gauge)
+	if err != nil {
+		t.Fatalf("create query hits metric: %v", err)
+	}
+	t.Cleanup(func() {
+		queryDuration, queryHits = oldDuration, oldHits
+	})
+
+	samples := make(chan k6metrics.SampleContainer, 2)
+	state := &lib.State{
+		Samples: samples,
+		Tags: lib.NewVUStateTags(
+			registry.RootTagSet().
+				With("scenario", "warm_search").
+				With("warmup", "true"),
+		),
+	}
+	ctx := context.Background()
+	vu := fakeVU{ctx: ctx, state: state}
+
+	(&QueryResult{Hits: 10, LatencyMs: 12.5}).Emit(ctx, vu, "paradedb")
+
+	if len(samples) != 2 {
+		t.Fatalf("tagged measured stage emitted %d samples, want query duration and hits", len(samples))
+	}
+	for range 2 {
+		sample := (<-samples).GetSamples()[0]
+		if backend, ok := sample.Tags.Get("backend"); !ok || backend != "paradedb" {
+			t.Fatalf("backend tag = %q, %v", backend, ok)
 		}
 	}
 }

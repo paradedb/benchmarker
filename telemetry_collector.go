@@ -18,11 +18,12 @@ const (
 )
 
 type telemetryWindow struct {
-	id         string
-	backend    string
-	start      time.Duration
-	end        time.Duration
-	baselineAt time.Duration
+	id              string
+	backend         string
+	start           time.Duration
+	end             time.Duration
+	baselineAt      time.Duration
+	baselineAtStart bool
 
 	baseline      []metrics.TelemetryPoint
 	baselineErr   error
@@ -60,7 +61,7 @@ func newBackendTelemetryCollector(
 	if err != nil {
 		return nil, err
 	}
-	if len(windows) == 0 && backendCount == 1 && len(providers) == 1 && totalDuration > 0 {
+	if len(windows) == 0 && !hasTaggedTelemetryWorkload(scenarios, providers) && backendCount == 1 && len(providers) == 1 && totalDuration > 0 {
 		for backend := range providers {
 			windows = []*telemetryWindow{{
 				id: backend + "@0", backend: backend, end: totalDuration,
@@ -113,10 +114,20 @@ func telemetryWindowsFromScenarios(
 		if duration <= 0 {
 			continue
 		}
+		warmupDuration, err := scenarioWarmupDuration(config)
+		if err != nil {
+			return nil, fmt.Errorf("scenario %s: %w", name, err)
+		}
+		end := start + duration
+		start += warmupDuration
+		if start >= end {
+			continue
+		}
 		windows = append(windows, &telemetryWindow{
-			backend: backend,
-			start:   start,
-			end:     start + duration,
+			backend:         backend,
+			start:           start,
+			end:             end,
+			baselineAtStart: warmupDuration > 0,
 		})
 	}
 	if len(windows) == 0 {
@@ -135,6 +146,9 @@ func telemetryWindowsFromScenarios(
 		if len(merged) > 0 {
 			previous := merged[len(merged)-1]
 			if previous.backend == window.backend && window.start <= previous.end {
+				if window.start == previous.start {
+					previous.baselineAtStart = previous.baselineAtStart || window.baselineAtStart
+				}
 				if window.end > previous.end {
 					previous.end = window.end
 				}
@@ -155,6 +169,19 @@ func telemetryWindowsFromScenarios(
 	return merged, nil
 }
 
+func hasTaggedTelemetryWorkload(scenarios map[string]interface{}, providers map[string]backends.TelemetryProvider) bool {
+	for _, raw := range scenarios {
+		config, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, ok := providers[scenarioBackend(config)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func setTelemetryBaselineTimes(windows []*telemetryWindow) {
 	for _, window := range windows {
 		if window.start == 0 {
@@ -167,6 +194,9 @@ func setTelemetryBaselineTimes(windows []*telemetryWindow) {
 			}
 		}
 		window.baselineAt = window.start - telemetryFinalGrace
+		if window.baselineAtStart {
+			window.baselineAt = window.start
+		}
 		if window.baselineAt < previousEnd {
 			window.baselineAt = previousEnd
 		}
@@ -180,6 +210,37 @@ func scenarioBackend(config map[string]interface{}) string {
 	}
 	backend, _ := tags["backend"].(string)
 	return backend
+}
+
+func scenarioIsWarmup(config map[string]interface{}) bool {
+	tags, ok := config["tags"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	warmup, _ := tags["warmup"].(string)
+	return warmup == "true"
+}
+
+func scenarioWarmupDuration(config map[string]interface{}) (time.Duration, error) {
+	if !scenarioIsWarmup(config) {
+		return 0, nil
+	}
+	stages, ok := config["stages"].([]interface{})
+	if !ok || len(stages) == 0 {
+		return 0, fmt.Errorf("warmup=true requires at least one ramping stage")
+	}
+	first, ok := stages[0].(map[string]interface{})
+	if !ok {
+		return 0, fmt.Errorf("warmup stage must be an object")
+	}
+	duration, err := optionalDuration(first["duration"])
+	if err != nil {
+		return 0, fmt.Errorf("warmup stage: %w", err)
+	}
+	if duration <= 0 {
+		return 0, fmt.Errorf("warmup stage duration must be greater than zero")
+	}
+	return duration, nil
 }
 
 func scenarioDuration(config map[string]interface{}) (time.Duration, error) {

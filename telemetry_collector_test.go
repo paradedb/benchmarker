@@ -75,3 +75,75 @@ func TestScenarioDurationUsesMaxDurationForIterationExecutors(t *testing.T) {
 		t.Fatalf("duration = %s, want 45s", duration)
 	}
 }
+
+func TestTelemetryWindowStartsAfterTaggedFirstRampStage(t *testing.T) {
+	scenarios := map[string]interface{}{
+		"search": map[string]interface{}{
+			"stages": []interface{}{
+				map[string]interface{}{"duration": "30s", "target": float64(5)},
+				map[string]interface{}{"duration": "60s", "target": float64(5)},
+			},
+			"tags": map[string]interface{}{
+				"backend": "paradedb",
+				"warmup":  "true",
+			},
+		},
+	}
+	providers := map[string]backends.TelemetryProvider{"paradedb": nil}
+
+	windows, err := telemetryWindowsFromScenarios(scenarios, providers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(windows) != 1 {
+		t.Fatalf("got %d telemetry windows, want the post-warmup stages", len(windows))
+	}
+	if windows[0].start != 30*time.Second || windows[0].end != 90*time.Second {
+		t.Fatalf("measured telemetry window = %#v, want 30s..90s", windows[0])
+	}
+	setTelemetryBaselineTimes(windows)
+	if windows[0].baselineAt != 30*time.Second {
+		t.Fatalf("post-warmup baseline = %s, want exact 30s boundary", windows[0].baselineAt)
+	}
+}
+
+func TestExplicitWarmupDoesNotEnableFallbackTelemetryWindow(t *testing.T) {
+	scenarios := map[string]interface{}{
+		"warm_search": map[string]interface{}{
+			"stages": []interface{}{
+				map[string]interface{}{"duration": "30s", "target": float64(5)},
+			},
+			"tags": map[string]interface{}{
+				"backend": "paradedb",
+				"warmup":  "true",
+			},
+		},
+	}
+	providers := map[string]backends.TelemetryProvider{"paradedb": nil}
+
+	collector, err := newBackendTelemetryCollector(scenarios, providers, 1, 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if collector != nil {
+		t.Fatalf("warmup-only workload created telemetry collector: %#v", collector)
+	}
+}
+
+func TestWarmupTagRequiresRampingStages(t *testing.T) {
+	scenarios := map[string]interface{}{
+		"invalid": map[string]interface{}{
+			"duration": "30s",
+			"tags": map[string]interface{}{
+				"backend": "paradedb",
+				"warmup":  "true",
+			},
+		},
+	}
+	providers := map[string]backends.TelemetryProvider{"paradedb": nil}
+
+	_, err := telemetryWindowsFromScenarios(scenarios, providers)
+	if err == nil {
+		t.Fatal("warmup tag on a non-ramping scenario did not fail validation")
+	}
+}

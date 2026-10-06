@@ -53,6 +53,11 @@ k6 gives you several strategies for generating load:
 
 You can mix these freely across scenarios in the same script.
 
+Tag a native k6 ramping scenario with `warmup: "true"` to make its first stage
+the warmup. The live dashboard shows that stage as a warmup bar on the same
+chart. Operations begun during it are unmeasured and cancelled at its boundary;
+the remaining stages are graphed and exported normally.
+
 ### Dashboard
 
 Results stream to a browser in real-time: mean and percentile latency (P50/P90/P95/P99), queries per second, update results, ingest rate, Docker container CPU/memory, and backend-provided database telemetry. The dashboard also captures backend configs, setup scripts, and query patterns so results can be understood and reproduced later. Export as standalone HTML to share, or use the bounded `query_csv` output to rank individually tagged workload queries.
