@@ -1,5 +1,5 @@
 -- ParadeDB setup: table for vector search over SIFT 128d descriptors.
--- vector must exist before pg_search: pg_search registers its bm25 vector
+-- vector must exist before pg_search: pg_search registers its paradedb vector
 -- opclasses (vector_l2_ops et al) only when pgvector is already present.
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_search;
