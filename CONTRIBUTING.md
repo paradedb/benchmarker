@@ -219,7 +219,7 @@ Datasets follow this structure:
 ```text
 datasets/<name>/
 ├── schema.yaml           # Column definitions
-├── data.csv              # Source data
+├── data.csv              # Source data (or data.parquet, or sharded data/)
 ├── paradedb/
 │   ├── pre.sql           # Create tables
 │   └── post.sql          # Create indexes, VACUUM
@@ -231,6 +231,10 @@ datasets/<name>/
 ```
 
 SQL backends use `.sql` files, HTTP backends (Elasticsearch, OpenSearch, MongoDB) use `.json`. You only need to add directories for the backends you want to test — the loader skips backends with no scripts.
+
+The CLI loader imports one source into one `schema.yaml` table per dataset.
+Scalar CSV and Parquet columns work across backends; `vector(n)` columns are
+limited to ParadeDB and PostgreSQL. k6 ingest/update helpers remain CSV-only.
 
 ## Pull Request Workflow
 

@@ -57,7 +57,7 @@ The `db` module (`k6/x/database`) provides:
 | `db.backends(config)`         | `Backends`  | Initializes backend drivers and Docker metrics collector from config                                                                                                                      |
 | `db.metrics(config)`          | `Collector` | Creates a standalone Docker container metrics collector (use `backends.addDockerMetricsCollector()` instead for most cases)                                                               |
 | `db.timer({ duration, gap })` | `Timer`     | Creates a phase timer for staggering scenarios                                                                                                                                            |
-| `db.loader()`                 | `Loader`    | Creates a CSV document reader for ingest or update benchmarks                                                                                                                             |
+| `db.loader()`                 | `Loader`    | Creates a CSV-only document reader for ingest or update benchmarks                                                                                                                        |
 | `db.terms(data)`              | `Terms`     | Loads a JSON array of query strings to avoid caching bias. `terms.next()` cycles sequentially, `terms.random()` picks randomly. Accepts a JSON string via `open()` or a k6 `SharedArray`. |
 
 ## Backend Configuration
@@ -394,7 +394,22 @@ export const options = { scenarios };
 
 The primary purpose of ingest scenarios is to put write pressure on the database while queries are running, simulating realistic mixed workloads where the index is being updated concurrently with queries. This is more useful for measuring how query latency degrades under write load than for comparing raw ingest throughput across backends, since each database handles write consistency, indexing, and flush semantics differently.
 
-To run an ingest workload, use the loader to open a document file and insert batches. The data file used for ingest must contain documents that are not already in the database. If you pre-loaded a dataset with the loader CLI or a setup function, you will need a separate CSV file (e.g. `ingest_data.csv`) with different document IDs for insert scenarios, otherwise you will get duplicate key errors. Note that you can only run an ingest benchmark once per file, since subsequent runs will fail with duplicates after the documents have been inserted. Use scenario `env` to pass the backend name so one function handles all backends. The second argument to `nextBatch()` is a pool key: each pool has its own atomic counter, so VUs within a backend get non-overlapping batches, while different backends independently walk through the same data from the start.
+To run an ingest workload, use the loader to open a CSV document file and insert
+batches. The data file used for ingest must contain documents that are not
+already in the database. If you pre-loaded a dataset with the loader CLI or a
+setup function, you will need a separate CSV file (e.g. `ingest_data.csv`) with
+different document IDs for insert scenarios, otherwise you will get duplicate
+key errors. Note that you can only run an ingest benchmark once per file, since
+subsequent runs will fail with duplicates after the documents have been
+inserted. Use scenario `env` to pass the backend name so one function handles
+all backends. The second argument to `nextBatch()` is a pool key: each pool has
+its own atomic counter, so VUs within a backend get non-overlapping batches,
+while different backends independently walk through the same data from the
+start.
+
+The k6 loader does not read Parquet and does not apply `schema.yaml` type
+conversion. Use the CLI loader for typed bulk loads, sharded Parquet, and
+`vector(n)` columns; use k6 CSVs for runtime ingest/update pressure.
 
 See [Pattern 3](#pattern-3-parallel-query--ingest) for a complete example combining queries and ingest.
 
@@ -428,7 +443,9 @@ Call `backends.setTimeout(seconds)` to set the timeout on all backends at once, 
 
 ## Loading Data from k6 Scripts
 
-The loader can also bulk-load data directly from a k6 script (without the CLI). This is useful for setup functions or ingest benchmarks that need to pre-populate data:
+The loader can also bulk-load CSV data directly from a k6 script (without the
+CLI). This is useful for setup functions or ingest benchmarks that need to
+pre-populate data:
 
 ```javascript
 const loader = db.loader();
@@ -456,7 +473,10 @@ loader.loadClickHouse("clickhouse://...", {
 loader.loadMongoDB("mongodb://...", { file: "../data.csv", dataset: "../" });
 ```
 
-Returns `{ loaded, loadTimeMs, indexTimeMs, totalTimeMs, error }`. The `dataset` path points to the dataset directory containing backend-specific `pre`/`post` scripts.
+Returns `{ loaded, loadTimeMs, indexTimeMs, totalTimeMs, error }`. The `dataset`
+path points to the dataset directory containing backend-specific `pre`/`post`
+scripts. For Parquet datasets or schema-driven type conversion, use
+`./bin/loader load` instead.
 
 ## Backend Query Reference
 
