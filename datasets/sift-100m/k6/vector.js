@@ -1,6 +1,6 @@
 import db from "k6/x/database";
 
-// SIFT 10M vector benchmark: unfiltered top-10 L2 kNN, ParadeDB (pg_search
+// SIFT 100M vector benchmark: unfiltered top-10 L2 kNN, ParadeDB (pg_search
 // IVF vector index) vs Elasticsearch (dense_vector HNSW), both containers
 // capped at 12g / 6 CPUs.
 

@@ -65,9 +65,12 @@ services:
       - "-c"
       - "jit=off"
 
+  # Opt-in (`--profile elasticsearch`): both engines at the default 12g don't
+  # fit a 16GiB Docker VM together.
   elasticsearch:
     image: ${ELASTICSEARCH_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:9.5.3}
     container_name: elasticsearch
+    profiles: ["elasticsearch"]
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false

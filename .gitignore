@@ -21,6 +21,13 @@ datasets/sift-10m/dataset.yaml
 datasets/sift-10m/k6/query_vectors.json
 datasets/sift-10m/k6/ground_truth_top10.json
 datasets/sift-10m/k6/results/
+!datasets/sift-100m
+datasets/sift-100m/data
+datasets/sift-100m/queries
+datasets/sift-100m/dataset.yaml
+datasets/sift-100m/k6/query_vectors.json
+datasets/sift-100m/k6/ground_truth_top10.json
+datasets/sift-100m/k6/results/
 
 # Build outputs
 *.exe

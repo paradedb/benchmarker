@@ -1,0 +1,8 @@
+[
+  {
+    "index": "sift",
+    "endpoint": "_settings",
+    "body": { "index": { "refresh_interval": null } }
+  },
+  { "index": "sift", "endpoint": "_refresh" }
+]
