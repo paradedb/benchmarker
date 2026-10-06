@@ -196,6 +196,14 @@ type Driver interface {
 	CaptureConfig(ctx context.Context, backendName string)
 }
 
+// TelemetryProvider is an optional backend capability consumed by the
+// dedicated metrics collector. Implementations own their database-specific
+// queries and return generic counter/gauge series.
+type TelemetryProvider interface {
+	TelemetryEnabled() bool
+	ReadTelemetry(ctx context.Context) ([]metrics.TelemetryPoint, error)
+}
+
 // DriverFactory creates a driver from a connection string.
 type DriverFactory func(connString string) (Driver, error)
 
@@ -354,17 +362,15 @@ func (c *K6Client) UpdateBatch(table string, docs []map[string]interface{}) map[
 	start := time.Now()
 	count, err := c.driver.Update(ctx, table, keyCols, allCols, rows)
 	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
+	result := &metrics.UpdateResult{Rows: count, LatencyMs: latencyMs}
 
 	if err != nil {
+		result.Error = err.Error()
+		result.Emit(ctx, c.vu, c.backend)
 		fmt.Printf("[%s] update error: %v\n", c.backend, err)
-		return map[string]interface{}{
-			"rows":      0,
-			"latencyMs": latencyMs,
-			"error":     err.Error(),
-		}
+		return result.ToMap()
 	}
 
-	result := &metrics.UpdateResult{Rows: count, LatencyMs: latencyMs}
 	result.Emit(ctx, c.vu, c.backend)
 	return result.ToMap()
 }

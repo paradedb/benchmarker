@@ -55,7 +55,7 @@ You can mix these freely across scenarios in the same script.
 
 ### Dashboard
 
-Results stream to a browser in real-time: latency percentiles (P50/P90/P95/P99), queries per second, ingest rate, and Docker container CPU/memory per backend. The dashboard also captures backend configs, setup scripts, and query patterns so results can be understood and reproduced later. Export as standalone HTML to share.
+Results stream to a browser in real-time: mean and percentile latency (P50/P90/P95/P99), queries per second, update results, ingest rate, Docker container CPU/memory, and backend-provided database telemetry. The dashboard also captures backend configs, setup scripts, and query patterns so results can be understood and reproduced later. Export as standalone HTML to share, or use the bounded `query_csv` output to rank individually tagged workload queries.
 
 ## Quick Start
 
@@ -124,14 +124,12 @@ const scenarios = {
     vus: 5,
     duration: "30s",
     exec: "paradedbQuery",
+    tags: { backend: "paradedb" },
   },
 };
 
-// Add docker based metric collection
-export const collectMetrics = backends.addDockerMetricsCollector(
-  scenarios,
-  "35s",
-);
+// Add Docker and database metric collection on a dedicated VU
+export const collectMetrics = backends.addMetricsCollector(scenarios, "35s");
 
 export const options = { scenarios };
 

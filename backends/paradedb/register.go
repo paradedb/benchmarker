@@ -24,6 +24,10 @@ func New(connString string) (backends.Driver, error) {
 	}
 
 	pgDriver := driver.(*postgres.Driver)
+	telemetryQueries := postgres.StandardTelemetryQueries()
+	telemetryQueries = append(telemetryQueries,
+		postgres.IndexIOTelemetryQueries("paradedb", "bm25")...)
+	pgDriver.SetTelemetryQueries(telemetryQueries...)
 
 	// Capture every paradedb.* GUC rather than a hardcoded list, so new or
 	// renamed GUCs show up without code changes

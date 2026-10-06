@@ -1,13 +1,16 @@
 package dashboard
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/paradedb/benchmarker/metrics"
+	k6metrics "go.k6.io/k6/metrics"
 )
 
 func TestUpdateIngestRateSkipsInitialPoint(t *testing.T) {
@@ -181,6 +184,102 @@ func TestReadMetaEnvUnsetReturnsNil(t *testing.T) {
 	t.Setenv("BENCHMARKER_META", "")
 	if m := readMetaEnv(); m != nil {
 		t.Fatalf("expected nil for unset env, got %v", m)
+	}
+}
+
+func TestUpdateMetricsAppearInLiveSummaryAndRawExport(t *testing.T) {
+	registry := k6metrics.NewRegistry()
+	duration, err := registry.NewMetric("update_duration", k6metrics.Trend, k6metrics.Time)
+	if err != nil {
+		t.Fatalf("create update duration metric: %v", err)
+	}
+	documents, err := registry.NewMetric("update_docs", k6metrics.Counter)
+	if err != nil {
+		t.Fatalf("create update documents metric: %v", err)
+	}
+	errorsMetric, err := registry.NewMetric("update_errors", k6metrics.Counter)
+	if err != nil {
+		t.Fatalf("create update errors metric: %v", err)
+	}
+
+	backend := "update-dashboard"
+	tags := registry.RootTagSet().With("backend", backend)
+	o := &Output{
+		data: &DashboardData{
+			StartTime:  time.Unix(0, 0),
+			Runs:       make(map[string]*RunMetrics),
+			Containers: make(map[string]*ContainerMetrics),
+		},
+	}
+	o.AddMetricSamples([]k6metrics.SampleContainer{k6metrics.Samples{
+		{TimeSeries: k6metrics.TimeSeries{Metric: duration, Tags: tags}, Time: time.UnixMilli(1000), Value: 2.5},
+		{TimeSeries: k6metrics.TimeSeries{Metric: documents, Tags: tags}, Time: time.UnixMilli(1000), Value: 3},
+		{TimeSeries: k6metrics.TimeSeries{Metric: duration, Tags: tags}, Time: time.UnixMilli(2000), Value: 15},
+		{TimeSeries: k6metrics.TimeSeries{Metric: errorsMetric, Tags: tags}, Time: time.UnixMilli(2000), Value: 1},
+	}})
+	o.flush()
+
+	summaryRun := o.getSummary()["runs"].(map[string]interface{})[backend].(map[string]interface{})
+	updates := summaryRun["updates"].(map[string]interface{})
+	if updates["attempts"] != 2 || updates["documents"] != float64(3) || updates["errors"] != float64(1) {
+		t.Fatalf("live update summary = %#v", updates)
+	}
+	if got := updates["mean"].(float64); math.Abs(got-8.75) > 1e-12 {
+		t.Fatalf("update mean = %v, want 8.75", got)
+	}
+
+	raw := o.getExportData()
+	rawRun := raw["runs"].(map[string]interface{})[backend].(map[string]interface{})
+	updateMetrics, ok := rawRun["updateMetrics"].(*UpdateMetrics)
+	if !ok {
+		t.Fatalf("raw updateMetrics = %#v", rawRun["updateMetrics"])
+	}
+	if len(updateMetrics.Duration) != 2 || len(updateMetrics.Documents) != 1 || len(updateMetrics.Errors) != 1 {
+		t.Fatalf("raw update samples = %#v", updateMetrics)
+	}
+
+	aggregatedRun := aggregateExportData(raw, time.Second, 0)["runs"].(map[string]interface{})[backend].(map[string]interface{})
+	if _, exists := aggregatedRun["updateMetrics"]; exists {
+		t.Fatal("standalone dashboard exposed raw update samples")
+	}
+	if _, exists := aggregatedRun["updates"]; !exists {
+		t.Fatal("standalone dashboard omitted update summary")
+	}
+	aggregatedUpdates := aggregatedRun["updates"].(map[string]interface{})
+	if got := aggregatedUpdates["p95"].(float64); got != 15 {
+		t.Fatalf("standalone update p95 = %v, want exact raw-sample p95 15", got)
+	}
+
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("marshal raw export: %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal raw export: %v", err)
+	}
+	decodedRun := aggregateExportData(decoded, time.Second, 0)["runs"].(map[string]interface{})[backend].(map[string]interface{})
+	if got := decodedRun["updates"].(map[string]interface{})["p95"].(float64); got != 15 {
+		t.Fatalf("JSON replay update p95 = %v, want 15", got)
+	}
+}
+
+func TestDashboardIncludesMeanUpdatesAndTelemetryUI(t *testing.T) {
+	html, err := staticFiles.ReadFile("static/index.html")
+	if err != nil {
+		t.Fatalf("read dashboard HTML: %v", err)
+	}
+	content := string(html)
+	for _, fragment := range []string{
+		`<option value="mean">Mean</option>`,
+		`id="${queryId}-mean"`,
+		`function updateUpdateStats(runs)`,
+		`function updateTelemetry(telemetry)`,
+		`database telemetry`,
+	} {
+		if !strings.Contains(content, fragment) {
+			t.Fatalf("dashboard missing UI fragment %q", fragment)
+		}
 	}
 }
 

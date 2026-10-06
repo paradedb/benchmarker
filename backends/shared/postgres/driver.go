@@ -10,12 +10,25 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgconn/ctxwatch"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nickbruun/pgsplit"
 	"github.com/paradedb/benchmarker/backends"
 	"github.com/paradedb/benchmarker/metrics"
 	"github.com/pgvector/pgvector-go"
 	pgxvector "github.com/pgvector/pgvector-go/pgx"
+)
+
+const (
+	// A cancel request should normally interrupt a PostgreSQL query immediately.
+	// Keep a bounded network deadline as a fallback for a backend that does not
+	// process interrupts, without using pgx's default immediate connection close.
+	queryCancelDeadlineDelay = 5 * time.Second
+
+	// Every benchmark VU owns one pool with one connection. Effectively disable
+	// age-based recycling so session identity remains stable for the whole run.
+	benchmarkConnectionLifetime = time.Duration(1<<63 - 1)
 )
 
 // ConfigQuery is a custom SQL query whose result is captured during CaptureConfig.
@@ -32,6 +45,7 @@ type ConfigQuery struct {
 type Driver struct {
 	pool             *pgxpool.Pool
 	connString       string
+	telemetryQueries []TelemetryQuery
 	extraGUCs        []string      // Additional GUCs to capture (e.g., "paradedb.xxx")
 	extraGUCPrefixes []string      // GUC prefixes captured wholesale (e.g., "paradedb")
 	extraQueries     []ConfigQuery // Additional SQL queries to capture
@@ -41,15 +55,10 @@ type Driver struct {
 func New(connString string) (backends.Driver, error) {
 	ctx := context.Background()
 
-	config, err := pgxpool.ParseConfig(connString)
+	config, err := newPoolConfig(connString)
 	if err != nil {
 		return nil, err
 	}
-
-	config.MaxConns = 1
-	config.MinConns = 1
-	config.MaxConnLifetime = 30 * time.Minute
-	config.MaxConnIdleTime = 5 * time.Minute
 
 	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		// Best-effort: fails harmlessly when the vector extension is not installed.
@@ -63,6 +72,27 @@ func New(connString string) (backends.Driver, error) {
 	}
 
 	return &Driver{pool: pool, connString: connString}, nil
+}
+
+func newPoolConfig(connString string) (*pgxpool.Config, error) {
+	config, err := pgxpool.ParseConfig(connString)
+	if err != nil {
+		return nil, err
+	}
+
+	config.MaxConns = 1
+	config.MinConns = 1
+	config.MaxConnLifetime = benchmarkConnectionLifetime
+	config.MaxConnIdleTime = benchmarkConnectionLifetime
+	config.ConnConfig.BuildContextWatcherHandler = func(conn *pgconn.PgConn) ctxwatch.Handler {
+		return &pgconn.CancelRequestContextWatcherHandler{
+			Conn:               conn,
+			CancelRequestDelay: 0,
+			DeadlineDelay:      queryCancelDeadlineDelay,
+		}
+	}
+
+	return config, nil
 }
 
 // Close closes the connection pool.

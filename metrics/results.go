@@ -19,6 +19,7 @@ var (
 	ingestDocs      *metrics.Metric
 	updateDuration  *metrics.Metric
 	updateDocs      *metrics.Metric
+	updateErrors    *metrics.Metric
 	backendInit     *metrics.Metric
 	scenarioStarted *metrics.Metric
 	metricsRegOnce  sync.Once
@@ -81,6 +82,7 @@ func RegisterMetrics(vu modules.VU) {
 		ingestDocs, _ = registry.NewMetric("ingest_docs", metrics.Counter)
 		updateDuration, _ = registry.NewMetric("update_duration", metrics.Trend, metrics.Time)
 		updateDocs, _ = registry.NewMetric("update_docs", metrics.Counter)
+		updateErrors, _ = registry.NewMetric("update_errors", metrics.Counter)
 		backendInit, _ = registry.NewMetric("backend_init", metrics.Gauge)
 		scenarioStarted, _ = registry.NewMetric("scenario_started", metrics.Gauge)
 	})
@@ -357,12 +359,8 @@ type UpdateResult struct {
 
 // Emit pushes update metrics to k6 with the backend tag.
 func (r *UpdateResult) Emit(ctx context.Context, vu modules.VU, backend string) {
-	if r.Error != "" {
-		return
-	}
-
 	state := vu.State()
-	if state == nil || updateDuration == nil || updateDocs == nil {
+	if state == nil {
 		return
 	}
 
@@ -372,11 +370,26 @@ func (r *UpdateResult) Emit(ctx context.Context, vu modules.VU, backend string) 
 		tags = tags.With("backend", backend)
 	}
 
-	metrics.PushIfNotDone(ctx, state.Samples, metrics.Sample{
-		TimeSeries: metrics.TimeSeries{Metric: updateDuration, Tags: tags},
-		Time:       now,
-		Value:      r.LatencyMs,
-	})
+	if updateDuration != nil {
+		metrics.PushIfNotDone(ctx, state.Samples, metrics.Sample{
+			TimeSeries: metrics.TimeSeries{Metric: updateDuration, Tags: tags},
+			Time:       now,
+			Value:      r.LatencyMs,
+		})
+	}
+	if r.Error != "" {
+		if updateErrors != nil {
+			metrics.PushIfNotDone(ctx, state.Samples, metrics.Sample{
+				TimeSeries: metrics.TimeSeries{Metric: updateErrors, Tags: tags},
+				Time:       now,
+				Value:      1,
+			})
+		}
+		return
+	}
+	if updateDocs == nil {
+		return
+	}
 	metrics.PushIfNotDone(ctx, state.Samples, metrics.Sample{
 		TimeSeries: metrics.TimeSeries{Metric: updateDocs, Tags: tags},
 		Time:       now,
