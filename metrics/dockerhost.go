@@ -60,6 +60,7 @@ func contextDockerHost(configDir string) string {
 
 	name := os.Getenv("DOCKER_CONTEXT")
 	if name == "" {
+		// #nosec G304 -- Reads the local user's Docker CLI config, as the docker CLI does.
 		data, err := os.ReadFile(filepath.Join(configDir, "config.json"))
 		if err != nil {
 			return ""
@@ -80,6 +81,7 @@ func contextDockerHost(configDir string) string {
 	// context name.
 	digest := sha256.Sum256([]byte(name))
 	metaPath := filepath.Join(configDir, "contexts", "meta", hex.EncodeToString(digest[:]), "meta.json")
+	// #nosec G304 -- Reads the local user's Docker CLI context metadata, as the docker CLI does.
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
 		return ""
