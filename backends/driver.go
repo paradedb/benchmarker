@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/paradedb/benchmarker/internal/cleanup"
 	"github.com/paradedb/benchmarker/metrics"
 	"go.k6.io/k6/js/modules"
 )
@@ -457,7 +458,7 @@ func (c *K6Client) Update(table string, doc map[string]interface{}) map[string]i
 
 // Close closes the underlying driver.
 func (c *K6Client) Close() {
-	c.driver.Close()
+	cleanup.Close(c.driver)
 }
 
 // normalizeSchemaType lowercases a schema type and drops any type modifier,
@@ -794,7 +795,7 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, dataPath string, b
 	if err != nil {
 		return 0, err
 	}
-	defer source.Close()
+	defer cleanup.Close(source)
 
 	cols := source.Columns()
 
@@ -810,7 +811,7 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, dataPath string, b
 		d, err := l.factory(l.connString)
 		if err != nil {
 			for j := 1; j < len(drivers); j++ {
-				drivers[j].Close()
+				cleanup.Close(drivers[j])
 			}
 			return 0, err
 		}
@@ -818,7 +819,7 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, dataPath string, b
 	}
 	defer func() {
 		for i := 1; i < len(drivers); i++ {
-			drivers[i].Close()
+			cleanup.Close(drivers[i])
 		}
 	}()
 
@@ -920,10 +921,10 @@ func safeSQLIdentifier(name string) (string, error) {
 		isDigit := c >= '0' && c <= '9'
 		isUnderscore := c == '_'
 		if i == 0 {
-			if !(isLower || isUpper || isUnderscore) {
+			if !isLower && !isUpper && !isUnderscore {
 				return "", fmt.Errorf("invalid identifier: %q", name)
 			}
-		} else if !(isLower || isUpper || isDigit || isUnderscore) {
+		} else if !isLower && !isUpper && !isDigit && !isUnderscore {
 			return "", fmt.Errorf("invalid identifier: %q", name)
 		}
 	}

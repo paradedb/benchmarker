@@ -226,7 +226,7 @@ func (d *Driver) Update(ctx context.Context, table string, keyCols []string, col
 			if j > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString(fmt.Sprintf("$%d", paramIdx))
+			fmt.Fprintf(&b, "$%d", paramIdx)
 			paramIdx++
 			args = append(args, row[j])
 		}

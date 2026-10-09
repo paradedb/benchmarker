@@ -11,6 +11,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/nickbruun/pgsplit"
 	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/internal/cleanup"
 	"github.com/paradedb/benchmarker/metrics"
 )
 
@@ -47,7 +48,7 @@ func New(connString string) (backends.Driver, error) {
 
 	ctx := context.Background()
 	if err := conn.Ping(ctx); err != nil {
-		conn.Close()
+		cleanup.Close(conn)
 		return nil, err
 	}
 
@@ -86,7 +87,7 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
+	defer cleanup.Close(rows)
 
 	count := 0
 	colTypes := rows.ColumnTypes()
@@ -153,7 +154,7 @@ func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 		WHERE name IN ('max_threads', 'max_memory_usage', 'max_block_size', 'max_insert_threads')
 	`)
 	if err == nil {
-		defer rows.Close()
+		defer cleanup.Close(rows)
 		settings := make(map[string]string)
 		for rows.Next() {
 			var name, value string

@@ -13,7 +13,6 @@ on:
       - "**/*.go"
       - "go.mod"
       - "go.sum"
-      - ".golangci.yml"
       - ".github/workflows/ci.yml"
   workflow_dispatch:
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -194,7 +195,11 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 	if err != nil {
 		return 0, err
 	}
-	defer cursor.Close(ctx)
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Printf("close MongoDB cursor: %v", err)
+		}
+	}()
 
 	count := 0
 	for cursor.Next(ctx) {

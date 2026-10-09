@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/internal/cleanup"
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 )
@@ -95,7 +96,7 @@ func (l *Loader) OpenDocuments(filePath string) *DocumentReader {
 	if err != nil {
 		return l.throwConfigErrorf("openDocuments: failed to open %q: %v", filePath, err)
 	}
-	defer file.Close()
+	defer cleanup.Close(file)
 
 	csvReader := csv.NewReader(file)
 
@@ -268,7 +269,7 @@ func parseColumns(config map[string]interface{}, filePath string) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer cleanup.Close(file)
 
 	reader := csv.NewReader(file)
 	headers, err := reader.Read()
@@ -288,7 +289,7 @@ func readCSVDocuments(filePath string) ([]map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer cleanup.Close(file)
 
 	csvReader := csv.NewReader(file)
 
@@ -495,7 +496,7 @@ func (l *Loader) Load(backendName, connectionString string, config map[string]in
 	if err != nil {
 		return map[string]interface{}{"error": fmt.Sprintf("connect failed: %v", err)}
 	}
-	defer driver.Close()
+	defer cleanup.Close(driver)
 
 	if cfg.FileType == "json" {
 		return loadWithDriverJSON(driver, tableName, filePath, dataset, backendName, columns, batchSize)

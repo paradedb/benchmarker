@@ -19,7 +19,9 @@ func TestRejectsUntrustedTLSCertificate(t *testing.T) {
 	driver := backend.(*Driver)
 	resp, err := driver.client.Get(server.URL)
 	if err == nil {
-		resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close failed: %v", err)
+		}
 		t.Fatal("accepted an untrusted TLS certificate")
 	}
 	var unknownCA x509.UnknownAuthorityError
@@ -34,5 +36,7 @@ func TestRejectsUntrustedTLSCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close failed: %v", err)
+	}
 }

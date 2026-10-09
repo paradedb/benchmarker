@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/internal/cleanup"
 	"github.com/paradedb/benchmarker/metrics"
 )
 
@@ -71,7 +72,7 @@ func (d *Driver) createIndex(ctx context.Context, index string, config map[strin
 	resp, err := d.client.Do(req)
 	if err == nil && resp != nil {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		cleanup.Close(resp.Body)
 		if resp.StatusCode >= 400 && resp.StatusCode != http.StatusNotFound {
 			return fmt.Errorf("delete index failed with status %d", resp.StatusCode)
 		}
@@ -89,7 +90,7 @@ func (d *Driver) createIndex(ctx context.Context, index string, config map[strin
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer cleanup.Close(resp.Body)
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
@@ -170,11 +171,11 @@ func (d *Driver) execOperations(ctx context.Context, operations []map[string]int
 		}
 		if resp.StatusCode >= 400 {
 			respBody, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			cleanup.Close(resp.Body)
 			return fmt.Errorf("operation %s %s failed: %s", method, opURL, string(respBody))
 		}
 		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		cleanup.Close(resp.Body)
 	}
 
 	return nil
@@ -256,7 +257,7 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer cleanup.Close(resp.Body)
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
@@ -347,7 +348,7 @@ func (d *Driver) Insert(ctx context.Context, index string, cols []string, rows [
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer cleanup.Close(resp.Body)
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -407,9 +408,9 @@ func (d *Driver) Update(ctx context.Context, index string, keyCols []string, col
 
 		// Use the key column as _id
 		if keyIdx >= 0 {
-			body.WriteString(fmt.Sprintf(`{"index":{"_index":"%s","_id":"%v"}}`, index, row[keyIdx]))
+			fmt.Fprintf(&body, `{"index":{"_index":"%s","_id":"%v"}}`, index, row[keyIdx])
 		} else {
-			body.WriteString(fmt.Sprintf(`{"index":{"_index":"%s"}}`, index))
+			fmt.Fprintf(&body, `{"index":{"_index":"%s"}}`, index)
 		}
 		body.WriteByte('\n')
 
@@ -425,7 +426,7 @@ func (d *Driver) Update(ctx context.Context, index string, keyCols []string, col
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer cleanup.Close(resp.Body)
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -467,7 +468,7 @@ func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 	if err != nil {
 		fmt.Printf("[%s] config capture failed: %v\n", backendName, err)
 	} else if resp.StatusCode == 200 {
-		defer resp.Body.Close()
+		defer cleanup.Close(resp.Body)
 		var info map[string]interface{}
 		if json.NewDecoder(resp.Body).Decode(&info) == nil {
 			if clusterName, ok := info["cluster_name"].(string); ok {
@@ -483,7 +484,7 @@ func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 			}
 		}
 	} else {
-		resp.Body.Close()
+		cleanup.Close(resp.Body)
 		fmt.Printf("[%s] config capture failed: HTTP %d\n", backendName, resp.StatusCode)
 	}
 

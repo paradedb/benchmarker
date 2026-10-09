@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/paradedb/benchmarker/internal/cleanup"
 )
 
 // RowSource streams schema-converted rows from a dataset file.
@@ -59,13 +61,13 @@ func openCSVSource(path string, schema *Schema) (RowSource, error) {
 	reader := csv.NewReader(file)
 	headers, err := reader.Read()
 	if err != nil {
-		file.Close()
+		cleanup.Close(file)
 		return nil, fmt.Errorf("failed to read CSV headers from %q: %w", path, err)
 	}
 
 	cols, err := schemaColumnsInOrder(schema, headers)
 	if err != nil {
-		file.Close()
+		cleanup.Close(file)
 		return nil, err
 	}
 

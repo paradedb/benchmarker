@@ -25,6 +25,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	_ "github.com/paradedb/benchmarker" // triggers backend init() via backends.go imports
 	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/internal/cleanup"
 	"gopkg.in/yaml.v3"
 )
 
@@ -359,7 +360,7 @@ func runDrop(datasetDir string, backendName string) {
 		} else {
 			fmt.Println("OK")
 		}
-		b.Close()
+		cleanup.Close(b)
 	}
 }
 
@@ -549,7 +550,7 @@ func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes in
 		fmt.Printf("Error opening destination: %v\n", err)
 		os.Exit(1)
 	}
-	defer root.Close()
+	defer cleanup.Close(root)
 
 	var objects []string
 	paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
@@ -605,7 +606,7 @@ func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes in
 		}
 
 		outputPath, n, err := writePulledObject(root, destDir, relPath, resp.Body, maxExtractedBytes)
-		resp.Body.Close()
+		cleanup.Close(resp.Body)
 		if err != nil {
 			fmt.Printf("  Error writing %s: %v\n", relPath, err)
 			failed++
@@ -651,7 +652,7 @@ func writePulledObject(root *os.Root, destDir, relPath string, src io.Reader, ma
 		if err != nil {
 			return "", 0, fmt.Errorf("opening gzip stream: %w", err)
 		}
-		defer gz.Close()
+		defer cleanup.Close(gz)
 		reader = &decompressionBudgetReader{reader: gz, remaining: maxBytes}
 	}
 
@@ -734,7 +735,7 @@ func pullTarGz(ctx context.Context, client *s3.Client, bucket, key, destDir stri
 	if err != nil {
 		return fmt.Errorf("downloading %s: %w", key, err)
 	}
-	defer resp.Body.Close()
+	defer cleanup.Close(resp.Body)
 
 	return extractTarGz(resp.Body, destDir, maxBytes)
 }
@@ -747,12 +748,12 @@ func extractTarGz(src io.Reader, destDir string, maxBytes int64) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer cleanup.Close(root)
 	gz, err := gzip.NewReader(src)
 	if err != nil {
 		return fmt.Errorf("opening gzip stream: %w", err)
 	}
-	defer gz.Close()
+	defer cleanup.Close(gz)
 
 	// Limit the entire decompressed stream, including skipped entries and tar metadata.
 	limited := &decompressionBudgetReader{reader: gz, remaining: maxBytes}

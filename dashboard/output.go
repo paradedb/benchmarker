@@ -517,8 +517,8 @@ func (o *Output) flush() {
 			tags := sample.Tags.Map()
 			sampleTime := sample.Time.UnixMilli()
 
-			switch {
-			case name == "backend_init":
+			switch name {
+			case "backend_init":
 				// Backend initialization signal - register container for metrics
 				backend := tags["backend"]
 				if backend == "" {
@@ -543,7 +543,7 @@ func (o *Output) flush() {
 					}
 				}
 
-			case name == "scenario_started":
+			case "scenario_started":
 				// Scenario started signal - create run entry immediately
 				// Query entries are created on demand when query_duration arrives
 				backend := tags["backend"]
@@ -565,7 +565,7 @@ func (o *Output) flush() {
 				}
 				rm.WarmingUp = false
 
-			case name == "warmup_progress":
+			case "warmup_progress":
 				backend := tags["backend"]
 				if backend == "" {
 					continue
@@ -577,7 +577,7 @@ func (o *Output) flush() {
 					rm.WarmingUp = true
 				}
 
-			case name == "query_duration":
+			case "query_duration":
 				backend := tags["backend"]
 				if backend == "" {
 					backend = tags["run"]
@@ -627,7 +627,7 @@ func (o *Output) flush() {
 					o.recordQueryCSV(rm, tags["query_id"], value)
 				}
 
-			case name == "query_hits":
+			case "query_hits":
 				backend := tags["backend"]
 				if backend == "" {
 					backend = tags["run"]
@@ -655,7 +655,7 @@ func (o *Output) flush() {
 					}
 				}
 
-			case name == "update_duration" || name == "update_docs" || name == "update_errors":
+			case "update_duration", "update_docs", "update_errors":
 				backend := tags["backend"]
 				if backend == "" {
 					continue
@@ -685,7 +685,7 @@ func (o *Output) flush() {
 					rm.UpdateMetrics.totalErrors += value
 				}
 
-			case name == "container_cpu_percent":
+			case "container_cpu_percent":
 				container := tags["container"]
 				if container == "" {
 					continue
@@ -696,7 +696,7 @@ func (o *Output) flush() {
 				}
 				o.data.Containers[container].CPU = append(o.data.Containers[container].CPU, TimeValue{Time: sampleTime, Value: value})
 
-			case name == "container_memory_bytes":
+			case "container_memory_bytes":
 				container := tags["container"]
 				if container == "" {
 					continue
@@ -707,7 +707,7 @@ func (o *Output) flush() {
 				}
 				o.data.Containers[container].Memory = append(o.data.Containers[container].Memory, TimeValue{Time: sampleTime, Value: value})
 
-			case name == "ingest_docs":
+			case "ingest_docs":
 				backend := tags["backend"]
 				if backend == "" {
 					backend = tags["run"]
@@ -1472,7 +1472,9 @@ func (o *Output) handleSSE(w http.ResponseWriter, r *http.Request) {
 	o.mu.RLock()
 	initial, _ := json.Marshal(o.getSummary())
 	o.mu.RUnlock()
-	fmt.Fprintf(w, "data: %s\n\n", initial)
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", initial); err != nil {
+		return
+	}
 	flusher.Flush()
 
 	for {
@@ -1480,7 +1482,9 @@ func (o *Output) handleSSE(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case data := <-ch:
-			fmt.Fprintf(w, "data: %s\n\n", data)
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+				return
+			}
 			flusher.Flush()
 		}
 	}
@@ -1685,7 +1689,9 @@ func ServeFile(filename string, notes ...string) error {
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
-		fmt.Fprintf(w, "data: %s\n\n", compactData)
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", compactData); err != nil {
+			return
+		}
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}

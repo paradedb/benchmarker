@@ -2,6 +2,7 @@ package backends
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/paradedb/benchmarker/internal/cleanup"
 	"github.com/parquet-go/parquet-go"
 )
 
@@ -39,13 +41,13 @@ func openParquetSource(path string, schema *Schema) (RowSource, error) {
 
 	info, err := file.Stat()
 	if err != nil {
-		file.Close()
+		cleanup.Close(file)
 		return nil, err
 	}
 
 	pf, err := parquet.OpenFile(file, info.Size())
 	if err != nil {
-		file.Close()
+		cleanup.Close(file)
 		return nil, fmt.Errorf("failed to open parquet file %q: %w", path, err)
 	}
 
@@ -57,7 +59,7 @@ func openParquetSource(path string, schema *Schema) (RowSource, error) {
 
 	cols, err := schemaColumnsInOrder(schema, headers)
 	if err != nil {
-		file.Close()
+		cleanup.Close(file)
 		return nil, err
 	}
 
@@ -387,11 +389,12 @@ func toVector(raw any, schemaType string) (any, error) {
 }
 
 func (s *parquetSource) Close() error {
+	var rowsErr error
 	if s.rows != nil {
-		s.rows.Close()
+		rowsErr = s.rows.Close()
 		s.rows = nil
 	}
-	return s.file.Close()
+	return errors.Join(rowsErr, s.file.Close())
 }
 
 type parquetDirSource struct {
@@ -453,7 +456,7 @@ func (s *parquetDirSource) Next() ([]any, error) {
 			return nil, err
 		}
 		if !slices.Equal(next.Columns(), s.cols) {
-			next.Close()
+			cleanup.Close(next)
 			return nil, fmt.Errorf("parquet shard %q has different columns than %q", s.paths[s.index], s.paths[0])
 		}
 		s.current = next

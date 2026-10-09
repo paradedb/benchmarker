@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/paradedb/benchmarker/internal/cleanup"
 	"go.k6.io/k6/js/modules"
 	"go.k6.io/k6/metrics"
 )
@@ -381,7 +382,7 @@ func (c *Collector) fetchAndCalculateStats(container string) (*ContainerStats, e
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer cleanup.Close(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
@@ -459,7 +460,7 @@ func (c *Collector) captureContainerInfo(container string) bool {
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer cleanup.Close(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return false

@@ -54,7 +54,11 @@ func TestWritePulledCSVGz(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer root.Close()
+			defer func() {
+				if err := root.Close(); err != nil {
+					t.Errorf("close failed: %v", err)
+				}
+			}()
 
 			want := []byte("id,body\n1,hello\n")
 			outputPath, n, err := writePulledObject(root, dir, relPath, bytes.NewReader(testGzip(t, want)), 1<<20)
@@ -88,7 +92,11 @@ func TestWritePulledCSVGzBudgetAndCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer root.Close()
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close failed: %v", err)
+		}
+	}()
 
 	_, _, err = writePulledObject(root, dir, "data.csv.gz", bytes.NewReader(testGzip(t, bytes.Repeat([]byte("x"), 2048))), 1024)
 	if err == nil || !strings.Contains(err.Error(), "decompression limit") {
@@ -108,7 +116,11 @@ func TestWritePulledCSVGzRejectsCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer root.Close()
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close failed: %v", err)
+		}
+	}()
 
 	if _, _, err := writePulledObject(root, dir, "data.csv.gz", bytes.NewReader(testGzip(t, []byte("replacement"))), 1<<20); err == nil {
 		t.Fatal("expected existing destination error")
@@ -128,7 +140,11 @@ func TestWritePulledCSVGzChecksumAndCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer root.Close()
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close failed: %v", err)
+		}
+	}()
 
 	data := testGzip(t, []byte("id\n1\n"))
 	data[len(data)-8] ^= 0xff
@@ -146,7 +162,11 @@ func TestWritePulledObjectUncompressed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer root.Close()
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close failed: %v", err)
+		}
+	}()
 
 	want := []byte("table: documents\n")
 	outputPath, n, err := writePulledObject(root, dir, "schema.yaml", bytes.NewReader(want), 1)
