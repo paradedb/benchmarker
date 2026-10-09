@@ -18,6 +18,9 @@ scripts, bulk inserts the data, then runs `post` scripts.
 # Load with parallel workers
 ./bin/loader load --backend paradedb --workers 4 --batch-size 10000 ./datasets/sample
 
+# Run pre scripts and load data, but skip post scripts (e.g. create an unindexed heap snapshot)
+./bin/loader load --backend paradedb --pre-only ./datasets/sample
+
 # Re-run only the post scripts against already-loaded data (e.g. rebuild indexes)
 ./bin/loader load --backend paradedb --post-only ./datasets/sample
 
@@ -29,7 +32,19 @@ scripts, bulk inserts the data, then runs `post` scripts.
 
 # Pull from a public S3 bucket (no credentials needed)
 ./bin/loader pull --dataset test --source s3://fts-bench/datasets/test/ --anonymous
+
+# Pull only configuration from a prefix, leaving its large compressed CSV in S3
+./bin/loader pull --dataset test --source s3://fts-bench/datasets/test/ --exclude data.csv.gz
 ```
+
+For prefix-based pulls, CSV objects ending in `.csv.gz` are decompressed while
+they download and written without the `.gz` suffix. For example,
+`data.csv.gz` becomes `data.csv`, while `data/posts.csv.gz` becomes
+`data/posts.csv`. The compressed copy is not stored locally.
+
+Use repeatable `--exclude <relative-path>` flags to omit objects from an S3
+prefix pull. Exclusions are exact relative paths and are not supported when the
+source itself is a `.tar.gz` or `.tgz` archive.
 
 Build the loader with:
 
@@ -84,8 +99,12 @@ go test -tags integration ./backends/paradedb
 
 See [Datasets](datasets.md) for full details on directory structure, schema format, and pre/post script formats.
 
-### Archive Extraction Limits
+### Compressed Extraction Limits
 
 S3 `.tar.gz` and `.tgz` downloads are limited to 100 GiB of decompressed data by default, including tar metadata, skipped entries, and trailing data. Set `--max-extracted-bytes <positive-byte-count>` on `loader pull` to choose a different budget for your dataset.
+
+The same limit applies separately to each `.csv.gz` object in a prefix-based
+pull. Partially decompressed CSV files are removed if extraction fails or the
+limit is exceeded.
 
 Downloads cannot escape the destination through parent paths or symlinks, and duplicate file entries are rejected. New files use mode `0600` and new directories use `0750`.

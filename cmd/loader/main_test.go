@@ -8,6 +8,77 @@ import (
 	"github.com/paradedb/benchmarker/backends"
 )
 
+func TestSelectLoadMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		preOnly  bool
+		postOnly bool
+		want     loadMode
+		wantErr  bool
+	}{
+		{name: "full load", want: loadAll},
+		{name: "pre only", preOnly: true, want: loadPreOnly},
+		{name: "post only", postOnly: true, want: loadPostOnly},
+		{name: "mutually exclusive", preOnly: true, postOnly: true, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := selectLoadMode(tt.preOnly, tt.postOnly)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("selectLoadMode(%v, %v) = %v, want %v", tt.preOnly, tt.postOnly, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRelativePathList(t *testing.T) {
+	var paths relativePathList
+	for _, path := range []string{"data.csv.gz", "data/posts.csv.gz"} {
+		if err := paths.Set(path); err != nil {
+			t.Fatalf("Set(%q): %v", path, err)
+		}
+	}
+	if got, want := paths.String(), "data.csv.gz,data/posts.csv.gz"; got != want {
+		t.Fatalf("String() = %q, want %q", got, want)
+	}
+	if !isExcludedPath("data.csv.gz", paths) || !isExcludedPath("data/posts.csv.gz", paths) {
+		t.Fatal("expected configured paths to be excluded")
+	}
+	if isExcludedPath("schema.yaml", paths) {
+		t.Fatal("unexpected exclusion")
+	}
+	for _, path := range []string{"../data.csv.gz", "/data.csv.gz", "."} {
+		if err := paths.Set(path); err == nil {
+			t.Fatalf("Set(%q) should fail", path)
+		}
+	}
+}
+
+func TestS3ListPrefix(t *testing.T) {
+	for _, tt := range []struct {
+		prefix string
+		want   string
+	}{
+		{prefix: "", want: ""},
+		{prefix: "datasets/stackexchange", want: "datasets/stackexchange/"},
+		{prefix: "datasets/stackexchange/", want: "datasets/stackexchange/"},
+	} {
+		if got := s3ListPrefix(tt.prefix); got != tt.want {
+			t.Fatalf("s3ListPrefix(%q) = %q, want %q", tt.prefix, got, tt.want)
+		}
+	}
+}
+
 func TestParseS3URL(t *testing.T) {
 	tests := []struct {
 		name       string

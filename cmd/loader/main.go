@@ -4,6 +4,7 @@
 //
 //	loader load ./datasets/wikipedia                    # Load all backends
 //	loader load --backend paradedb ./datasets/wikipedia # Load specific backend
+//	loader load --pre-only ./datasets/wikipedia          # Load data without post scripts
 //	loader drop --backend paradedb ./datasets/wikipedia # Drop tables/indexes
 package main
 
@@ -32,6 +33,7 @@ func main() {
 	loadBackend := loadCmd.String("backend", "", "Specific backend ("+strings.Join(backends.RegisteredBackends(), ", ")+")")
 	loadBatchSize := loadCmd.Int("batch-size", 10000, "Batch size for bulk loading")
 	loadWorkers := loadCmd.Int("workers", 1, "Number of parallel workers")
+	loadPreOnly := loadCmd.Bool("pre-only", false, "Run pre and data load; skip post")
 	loadPostOnly := loadCmd.Bool("post-only", false, "Skip pre and data load; only run post (reuses data already in the backend)")
 
 	dropCmd := flag.NewFlagSet("drop", flag.ContinueOnError)
@@ -40,8 +42,10 @@ func main() {
 	pullCmd := flag.NewFlagSet("pull", flag.ContinueOnError)
 	pullDataset := pullCmd.String("dataset", "", "Dataset name (creates ./datasets/<name>/)")
 	pullSource := pullCmd.String("source", "", "S3 source URL (s3://bucket/prefix/)")
-	pullMaxBytes := pullCmd.Int64("max-extracted-bytes", 100<<30, "Maximum decompressed tar stream size in bytes (default 100 GiB)")
+	pullMaxBytes := pullCmd.Int64("max-extracted-bytes", 100<<30, "Maximum decompressed archive or CSV size in bytes (default 100 GiB)")
 	pullAnonymous := pullCmd.Bool("anonymous", false, "Use anonymous access for public buckets")
+	var pullExcludes relativePathList
+	pullCmd.Var(&pullExcludes, "exclude", "Relative object path to skip for prefix pulls (repeatable)")
 
 	if len(os.Args) < 2 {
 		printUsage()
@@ -70,7 +74,12 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Usage: loader load [--backend <name>] <dataset-dir>")
 			os.Exit(1)
 		}
-		runLoad(loadCmd.Arg(0), *loadBackend, *loadBatchSize, *loadWorkers, *loadPostOnly)
+		loadMode, err := selectLoadMode(*loadPreOnly, *loadPostOnly)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		runLoad(loadCmd.Arg(0), *loadBackend, *loadBatchSize, *loadWorkers, loadMode)
 
 	case "drop":
 		if err := dropCmd.Parse(os.Args[2:]); err != nil {
@@ -112,7 +121,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Error: --max-extracted-bytes must be positive")
 			os.Exit(1)
 		}
-		runPull(*pullDataset, *pullSource, *pullAnonymous, *pullMaxBytes)
+		runPull(*pullDataset, *pullSource, *pullAnonymous, *pullMaxBytes, pullExcludes)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Error: unknown command: %s\n", os.Args[1])
@@ -125,15 +134,15 @@ func printUsage() {
 	fmt.Println(`Loader - Bulk load data into search backends
 
 Usage:
-  loader load [--backend <name>] [--batch-size <n>] [--workers <n>] [--post-only] <dataset-dir>
+  loader load [--backend <name>] [--batch-size <n>] [--workers <n>] [--pre-only | --post-only] <dataset-dir>
   loader drop [--backend <name>] <dataset-dir>
-  loader pull --dataset <name> --source <s3-url> [--anonymous]
+  loader pull --dataset <name> --source <s3-url> [--anonymous] [--exclude <relative-path>]
   loader help
 
 Commands:
   load    Run pre.sql/json, bulk load parquet or CSV data (one file or one per table), run post.sql/json
   drop    Drop tables/indexes for the dataset
-  pull    Download dataset from S3 to ./datasets/<name>/ (auto-extracts .tar.gz/.tgz)
+  pull    Download dataset from S3 to ./datasets/<name>/ (auto-extracts .tar.gz/.tgz and .csv.gz objects)
   help    Show this help message
 
 Backends:
@@ -143,11 +152,13 @@ Options:
   --backend <name>           Load/drop specific backend (default: all backends)
   --batch-size <n>           Rows per batch (default: 10000)
   --workers <n>              Parallel workers (default: 1)
+  --pre-only                 Run pre scripts and load data; skip post scripts
   --post-only                Skip pre and data load; only run post against existing data
-  --max-extracted-bytes <n>  Maximum decompressed tar stream bytes (default 107374182400)
+  --max-extracted-bytes <n>  Maximum decompressed archive or CSV bytes (default 107374182400)
   --dataset <name>           Dataset name for pull command
   --source <url>             S3 source URL (s3://bucket/prefix/)
   --anonymous                Use anonymous access for public S3 buckets
+  --exclude <relative-path>  Skip an object during a prefix pull (repeatable)
 
 Environment Variables:
   PARADEDB_URL       ParadeDB connection string
@@ -162,10 +173,12 @@ Environment Variables:
 Examples:
   loader load --backend paradedb ./datasets/sample
   loader load --backend paradedb --workers 4 ./datasets/sample
+  loader load --backend paradedb --pre-only ./datasets/sample       # load an unindexed heap
   loader load --backend paradedb --post-only ./datasets/sample      # rebuild indexes only
   loader load ./datasets/sample                                    # all backends
   loader drop --backend paradedb ./datasets/sample
   loader pull --dataset large --source s3://mybucket/datasets/large/
+  loader pull --dataset large --source s3://mybucket/datasets/large/ --exclude data.csv.gz
   loader pull --dataset test --source s3://fts-bench/datasets/test/ --anonymous
   loader pull --dataset hn --source s3://fts-bench/datasets/hn.tar.gz --anonymous
   PARADEDB_URL=postgres://user:pass@host:5432/db loader load --backend paradedb ./datasets/sample`)
@@ -183,7 +196,28 @@ func getConnection(name string) string {
 	return cfg.DefaultConn
 }
 
-func runLoad(datasetDir string, backendName string, batchSize int, workers int, postOnly bool) {
+type loadMode int
+
+const (
+	loadAll loadMode = iota
+	loadPreOnly
+	loadPostOnly
+)
+
+func selectLoadMode(preOnly, postOnly bool) (loadMode, error) {
+	if preOnly && postOnly {
+		return loadAll, fmt.Errorf("--pre-only and --post-only cannot be used together")
+	}
+	if preOnly {
+		return loadPreOnly, nil
+	}
+	if postOnly {
+		return loadPostOnly, nil
+	}
+	return loadAll, nil
+}
+
+func runLoad(datasetDir string, backendName string, batchSize int, workers int, mode loadMode) {
 	schema, err := loadSchema(datasetDir)
 	if err != nil {
 		fmt.Printf("Error loading schema: %v\n", err)
@@ -191,7 +225,7 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int, 
 	}
 
 	var tables []tableData
-	if !postOnly {
+	if mode != loadPostOnly {
 		tables, err = resolveTableData(datasetDir, schema)
 		if err != nil {
 			fmt.Printf("Error locating data file: %v\n", err)
@@ -237,7 +271,7 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int, 
 			}
 
 			var start time.Time
-			if postOnly {
+			if mode == loadPostOnly {
 				fmt.Println("Skipping pre and data load (--post-only)")
 			} else {
 				fmt.Print("Running pre... ")
@@ -270,6 +304,11 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int, 
 					rate = float64(count) / elapsed
 				}
 				fmt.Printf("OK (%d rows, %.2fs, %.0f rows/sec)\n", count, elapsed, rate)
+			}
+
+			if mode == loadPreOnly {
+				fmt.Println("Skipping post (--pre-only)")
+				return
 			}
 
 			// Run post
@@ -425,10 +464,46 @@ func loadSchema(datasetDir string) (*backends.Schema, error) {
 // S3 Pull
 // ============================================================================
 
-func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes int64) {
+type relativePathList []string
+
+func (paths *relativePathList) String() string {
+	return strings.Join(*paths, ",")
+}
+
+func (paths *relativePathList) Set(value string) error {
+	clean, _, err := resolveDownloadPath(".", "", value)
+	if err != nil {
+		return fmt.Errorf("invalid relative path %q: %w", value, err)
+	}
+	*paths = append(*paths, clean)
+	return nil
+}
+
+func isExcludedPath(path string, excludes []string) bool {
+	for _, exclude := range excludes {
+		if path == exclude {
+			return true
+		}
+	}
+	return false
+}
+
+func s3ListPrefix(prefix string) string {
+	if prefix == "" {
+		return ""
+	}
+	return strings.TrimSuffix(prefix, "/") + "/"
+}
+
+func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes int64, excludes []string) {
 	bucket, prefix, err := parseS3URL(sourceURL)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if isTarGzKey(prefix) && len(excludes) > 0 {
+		fmt.Println("Error: --exclude is only supported for S3 prefix pulls")
 		os.Exit(1)
 	}
 
@@ -479,7 +554,7 @@ func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes in
 	var objects []string
 	paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
-		Prefix: aws.String(prefix),
+		Prefix: aws.String(s3ListPrefix(prefix)),
 	})
 
 	for paginator.HasMorePages() {
@@ -508,16 +583,14 @@ func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes in
 	var totalBytes int64
 
 	for _, key := range objects {
-		relPath, localPath, err := resolveDownloadPath(destDir, prefix, key)
+		relPath, _, err := resolveDownloadPath(destDir, prefix, key)
 		if err != nil {
 			fmt.Printf("  Skipping %s: %v\n", key, err)
 			failed++
 			continue
 		}
-
-		if err := root.MkdirAll(filepath.Dir(relPath), 0750); err != nil {
-			fmt.Printf("  Error creating directory for %s: %v\n", relPath, err)
-			failed++
+		if isExcludedPath(relPath, excludes) {
+			fmt.Printf("  Skipping %s (excluded)\n", relPath)
 			continue
 		}
 
@@ -531,27 +604,21 @@ func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes in
 			continue
 		}
 
-		f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-		if err != nil {
-			resp.Body.Close()
-			fmt.Printf("  Error creating %s: %v\n", localPath, err)
-			failed++
-			continue
-		}
-
-		n, err := io.Copy(f, resp.Body)
+		outputPath, n, err := writePulledObject(root, destDir, relPath, resp.Body, maxExtractedBytes)
 		resp.Body.Close()
-		f.Close()
-
 		if err != nil {
-			fmt.Printf("  Error writing %s: %v\n", localPath, err)
+			fmt.Printf("  Error writing %s: %v\n", relPath, err)
 			failed++
 			continue
 		}
 
 		totalBytes += n
 		downloaded++
-		fmt.Printf("  %s (%s)\n", relPath, formatBytes(n))
+		if outputPath != relPath {
+			fmt.Printf("  %s -> %s (%s)\n", relPath, outputPath, formatBytes(n))
+		} else {
+			fmt.Printf("  %s (%s)\n", outputPath, formatBytes(n))
+		}
 	}
 
 	fmt.Printf("\nComplete: %d files downloaded (%.2f MB)", downloaded, float64(totalBytes)/1024/1024)
@@ -563,6 +630,52 @@ func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes in
 		os.Exit(1)
 	}
 	writeDatasetManifest(destDir, sourceURL)
+}
+
+func isCsvGzPath(path string) bool {
+	return strings.HasSuffix(path, ".csv.gz")
+}
+
+// writePulledObject writes an S3 object into root. Gzipped CSV objects are
+// decompressed while streaming and materialized without the .gz suffix so the
+// loader can consume them directly without storing a second compressed copy.
+func writePulledObject(root *os.Root, destDir, relPath string, src io.Reader, maxBytes int64) (string, int64, error) {
+	outputPath := relPath
+	reader := src
+	if isCsvGzPath(relPath) {
+		if maxBytes <= 0 {
+			return "", 0, fmt.Errorf("decompression limit must be positive")
+		}
+		outputPath = relPath[:len(relPath)-len(".gz")]
+		gz, err := gzip.NewReader(src)
+		if err != nil {
+			return "", 0, fmt.Errorf("opening gzip stream: %w", err)
+		}
+		defer gz.Close()
+		reader = &decompressionBudgetReader{reader: gz, remaining: maxBytes}
+	}
+
+	if err := root.MkdirAll(filepath.Dir(outputPath), 0750); err != nil {
+		return "", 0, fmt.Errorf("creating directory for %s: %w", outputPath, err)
+	}
+
+	localPath := filepath.Join(destDir, outputPath)
+	f, err := root.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return "", 0, fmt.Errorf("creating %s: %w", localPath, err)
+	}
+
+	n, copyErr := io.Copy(f, reader)
+	closeErr := f.Close()
+	if copyErr == nil {
+		copyErr = closeErr
+	}
+	if copyErr != nil {
+		_ = root.Remove(outputPath)
+		return "", 0, fmt.Errorf("writing %s: %w", localPath, copyErr)
+	}
+
+	return outputPath, n, nil
 }
 
 // writeDatasetManifest records where the dataset was pulled from. The k6
@@ -642,7 +755,7 @@ func extractTarGz(src io.Reader, destDir string, maxBytes int64) error {
 	defer gz.Close()
 
 	// Limit the entire decompressed stream, including skipped entries and tar metadata.
-	limited := &archiveBudgetReader{reader: gz, remaining: maxBytes}
+	limited := &decompressionBudgetReader{reader: gz, remaining: maxBytes}
 	tr := tar.NewReader(limited)
 	var extracted, skipped int
 	var totalBytes int64
@@ -779,14 +892,14 @@ func formatBytes(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-// archiveBudgetReader fails instead of returning EOF when the decompressed
-// stream exceeds its budget, so tar cannot mistake a limit for clean completion.
-type archiveBudgetReader struct {
+// decompressionBudgetReader fails instead of returning EOF when a decompressed
+// stream exceeds its budget, so callers cannot mistake a limit for completion.
+type decompressionBudgetReader struct {
 	reader    io.Reader
 	remaining int64
 }
 
-func (r *archiveBudgetReader) Read(p []byte) (int, error) {
+func (r *decompressionBudgetReader) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
@@ -794,7 +907,7 @@ func (r *archiveBudgetReader) Read(p []byte) (int, error) {
 		var probe [1]byte
 		n, err := r.reader.Read(probe[:])
 		if n > 0 {
-			return 0, fmt.Errorf("archive exceeds decompression limit")
+			return 0, fmt.Errorf("stream exceeds decompression limit")
 		}
 		return 0, err
 	}
