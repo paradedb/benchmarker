@@ -13,6 +13,7 @@ on:
       - "**/*.go"
       - "go.mod"
       - "go.sum"
+      - ".golangci.yml"
       - ".github/workflows/ci.yml"
   workflow_dispatch:
 
@@ -65,7 +66,7 @@ jobs:
 
       - name: Install golangci-lint
         run: |
-          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Run lint
@@ -86,10 +87,10 @@ jobs:
 
       - name: Install Gosec
         run: |
-          # Gosec v2.29.0 needs a newer export-data reader for Go 1.27.
+          # Keep the export-data reader compatible with the current Go toolchain.
           cd "$(mktemp -d)"
           go mod init gosec-tools
-          go get github.com/securego/gosec/v2/cmd/gosec@v2.29.0 golang.org/x/tools@v0.51.0
+          go get github.com/securego/gosec/v2/cmd/gosec@latest golang.org/x/tools@latest
           go install github.com/securego/gosec/v2/cmd/gosec
 
       # Enforce the audited rules.
