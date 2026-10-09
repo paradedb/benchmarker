@@ -1,0 +1,21 @@
+columns:
+  id: bigint
+  deleted: boolean
+  type: text
+  by: text
+  time: timestamp
+  text: text
+  dead: boolean
+  parent: bigint
+  poll: bigint
+  kids: bigint[]
+  url: text
+  score: integer
+  title: text
+  parts: bigint[]
+  descendants: integer
+
+primaryKey: id
+table: hn_items
+index: hn_items
+collection: hn_items

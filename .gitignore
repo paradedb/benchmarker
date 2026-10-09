@@ -44,3 +44,4 @@ bin/
 
 #AI
 .claude/
+!datasets/hackernews-boolean
