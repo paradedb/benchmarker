@@ -1,6 +1,6 @@
 module github.com/paradedb/benchmarker
 
-go 1.26.9
+go 1.27.2
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
