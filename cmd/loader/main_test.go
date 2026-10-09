@@ -64,6 +64,21 @@ func TestRelativePathList(t *testing.T) {
 	}
 }
 
+func TestS3ListPrefix(t *testing.T) {
+	for _, tt := range []struct {
+		prefix string
+		want   string
+	}{
+		{prefix: "", want: ""},
+		{prefix: "datasets/stackexchange", want: "datasets/stackexchange/"},
+		{prefix: "datasets/stackexchange/", want: "datasets/stackexchange/"},
+	} {
+		if got := s3ListPrefix(tt.prefix); got != tt.want {
+			t.Fatalf("s3ListPrefix(%q) = %q, want %q", tt.prefix, got, tt.want)
+		}
+	}
+}
+
 func TestParseS3URL(t *testing.T) {
 	tests := []struct {
 		name       string

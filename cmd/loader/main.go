@@ -488,6 +488,13 @@ func isExcludedPath(path string, excludes []string) bool {
 	return false
 }
 
+func s3ListPrefix(prefix string) string {
+	if prefix == "" {
+		return ""
+	}
+	return strings.TrimSuffix(prefix, "/") + "/"
+}
+
 func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes int64, excludes []string) {
 	bucket, prefix, err := parseS3URL(sourceURL)
 	if err != nil {
@@ -547,7 +554,7 @@ func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes in
 	var objects []string
 	paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
-		Prefix: aws.String(prefix),
+		Prefix: aws.String(s3ListPrefix(prefix)),
 	})
 
 	for paginator.HasMorePages() {
