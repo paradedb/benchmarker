@@ -32,12 +32,19 @@ scripts, bulk inserts the data, then runs `post` scripts.
 
 # Pull from a public S3 bucket (no credentials needed)
 ./bin/loader pull --dataset test --source s3://fts-bench/datasets/test/ --anonymous
+
+# Pull only configuration from a prefix, leaving its large compressed CSV in S3
+./bin/loader pull --dataset test --source s3://fts-bench/datasets/test/ --exclude data.csv.gz
 ```
 
 For prefix-based pulls, CSV objects ending in `.csv.gz` are decompressed while
 they download and written without the `.gz` suffix. For example,
 `data.csv.gz` becomes `data.csv`, while `data/posts.csv.gz` becomes
 `data/posts.csv`. The compressed copy is not stored locally.
+
+Use repeatable `--exclude <relative-path>` flags to omit objects from an S3
+prefix pull. Exclusions are exact relative paths and are not supported when the
+source itself is a `.tar.gz` or `.tgz` archive.
 
 Build the loader with:
 

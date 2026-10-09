@@ -44,6 +44,8 @@ func main() {
 	pullSource := pullCmd.String("source", "", "S3 source URL (s3://bucket/prefix/)")
 	pullMaxBytes := pullCmd.Int64("max-extracted-bytes", 100<<30, "Maximum decompressed archive or CSV size in bytes (default 100 GiB)")
 	pullAnonymous := pullCmd.Bool("anonymous", false, "Use anonymous access for public buckets")
+	var pullExcludes relativePathList
+	pullCmd.Var(&pullExcludes, "exclude", "Relative object path to skip for prefix pulls (repeatable)")
 
 	if len(os.Args) < 2 {
 		printUsage()
@@ -119,7 +121,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Error: --max-extracted-bytes must be positive")
 			os.Exit(1)
 		}
-		runPull(*pullDataset, *pullSource, *pullAnonymous, *pullMaxBytes)
+		runPull(*pullDataset, *pullSource, *pullAnonymous, *pullMaxBytes, pullExcludes)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Error: unknown command: %s\n", os.Args[1])
@@ -134,7 +136,7 @@ func printUsage() {
 Usage:
   loader load [--backend <name>] [--batch-size <n>] [--workers <n>] [--pre-only | --post-only] <dataset-dir>
   loader drop [--backend <name>] <dataset-dir>
-  loader pull --dataset <name> --source <s3-url> [--anonymous]
+  loader pull --dataset <name> --source <s3-url> [--anonymous] [--exclude <relative-path>]
   loader help
 
 Commands:
@@ -156,6 +158,7 @@ Options:
   --dataset <name>           Dataset name for pull command
   --source <url>             S3 source URL (s3://bucket/prefix/)
   --anonymous                Use anonymous access for public S3 buckets
+  --exclude <relative-path>  Skip an object during a prefix pull (repeatable)
 
 Environment Variables:
   PARADEDB_URL       ParadeDB connection string
@@ -175,6 +178,7 @@ Examples:
   loader load ./datasets/sample                                    # all backends
   loader drop --backend paradedb ./datasets/sample
   loader pull --dataset large --source s3://mybucket/datasets/large/
+  loader pull --dataset large --source s3://mybucket/datasets/large/ --exclude data.csv.gz
   loader pull --dataset test --source s3://fts-bench/datasets/test/ --anonymous
   loader pull --dataset hn --source s3://fts-bench/datasets/hn.tar.gz --anonymous
   PARADEDB_URL=postgres://user:pass@host:5432/db loader load --backend paradedb ./datasets/sample`)
@@ -460,10 +464,39 @@ func loadSchema(datasetDir string) (*backends.Schema, error) {
 // S3 Pull
 // ============================================================================
 
-func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes int64) {
+type relativePathList []string
+
+func (paths *relativePathList) String() string {
+	return strings.Join(*paths, ",")
+}
+
+func (paths *relativePathList) Set(value string) error {
+	clean, _, err := resolveDownloadPath(".", "", value)
+	if err != nil {
+		return fmt.Errorf("invalid relative path %q: %w", value, err)
+	}
+	*paths = append(*paths, clean)
+	return nil
+}
+
+func isExcludedPath(path string, excludes []string) bool {
+	for _, exclude := range excludes {
+		if path == exclude {
+			return true
+		}
+	}
+	return false
+}
+
+func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes int64, excludes []string) {
 	bucket, prefix, err := parseS3URL(sourceURL)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if isTarGzKey(prefix) && len(excludes) > 0 {
+		fmt.Println("Error: --exclude is only supported for S3 prefix pulls")
 		os.Exit(1)
 	}
 
@@ -547,6 +580,10 @@ func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes in
 		if err != nil {
 			fmt.Printf("  Skipping %s: %v\n", key, err)
 			failed++
+			continue
+		}
+		if isExcludedPath(relPath, excludes) {
+			fmt.Printf("  Skipping %s (excluded)\n", relPath)
 			continue
 		}
 

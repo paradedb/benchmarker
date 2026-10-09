@@ -41,6 +41,29 @@ func TestSelectLoadMode(t *testing.T) {
 	}
 }
 
+func TestRelativePathList(t *testing.T) {
+	var paths relativePathList
+	for _, path := range []string{"data.csv.gz", "data/posts.csv.gz"} {
+		if err := paths.Set(path); err != nil {
+			t.Fatalf("Set(%q): %v", path, err)
+		}
+	}
+	if got, want := paths.String(), "data.csv.gz,data/posts.csv.gz"; got != want {
+		t.Fatalf("String() = %q, want %q", got, want)
+	}
+	if !isExcludedPath("data.csv.gz", paths) || !isExcludedPath("data/posts.csv.gz", paths) {
+		t.Fatal("expected configured paths to be excluded")
+	}
+	if isExcludedPath("schema.yaml", paths) {
+		t.Fatal("unexpected exclusion")
+	}
+	for _, path := range []string{"../data.csv.gz", "/data.csv.gz", "."} {
+		if err := paths.Set(path); err == nil {
+			t.Fatalf("Set(%q) should fail", path)
+		}
+	}
+}
+
 func TestParseS3URL(t *testing.T) {
 	tests := []struct {
 		name       string
