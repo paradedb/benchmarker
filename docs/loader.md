@@ -18,6 +18,9 @@ scripts, bulk inserts the data, then runs `post` scripts.
 # Load with parallel workers
 ./bin/loader load --backend paradedb --workers 4 --batch-size 10000 ./datasets/sample
 
+# Run pre scripts and load data, but skip post scripts (e.g. create an unindexed heap snapshot)
+./bin/loader load --backend paradedb --pre-only ./datasets/sample
+
 # Re-run only the post scripts against already-loaded data (e.g. rebuild indexes)
 ./bin/loader load --backend paradedb --post-only ./datasets/sample
 

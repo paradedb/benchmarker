@@ -8,6 +8,39 @@ import (
 	"github.com/paradedb/benchmarker/backends"
 )
 
+func TestSelectLoadMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		preOnly  bool
+		postOnly bool
+		want     loadMode
+		wantErr  bool
+	}{
+		{name: "full load", want: loadAll},
+		{name: "pre only", preOnly: true, want: loadPreOnly},
+		{name: "post only", postOnly: true, want: loadPostOnly},
+		{name: "mutually exclusive", preOnly: true, postOnly: true, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := selectLoadMode(tt.preOnly, tt.postOnly)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("selectLoadMode(%v, %v) = %v, want %v", tt.preOnly, tt.postOnly, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseS3URL(t *testing.T) {
 	tests := []struct {
 		name       string

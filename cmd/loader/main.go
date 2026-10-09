@@ -4,6 +4,7 @@
 //
 //	loader load ./datasets/wikipedia                    # Load all backends
 //	loader load --backend paradedb ./datasets/wikipedia # Load specific backend
+//	loader load --pre-only ./datasets/wikipedia          # Load data without post scripts
 //	loader drop --backend paradedb ./datasets/wikipedia # Drop tables/indexes
 package main
 
@@ -32,6 +33,7 @@ func main() {
 	loadBackend := loadCmd.String("backend", "", "Specific backend ("+strings.Join(backends.RegisteredBackends(), ", ")+")")
 	loadBatchSize := loadCmd.Int("batch-size", 10000, "Batch size for bulk loading")
 	loadWorkers := loadCmd.Int("workers", 1, "Number of parallel workers")
+	loadPreOnly := loadCmd.Bool("pre-only", false, "Run pre and data load; skip post")
 	loadPostOnly := loadCmd.Bool("post-only", false, "Skip pre and data load; only run post (reuses data already in the backend)")
 
 	dropCmd := flag.NewFlagSet("drop", flag.ContinueOnError)
@@ -70,7 +72,12 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Usage: loader load [--backend <name>] <dataset-dir>")
 			os.Exit(1)
 		}
-		runLoad(loadCmd.Arg(0), *loadBackend, *loadBatchSize, *loadWorkers, *loadPostOnly)
+		loadMode, err := selectLoadMode(*loadPreOnly, *loadPostOnly)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		runLoad(loadCmd.Arg(0), *loadBackend, *loadBatchSize, *loadWorkers, loadMode)
 
 	case "drop":
 		if err := dropCmd.Parse(os.Args[2:]); err != nil {
@@ -125,7 +132,7 @@ func printUsage() {
 	fmt.Println(`Loader - Bulk load data into search backends
 
 Usage:
-  loader load [--backend <name>] [--batch-size <n>] [--workers <n>] [--post-only] <dataset-dir>
+  loader load [--backend <name>] [--batch-size <n>] [--workers <n>] [--pre-only | --post-only] <dataset-dir>
   loader drop [--backend <name>] <dataset-dir>
   loader pull --dataset <name> --source <s3-url> [--anonymous]
   loader help
@@ -143,6 +150,7 @@ Options:
   --backend <name>           Load/drop specific backend (default: all backends)
   --batch-size <n>           Rows per batch (default: 10000)
   --workers <n>              Parallel workers (default: 1)
+  --pre-only                 Run pre scripts and load data; skip post scripts
   --post-only                Skip pre and data load; only run post against existing data
   --max-extracted-bytes <n>  Maximum decompressed tar stream bytes (default 107374182400)
   --dataset <name>           Dataset name for pull command
@@ -162,6 +170,7 @@ Environment Variables:
 Examples:
   loader load --backend paradedb ./datasets/sample
   loader load --backend paradedb --workers 4 ./datasets/sample
+  loader load --backend paradedb --pre-only ./datasets/sample       # load an unindexed heap
   loader load --backend paradedb --post-only ./datasets/sample      # rebuild indexes only
   loader load ./datasets/sample                                    # all backends
   loader drop --backend paradedb ./datasets/sample
@@ -183,7 +192,28 @@ func getConnection(name string) string {
 	return cfg.DefaultConn
 }
 
-func runLoad(datasetDir string, backendName string, batchSize int, workers int, postOnly bool) {
+type loadMode int
+
+const (
+	loadAll loadMode = iota
+	loadPreOnly
+	loadPostOnly
+)
+
+func selectLoadMode(preOnly, postOnly bool) (loadMode, error) {
+	if preOnly && postOnly {
+		return loadAll, fmt.Errorf("--pre-only and --post-only cannot be used together")
+	}
+	if preOnly {
+		return loadPreOnly, nil
+	}
+	if postOnly {
+		return loadPostOnly, nil
+	}
+	return loadAll, nil
+}
+
+func runLoad(datasetDir string, backendName string, batchSize int, workers int, mode loadMode) {
 	schema, err := loadSchema(datasetDir)
 	if err != nil {
 		fmt.Printf("Error loading schema: %v\n", err)
@@ -191,7 +221,7 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int, 
 	}
 
 	var tables []tableData
-	if !postOnly {
+	if mode != loadPostOnly {
 		tables, err = resolveTableData(datasetDir, schema)
 		if err != nil {
 			fmt.Printf("Error locating data file: %v\n", err)
@@ -237,7 +267,7 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int, 
 			}
 
 			var start time.Time
-			if postOnly {
+			if mode == loadPostOnly {
 				fmt.Println("Skipping pre and data load (--post-only)")
 			} else {
 				fmt.Print("Running pre... ")
@@ -270,6 +300,11 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int, 
 					rate = float64(count) / elapsed
 				}
 				fmt.Printf("OK (%d rows, %.2fs, %.0f rows/sec)\n", count, elapsed, rate)
+			}
+
+			if mode == loadPreOnly {
+				fmt.Println("Skipping post (--pre-only)")
+				return
 			}
 
 			// Run post
