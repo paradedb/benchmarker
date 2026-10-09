@@ -42,7 +42,7 @@ func main() {
 	pullCmd := flag.NewFlagSet("pull", flag.ContinueOnError)
 	pullDataset := pullCmd.String("dataset", "", "Dataset name (creates ./datasets/<name>/)")
 	pullSource := pullCmd.String("source", "", "S3 source URL (s3://bucket/prefix/)")
-	pullMaxBytes := pullCmd.Int64("max-extracted-bytes", 100<<30, "Maximum decompressed tar stream size in bytes (default 100 GiB)")
+	pullMaxBytes := pullCmd.Int64("max-extracted-bytes", 100<<30, "Maximum decompressed archive or CSV size in bytes (default 100 GiB)")
 	pullAnonymous := pullCmd.Bool("anonymous", false, "Use anonymous access for public buckets")
 
 	if len(os.Args) < 2 {
@@ -140,7 +140,7 @@ Usage:
 Commands:
   load    Run pre.sql/json, bulk load parquet or CSV data (one file or one per table), run post.sql/json
   drop    Drop tables/indexes for the dataset
-  pull    Download dataset from S3 to ./datasets/<name>/ (auto-extracts .tar.gz/.tgz)
+  pull    Download dataset from S3 to ./datasets/<name>/ (auto-extracts .tar.gz/.tgz and .csv.gz objects)
   help    Show this help message
 
 Backends:
@@ -152,7 +152,7 @@ Options:
   --workers <n>              Parallel workers (default: 1)
   --pre-only                 Run pre scripts and load data; skip post scripts
   --post-only                Skip pre and data load; only run post against existing data
-  --max-extracted-bytes <n>  Maximum decompressed tar stream bytes (default 107374182400)
+  --max-extracted-bytes <n>  Maximum decompressed archive or CSV bytes (default 107374182400)
   --dataset <name>           Dataset name for pull command
   --source <url>             S3 source URL (s3://bucket/prefix/)
   --anonymous                Use anonymous access for public S3 buckets
@@ -543,15 +543,9 @@ func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes in
 	var totalBytes int64
 
 	for _, key := range objects {
-		relPath, localPath, err := resolveDownloadPath(destDir, prefix, key)
+		relPath, _, err := resolveDownloadPath(destDir, prefix, key)
 		if err != nil {
 			fmt.Printf("  Skipping %s: %v\n", key, err)
-			failed++
-			continue
-		}
-
-		if err := root.MkdirAll(filepath.Dir(relPath), 0750); err != nil {
-			fmt.Printf("  Error creating directory for %s: %v\n", relPath, err)
 			failed++
 			continue
 		}
@@ -566,27 +560,21 @@ func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes in
 			continue
 		}
 
-		f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-		if err != nil {
-			resp.Body.Close()
-			fmt.Printf("  Error creating %s: %v\n", localPath, err)
-			failed++
-			continue
-		}
-
-		n, err := io.Copy(f, resp.Body)
+		outputPath, n, err := writePulledObject(root, destDir, relPath, resp.Body, maxExtractedBytes)
 		resp.Body.Close()
-		f.Close()
-
 		if err != nil {
-			fmt.Printf("  Error writing %s: %v\n", localPath, err)
+			fmt.Printf("  Error writing %s: %v\n", relPath, err)
 			failed++
 			continue
 		}
 
 		totalBytes += n
 		downloaded++
-		fmt.Printf("  %s (%s)\n", relPath, formatBytes(n))
+		if outputPath != relPath {
+			fmt.Printf("  %s -> %s (%s)\n", relPath, outputPath, formatBytes(n))
+		} else {
+			fmt.Printf("  %s (%s)\n", outputPath, formatBytes(n))
+		}
 	}
 
 	fmt.Printf("\nComplete: %d files downloaded (%.2f MB)", downloaded, float64(totalBytes)/1024/1024)
@@ -598,6 +586,52 @@ func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes in
 		os.Exit(1)
 	}
 	writeDatasetManifest(destDir, sourceURL)
+}
+
+func isCsvGzPath(path string) bool {
+	return strings.HasSuffix(path, ".csv.gz")
+}
+
+// writePulledObject writes an S3 object into root. Gzipped CSV objects are
+// decompressed while streaming and materialized without the .gz suffix so the
+// loader can consume them directly without storing a second compressed copy.
+func writePulledObject(root *os.Root, destDir, relPath string, src io.Reader, maxBytes int64) (string, int64, error) {
+	outputPath := relPath
+	reader := src
+	if isCsvGzPath(relPath) {
+		if maxBytes <= 0 {
+			return "", 0, fmt.Errorf("decompression limit must be positive")
+		}
+		outputPath = relPath[:len(relPath)-len(".gz")]
+		gz, err := gzip.NewReader(src)
+		if err != nil {
+			return "", 0, fmt.Errorf("opening gzip stream: %w", err)
+		}
+		defer gz.Close()
+		reader = &decompressionBudgetReader{reader: gz, remaining: maxBytes}
+	}
+
+	if err := root.MkdirAll(filepath.Dir(outputPath), 0750); err != nil {
+		return "", 0, fmt.Errorf("creating directory for %s: %w", outputPath, err)
+	}
+
+	localPath := filepath.Join(destDir, outputPath)
+	f, err := root.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return "", 0, fmt.Errorf("creating %s: %w", localPath, err)
+	}
+
+	n, copyErr := io.Copy(f, reader)
+	closeErr := f.Close()
+	if copyErr == nil {
+		copyErr = closeErr
+	}
+	if copyErr != nil {
+		_ = root.Remove(outputPath)
+		return "", 0, fmt.Errorf("writing %s: %w", localPath, copyErr)
+	}
+
+	return outputPath, n, nil
 }
 
 // writeDatasetManifest records where the dataset was pulled from. The k6
@@ -677,7 +711,7 @@ func extractTarGz(src io.Reader, destDir string, maxBytes int64) error {
 	defer gz.Close()
 
 	// Limit the entire decompressed stream, including skipped entries and tar metadata.
-	limited := &archiveBudgetReader{reader: gz, remaining: maxBytes}
+	limited := &decompressionBudgetReader{reader: gz, remaining: maxBytes}
 	tr := tar.NewReader(limited)
 	var extracted, skipped int
 	var totalBytes int64
@@ -814,14 +848,14 @@ func formatBytes(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-// archiveBudgetReader fails instead of returning EOF when the decompressed
-// stream exceeds its budget, so tar cannot mistake a limit for clean completion.
-type archiveBudgetReader struct {
+// decompressionBudgetReader fails instead of returning EOF when a decompressed
+// stream exceeds its budget, so callers cannot mistake a limit for completion.
+type decompressionBudgetReader struct {
 	reader    io.Reader
 	remaining int64
 }
 
-func (r *archiveBudgetReader) Read(p []byte) (int, error) {
+func (r *decompressionBudgetReader) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
@@ -829,7 +863,7 @@ func (r *archiveBudgetReader) Read(p []byte) (int, error) {
 		var probe [1]byte
 		n, err := r.reader.Read(probe[:])
 		if n > 0 {
-			return 0, fmt.Errorf("archive exceeds decompression limit")
+			return 0, fmt.Errorf("stream exceeds decompression limit")
 		}
 		return 0, err
 	}
