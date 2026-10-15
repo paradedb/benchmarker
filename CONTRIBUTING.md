@@ -234,7 +234,10 @@ SQL backends use `.sql` files, HTTP backends (Elasticsearch, OpenSearch, MongoDB
 
 The CLI loader imports one source into one `schema.yaml` table per dataset.
 Scalar CSV and Parquet columns work across backends; `vector(n)` columns are
-limited to ParadeDB and PostgreSQL. k6 ingest/update helpers remain CSV-only.
+limited to ParadeDB and PostgreSQL. For k6 ingest/update workloads,
+`db.loader().openDocumentStream(path, {schema})` reads typed CSV, Parquet files,
+and Parquet shard directories. The existing `openDocuments()` and
+`loader.load...()` helpers remain CSV-only.
 
 ## Pull Request Workflow
 

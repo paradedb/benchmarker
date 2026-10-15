@@ -1,6 +1,6 @@
 services:
   paradedb:
-    image: paradedb/paradedb:v0.23.1-pg18
+    image: paradedb/paradedb:v0.26.0-pg18
     container_name: paradedb
     privileged: true
     cap_add:
@@ -33,7 +33,7 @@ services:
     command:
       - "postgres"
       - "-c"
-      - "shared_preload_libraries=pg_search"
+      - "shared_preload_libraries=pg_search,pg_cron"
       - "-c"
       - "shared_buffers=2GB"
       - "-c"

@@ -55,7 +55,7 @@ The `db` module (`k6/x/database`) provides:
 | `db.backends(config)`         | `Backends`  | Initializes backend drivers and their optional telemetry providers                                                                                                                        |
 | `db.metrics(config)`          | `Collector` | Creates a standalone Docker container metrics collector (use `backends.addMetricsCollector()` instead for most cases)                                                                     |
 | `db.timer({ duration, gap })` | `Timer`     | Creates a phase timer for staggering scenarios                                                                                                                                            |
-| `db.loader()`                 | `Loader`    | Creates a CSV-only document reader for ingest or update benchmarks                                                                                                                        |
+| `db.loader()`                 | `Loader`    | Creates cached CSV readers or typed CSV/Parquet streams for ingest and update benchmarks                                                                                                  |
 | `db.terms(data)`              | `Terms`     | Loads a JSON array of query strings to avoid caching bias. `terms.next()` cycles sequentially, `terms.random()` picks randomly. Accepts a JSON string via `open()` or a k6 `SharedArray`. |
 
 ## Backend Configuration
@@ -469,9 +469,9 @@ its own atomic counter, so VUs within a backend get non-overlapping batches,
 while different backends independently walk through the same data from the
 start.
 
-The k6 loader does not read Parquet and does not apply `schema.yaml` type
-conversion. Use the CLI loader for typed bulk loads, sharded Parquet, and
-`vector(n)` columns; use k6 CSVs for runtime ingest/update pressure.
+The existing `openDocuments()` helper remains CSV-only, with its cached,
+cycling behavior unchanged. Use `openDocumentStream()` below for typed CSV
+or Parquet reads without caching the full dataset.
 
 See [Pattern 3](#pattern-3-parallel-query--ingest) for a complete example combining queries and ingest.
 
@@ -490,6 +490,130 @@ export function updateTest() {
 ```
 
 The `nextBatchSwapped()` method lazily builds a copy of all documents with adjacent values of the given field swapped, then paginates through them atomically. The optional third argument is a pool key, same as `nextBatch()`.
+
+## Streaming CSV and Parquet Workloads
+
+Open a reader in the script's init context, then consume it in a VU function:
+
+```javascript
+import exec from "k6/execution";
+
+const stream = db.loader().openDocumentStream("../data/", {
+  schema: "../schema.yaml",
+});
+
+// This loop consumes the stream in one iteration. Alternatively, read one
+// batch per iteration; the reader retains its position between iterations.
+export function ingest() {
+  const backend = backends.get("paradedb");
+  try {
+    while (true) {
+      const batch = stream.nextBatch(100);
+      if (batch.length === 0) return;
+      const result = backend.insertBatch("documents", batch);
+      if (result.error) throw new Error(result.error);
+    }
+  } catch (error) {
+    exec.test.abort(`Ingest failed: ${error}`);
+  } finally {
+    stream.close();
+  }
+}
+```
+
+- Sources may be `.csv`, `.parquet`, or a directory containing Parquet shards.
+  Shards are read in filename order; non-Parquet entries are ignored.
+- Both paths are relative to the script when opened in init context. A
+  single-table `schema.yaml` with `columns` is required. Multi-table schemas
+  are rejected; provide a separate single-table schema for each reader.
+- Data files open on the first `nextBatch()` call. Reads must happen in a VU
+  function, not init context. Only batches and decoder buffers are retained;
+  the full dataset is not cached.
+- `nextBatch(n)` requires a positive batch size and fills across file boundaries.
+  The last batch may be smaller. EOF returns `[]` on every subsequent call,
+  without cycling. File, schema-conversion, and decoding errors throw exceptions;
+  a failed read closes the stream and does not return an incomplete batch.
+- `close()` is safe to repeat. EOF, read errors, and canceled reads also release
+  open files. Completing an iteration keeps the reader open for the next
+  iteration. Reading after explicit close throws an error. Close an unfinished
+  stream explicitly when you no longer need it; iteration cancellation while
+  idle does not close it.
+- Catch read and write exceptions and call `exec.test.abort()` to fail the run.
+  An uncaught iteration exception alone does not make k6 exit unsuccessfully.
+- Each reader has its own position. VUs opening the same path read the same
+  records independently. To avoid overlapping writes, assign distinct files or
+  shard directories yourself. There is no automatic VU partitioning.
+- Conversion uses the same `RowSource` implementation as the CLI, including
+  vectors, typed scalars, and nulls. Swapping whole embedding values in JavaScript
+  preserves the Go vector type required by PostgreSQL/ParadeDB writes. JavaScript
+  arithmetic on integers beyond its safe integer range can lose precision; use
+  text IDs for such identifiers. Creating replacement vector arrays in JavaScript
+  is not equivalent to passing through the reader's typed embedding values.
+
+For updates, keep the existing ID and mutate the fields in the returned batch
+before calling `backend.updateBatch()`. PostgreSQL/ParadeDB implements this as
+an upsert, so the ID needs a unique index and missing IDs will insert rows.
+Keep adjacent-value swapping in the workload script; the reader does not modify
+source files. With an odd batch size, a script that swaps pairs must explicitly
+handle or leave unchanged its final unpaired row.
+
+### Sample inserts and updates during searches
+
+The [insert sample](../datasets/sample/k6/insert_while_reading.js) and
+[update sample](../datasets/sample/k6/update_while_reading.js) each run one
+streaming writer VU alongside five search VUs against ParadeDB's `documents`
+table (`id`, `title`, `content`). The Compose files use ParadeDB 0.26.0 to support
+the sample's `USING paradedb` index syntax. Load the sample and its search index,
+then run either script:
+
+```bash
+make loader k6
+./bin/loader load --backend paradedb ./datasets/sample
+./k6 run datasets/sample/k6/insert_while_reading.js
+# Or update the existing sample rows:
+./k6 run datasets/sample/k6/update_while_reading.js
+```
+
+Both scripts read `data.csv` and `schema.yaml` relative to themselves and use
+the sample search terms. Override `DATA_FILE` to read a Parquet file or shard
+directory with the same columns. `SCHEMA_FILE`, `TABLE`, `PARADEDB_URL`, and
+`DURATION` are also configurable. Custom tables must have a UUID `id` primary
+key and a ParadeDB search index on `content` (see the sample post-load SQL).
+
+The bundled `datasets/sample/fixtures/data.parquet` contains the same five rows
+as `data.csv`. To read it during the benchmark, run from the repository root:
+
+```bash
+DATA_FILE="$PWD/datasets/sample/fixtures/data.parquet" \
+./k6 run datasets/sample/k6/insert_while_reading.js
+```
+
+The fixture directory keeps the CLI's default sample load on `data.csv`.
+
+To update the existing rows from the same Parquet source:
+
+```bash
+DATA_FILE="$PWD/datasets/sample/fixtures/data.parquet" \
+./k6 run datasets/sample/k6/update_while_reading.js
+```
+
+The update script preserves each ID and sets its title to the source title
+followed by a space and `(updated)`. Content is preserved. Repeating the script writes the
+same values; it does not keep appending the suffix. Missing IDs are inserted
+because `updateBatch()` uses an upsert. Both scripts accept CSV, a Parquet file,
+or a shard directory through `DATA_FILE`.
+
+Each inserted document gets a fresh UUID; title and content are preserved.
+Existing rows are left intact, and repeating the workload adds another copy of
+the source data with new IDs. Each script consumes the source once, in batches
+of 100, then closes its stream. Searches continue for `DURATION` (default 30s).
+The bundled sample has only five rows, so its write phase is brief; choose a
+larger source for sustained write pressure. The duration caps writes too, so a
+large source may not be exhausted. Failed searches fail the checks threshold.
+Source and write errors abort the run with a nonzero exit code; writes also
+verify the affected-row count. Use the sample commands above for database smoke
+checks. The Go tests cover batching, conversion, updates through the k6 client,
+and stream lifetime without requiring a running database.
 
 ## Additional Backend Methods
 

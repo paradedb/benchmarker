@@ -1,7 +1,7 @@
 services:
   paradedb:
     profiles: [paradedb, all]
-    image: paradedb/paradedb:v0.23.1-pg18
+    image: paradedb/paradedb:v0.26.0-pg18
     container_name: paradedb
     privileged: true
     cap_add:

@@ -81,7 +81,9 @@ and PostgreSQL; the CLI checks this before running `pre.sql`.
 
 The k6-side loader API is separate from this CLI. `db.loader().openDocuments()`
 and `loader.load...()` remain CSV-only helpers for script setup, ingest, and
-update workloads.
+update workloads. `db.loader().openDocumentStream(path, {schema})` reads CSV,
+Parquet files, and Parquet shard directories directly using the CLI's type
+conversion. See [streaming workloads](scripting.md#streaming-csv-and-parquet-workloads).
 
 ## Integration Smoke Tests
 

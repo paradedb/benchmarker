@@ -125,7 +125,9 @@ Postgres-family `pre.sql` and `Int16` in ClickHouse.
 
 The k6 `db.loader().openDocuments()` helper is separate from the CLI loader: it
 is still a CSV-only reader for ingest and update workloads and does not apply
-`schema.yaml` type conversion.
+`schema.yaml` type conversion. For typed streaming reads from CSV, Parquet, or
+Parquet shard directories, use `db.loader().openDocumentStream(path, {schema})`.
+See [streaming workloads](scripting.md#streaming-csv-and-parquet-workloads).
 
 ## Pre/Post Scripts
 
