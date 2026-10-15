@@ -2409,17 +2409,28 @@
                 // Slightly vary color for multiple queries in same run
                 const color =
                   idx === 0 ? baseColor : shadeColor(baseColor, idx * 15);
-                const timelineData = (q.timeline || []).map((p) => {
-                  let y;
-                  if (chartType === "hits") {
-                    y = p.hits || 0;
-                  } else if (chartType === "throughput") {
-                    y = (p.count || 0) / throughputDivisor;
-                  } else {
-                    y = p[selectedMetric];
-                  }
-                  return { x: (p.time - startTime) / 1000, y };
-                });
+                const timelineData = (q.timeline || [])
+                  .map((p) => {
+                    const elapsedMs = p.time - startTime;
+                    if (
+                      chartType === "throughput" &&
+                      data.timelineWindow > 0 &&
+                      elapsedMs < data.timelineWindow
+                    ) {
+                      return null;
+                    }
+
+                    let y;
+                    if (chartType === "hits") {
+                      y = p.hits || 0;
+                    } else if (chartType === "throughput") {
+                      y = (p.count || 0) / throughputDivisor;
+                    } else {
+                      y = p[selectedMetric];
+                    }
+                    return { x: elapsedMs / 1000, y };
+                  })
+                  .filter((p) => p !== null);
                 datasets.push({
                   datasetKey: `${name}::${qName}`,
                   label: qName,
