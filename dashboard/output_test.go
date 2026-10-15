@@ -287,6 +287,24 @@ func TestDashboardIncludesMeanUpdatesAndTelemetryUI(t *testing.T) {
 	}
 }
 
+func TestDashboardSkipsPartialThroughputWindows(t *testing.T) {
+	html, err := staticFiles.ReadFile("static/index.html")
+	if err != nil {
+		t.Fatalf("read dashboard HTML: %v", err)
+	}
+	content := string(html)
+	for _, fragment := range []string{
+		`chartType === "throughput"`,
+		`data.timelineWindow > 0`,
+		`elapsedMs < data.timelineWindow`,
+		`.filter((p) => p !== null)`,
+	} {
+		if !strings.Contains(content, fragment) {
+			t.Fatalf("dashboard missing partial-window guard %q", fragment)
+		}
+	}
+}
+
 func TestWarmupProgressReplacesWorkloadGraphsUntilMeasurementStarts(t *testing.T) {
 	registry := k6metrics.NewRegistry()
 	started, err := registry.NewMetric("scenario_started", k6metrics.Gauge)
