@@ -19,7 +19,8 @@ import (
 
 // Loader handles loading data into search backends.
 type Loader struct {
-	vu modules.VU
+	vu       modules.VU
+	basePath string
 }
 
 func (l *Loader) throwConfigErrorf(format string, args ...interface{}) *DocumentReader {
@@ -231,7 +232,25 @@ func (r *DocumentReader) Size() int {
 
 // NewLoader creates a new data loader.
 func NewLoader(vu modules.VU) *Loader {
-	return &Loader{vu: vu}
+	l := &Loader{vu: vu}
+	if vu != nil && vu.InitEnv() != nil {
+		l.basePath = vu.InitEnv().GetAbsFilePath(".")
+	}
+	return l
+}
+
+// resolvePath retains the script directory after k6 leaves init context.
+func (l *Loader) resolvePath(path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	if l.basePath != "" {
+		return filepath.Join(l.basePath, path)
+	}
+	if l.vu != nil && l.vu.InitEnv() != nil {
+		return l.vu.InitEnv().GetAbsFilePath(path)
+	}
+	return path
 }
 
 // Helper to parse common config options
@@ -243,8 +262,16 @@ func parseConfig(config map[string]interface{}) (filePath, tableName, dataset st
 	}
 	dataset, _ = config["dataset"].(string)
 	batchSize = 10000
-	if bs, ok := config["batchSize"].(float64); ok {
+	switch bs := config["batchSize"].(type) {
+	case int:
+		batchSize = bs
+	case int64:
 		batchSize = int(bs)
+	case float64:
+		batchSize = int(bs)
+		if float64(batchSize) != bs {
+			batchSize = 0
+		}
 	}
 	return
 }
@@ -472,6 +499,7 @@ func loadWithDriverJSON(driver backends.Driver, tableName, filePath, dataset, ba
 //   - table: table/index/collection name (default: "documents")
 //   - dataset: path to dataset directory with backend-specific pre/post files
 //   - batchSize: batch size for loading (default: 10000)
+//   - schema: schema.yaml path for typed CSV, Parquet, or Parquet shards
 func (l *Loader) Load(backendName, connectionString string, config map[string]interface{}) map[string]interface{} {
 	cfg, ok := backends.GetConfig(backendName)
 	if !ok {
@@ -485,6 +513,11 @@ func (l *Loader) Load(backendName, connectionString string, config map[string]in
 	if batchSize <= 0 {
 		return map[string]interface{}{"error": "batchSize must be greater than 0"}
 	}
+	if _, ok := config["schema"]; ok {
+		return l.loadTyped(backendName, connectionString, config, filePath, dataset, batchSize)
+	}
+	filePath = l.resolvePath(filePath)
+	dataset = l.resolvePath(dataset)
 
 	columns, err := parseColumns(config, filePath)
 	if err != nil {

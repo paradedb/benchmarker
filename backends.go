@@ -20,6 +20,7 @@ import (
 	_ "github.com/paradedb/benchmarker/backends/opensearch"
 	_ "github.com/paradedb/benchmarker/backends/paradedb"
 	_ "github.com/paradedb/benchmarker/backends/postgres"
+	_ "github.com/paradedb/benchmarker/backends/turbopuffer"
 )
 
 // Backends holds all configured backend clients.
@@ -148,7 +149,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 		// Only default the container name if the user didn't explicitly set it.
 		// An explicit "" opts out of docker capture (off-host backends).
 		if !containerExplicit {
-			if alias != backendType {
+			if alias != backendType && defaultContainers[backendType] != "" {
 				container = alias // default container to alias if alias is set
 			} else {
 				container = defaultContainers[backendType]

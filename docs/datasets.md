@@ -48,7 +48,7 @@ columns:
 
 Supported column types: `text`/`varchar`, `bigint`, `integer`, `smallint`,
 `boolean`, `timestamp`, `jsonb`, `uuid`, arrays of the integer and text types,
-and `vector(n)` (pgvector; ParadeDB and PostgreSQL only).
+and `vector(n)` (ParadeDB, PostgreSQL, Elasticsearch, OpenSearch, and Turbopuffer).
 
 Normalized datasets declare a `tables` list instead of top-level
 `table`/`columns` (the two forms cannot be mixed):
@@ -91,6 +91,7 @@ those the CLI bulk-import path loads.
 | ClickHouse    | Yes                | Yes                    | No                         | Yes                            | Yes (no BM25 scoring)         |
 | Elasticsearch | Yes                | Yes                    | Yes (`dense_vector`)       | Yes (one index per table)      | No                            |
 | OpenSearch    | Yes                | Yes                    | Yes (`knn_vector` mapping) | Yes (one index per table)      | No                            |
+| Turbopuffer   | Yes                | Yes                    | Yes (`[n]f32` schema)      | Yes (one namespace per table)  | No                            |
 | MongoDB       | Yes                | Yes                    | No                         | Yes (one collection per table) | No (driver is `$search`-only) |
 
 The CLI validates vector schemas before running backend `pre` scripts. A dataset
