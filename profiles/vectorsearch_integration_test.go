@@ -1,6 +1,6 @@
 //go:build integration
 
-package workloads_test
+package profiles_test
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 
 	"github.com/paradedb/benchmarker/backends/shared/postgres"
 	"github.com/paradedb/benchmarker/metrics"
-	"github.com/paradedb/benchmarker/workloads"
+	"github.com/paradedb/benchmarker/profiles"
 )
 
 func TestVectorSearchLoadIndexQueryAndCapture(t *testing.T) {
@@ -20,11 +20,11 @@ func TestVectorSearchLoadIndexQueryAndCapture(t *testing.T) {
 	if connString == "" {
 		t.Skip("set BENCHMARKER_VECTORSEARCH_URL to run the pg_vectorsearch smoke test")
 	}
-	workload, err := workloads.Builtin("vectorsearch")
+	profile, err := profiles.Builtin("vectorsearch")
 	if err != nil {
 		t.Fatal(err)
 	}
-	driver, err := workload.NewDriver(connString)
+	driver, err := profile.NewDriver(connString)
 	if err != nil {
 		t.Fatal(err)
 	}

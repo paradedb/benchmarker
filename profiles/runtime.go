@@ -1,46 +1,53 @@
-package workloads
+package profiles
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/paradedb/benchmarker/backends"
 	"github.com/paradedb/benchmarker/backends/shared/postgres"
 	"gopkg.in/yaml.v3"
 )
 
+// LegacyType identifies selectors whose k6 environment and alias defaults
+// predate profiles. ParadeDB used to register a separate PostgreSQL factory.
+func LegacyType(name string) bool {
+	_, registered := backends.GetConfig(name)
+	return registered || name == "paradedb"
+}
+
+// DefaultNames preserves the loader's historical all-backends selection without
+// registering PostgreSQL extension profiles as database drivers.
+func DefaultNames() []string {
+	names := backends.RegisteredBackends()
+	if _, registered := backends.GetConfig("paradedb"); !registered {
+		names = append(names, "paradedb")
+	}
+	sort.Strings(names)
+	return names
+}
+
 func fallbackManifest(name string) ([]byte, error) {
 	cfg, ok := backends.GetConfig(name)
 	if !ok {
-		return nil, fmt.Errorf("unknown workload %q", name)
+		return nil, fmt.Errorf("unknown profile %q", name)
 	}
 	return yaml.Marshal(Manifest{Backend: name, Container: &cfg.Container, Connection: cfg.DefaultConn, EnvVar: &cfg.EnvVar})
 }
 
-// CheckBackend rejects conflicting engine/workload combinations. Legacy names
-// such as paradedb are accepted when their embedded workload uses this engine.
-func (w Workload) CheckBackend(name string) error {
-	if name == "" || name == w.Backend {
-		return nil
-	}
-	if legacy, err := Builtin(name); err == nil && legacy.Backend == w.Backend {
-		return nil
-	}
-	return fmt.Errorf("workload %q uses backend %q, not %q", w.Name, w.Backend, name)
-}
-
-func (w Workload) BackendConfig() (backends.BackendConfig, error) {
+func (w Profile) BackendConfig() (backends.BackendConfig, error) {
 	cfg, ok := backends.GetConfig(w.Backend)
 	if !ok {
-		return cfg, fmt.Errorf("workload %q: unknown backend %q", w.Name, w.Backend)
+		return cfg, fmt.Errorf("profile %q: unknown backend %q", w.Name, w.Backend)
 	}
 	e := w.Extras
 	if w.Backend != "postgres" && (len(e.GUCs) > 0 || len(e.GUCPrefixes) > 0 || len(e.Queries) > 0 || e.IndexAccessMethods != nil) {
-		return cfg, fmt.Errorf("workload %q: extras require the postgres backend", w.Name)
+		return cfg, fmt.Errorf("profile %q: extras require the postgres backend", w.Name)
 	}
 	return cfg, nil
 }
 
-func (w Workload) NewDriver(connection string) (backends.Driver, error) {
+func (w Profile) NewDriver(connection string) (backends.Driver, error) {
 	cfg, err := w.BackendConfig()
 	if err != nil {
 		return nil, err
@@ -53,10 +60,8 @@ func (w Workload) NewDriver(connection string) (backends.Driver, error) {
 	return driver, nil
 }
 
-// ConfigureDriver applies PostgreSQL workload capture and telemetry settings.
-// It also lets legacy constructors retain their original factory and registration
-// side effects while sharing the declarative specialization.
-func (w Workload) ConfigureDriver(driver backends.Driver) {
+// ConfigureDriver applies PostgreSQL profile capture and telemetry settings.
+func (w Profile) ConfigureDriver(driver backends.Driver) {
 	if pg, ok := driver.(*postgres.Driver); ok {
 		if w.Extras.GUCs != nil {
 			pg.SetExtraGUCs(w.Extras.GUCs)
@@ -79,10 +84,10 @@ func (w Workload) ConfigureDriver(driver backends.Driver) {
 	}
 }
 
-func (w Workload) CLILoader(connection string) (*backends.CLILoader, error) {
+func (w Profile) CLILoader(connection string) (*backends.CLILoader, error) {
 	cfg, err := w.BackendConfig()
 	if err != nil {
 		return nil, err
 	}
-	return backends.NewWorkloadCLILoader(w.Name, w.Backend, cfg.FileType, connection, w.NewDriver), nil
+	return backends.NewProfileCLILoader(w.Name, w.Backend, cfg.FileType, connection, w.NewDriver), nil
 }

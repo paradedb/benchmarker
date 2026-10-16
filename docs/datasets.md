@@ -35,27 +35,27 @@ Each backend subdirectory contains pre/post scripts that the loader runs before 
 
 The `k6/` directory holds your benchmark scripts and any supporting data like search terms.
 
-## Workloads
+## Profiles
 
-A backend supplies the database driver. A workload supplies an index/query
+A backend supplies the database driver. A profile supplies an index/query
 strategy, its connection and container defaults, and its dataset scripts. For
-example, both the `postgres` and `paradedb` workloads use the `postgres` driver.
+example, both the `postgres` and `paradedb` profiles use the `postgres` driver.
 Existing dataset directory names remain valid.
 
-Select a workload with `loader load --workload paradedb ./datasets/sample` or
-`{ type: "postgres", workload: "paradedb" }` in a k6 backend block. The workload
-name selects `datasets/<dataset>/<workload>/pre.sql` and `post.sql` (or `.json`
+Select a profile with `loader load --backend paradedb ./datasets/sample` or
+`{ type: "paradedb" }` in a k6 backend block. The profile
+name selects `datasets/<dataset>/<profile>/pre.sql` and `post.sql` (or `.json`
 for JSON-based drivers). Query SQL remains in your k6 script.
 
-Global manifests live in `workloads/<name>.yaml`. Built-in manifests are also
+Global manifests live in `profiles/<name>.yaml`. Built-in manifests are also
 embedded in the binaries, so a checkout is not required at runtime. An external
 manifest replaces the embedded manifest of the same name. Lookup uses
-`./workloads` relative to the process working directory, or `--workloads-dir`
-(CLI) / `workloadsDir` (k6) when specified. A missing explicitly selected
+`./profiles` relative to the process working directory, or `--profiles-dir`
+(CLI) / `profilesDir` (k6) when specified. A missing explicitly selected
 directory is an error. Registered third-party backends without a manifest can
-still be selected as workloads using their registered defaults.
+still be selected as profiles using their registered defaults.
 
-An optional `datasets/<dataset>/<workload>/workload.yaml` replaces individual
+An optional `datasets/<dataset>/<profile>/profile.yaml` replaces individual
 top-level fields from the global manifest. Nested fields are **not** deep-merged:
 an override containing `extras` replaces the entire `extras` block. Empty
 strings and empty lists are honored; `container: ""` disables Docker metrics.
@@ -75,19 +75,19 @@ extras:
       query: SELECT paradedb.version_info()::text
 ```
 
-| Field         | Default                                                                 | Meaning                                                               |
-| ------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `backend`     | Required                                                                | Registered driver name                                                |
-| `container`   | Workload name                                                           | Docker container, or `""` to disable Docker metrics                   |
-| `connection`  | None                                                                    | Connection used when no explicit value or environment override is set |
-| `envVar`      | Uppercase workload name, hyphens replaced with underscores, plus `_URL` | Connection environment variable; `""` disables it                     |
-| `description` | Empty                                                                   | Human-readable description                                            |
-| `color`       | Dashboard palette                                                       | Chart color; explicit k6 colors take precedence                       |
-| `extras`      | Empty                                                                   | Optional PostgreSQL configuration capture and telemetry settings      |
+| Field         | Default                                                                | Meaning                                                               |
+| ------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `backend`     | Required                                                               | Registered driver name                                                |
+| `container`   | Profile name                                                           | Docker container, or `""` to disable Docker metrics                   |
+| `connection`  | None                                                                   | Connection used when no explicit value or environment override is set |
+| `envVar`      | Uppercase profile name, hyphens replaced with underscores, plus `_URL` | Connection environment variable; `""` disables it                     |
+| `description` | Empty                                                                  | Human-readable description                                            |
+| `color`       | Dashboard palette                                                      | Chart color; explicit k6 colors take precedence                       |
+| `extras`      | Empty                                                                  | Optional PostgreSQL configuration capture and telemetry settings      |
 
-Workload manifests are the source of default dashboard colors. Legacy backend
-configurations and saved results without colors use the embedded manifest's
-color; explicit script colors take precedence. Workloads without a color use
+Profile manifests are the source of default dashboard colors. Legacy backend
+configurations use the selected manifest; saved results without colors use
+the embedded manifest's color; explicit script colors take precedence. Profiles without a color use
 the dashboard's generic palette.
 
 PostgreSQL extras support:
@@ -108,7 +108,7 @@ settings, preserving the existing result keys and telemetry series. The
 `vectorsearch` manifest captures the pg_vectorsearch version and `prism.*`
 settings, and `vectorchord` captures extension versions and `vchord*` settings.
 All three select `backend: postgres` and declare their index access methods for
-telemetry. The [Cohere example](../datasets/cohere-1m/README.md#postgresql-workload-comparison)
+telemetry. The [Cohere example](../datasets/cohere-1m/README.md#postgresql-profile-comparison)
 shows them together.
 
 The existing sample dataset uses the `postgres` directory for native FTS.
@@ -117,11 +117,13 @@ name; it retains `POSTGRES_URL` and the `postgres` container default.
 
 ### Compatibility
 
-Configurations without explicit workload selection keep their existing behavior:
-legacy backend names, dataset paths, registry entries, connection defaults,
-container aliases, and loading helpers continue to work. They do not read external
-workload manifests. Opt into manifests by adding `workload` or `--workload`.
-Built-in defaults remain available even when no manifest files are installed.
+Existing type names, shorthand strings, `--backend` selections, result keys,
+and dataset script paths remain supported. Every selection now resolves a
+profile; no ParadeDB driver registration is needed. Built-in defaults work
+without a checkout. For the original k6 types, environment connections still
+need an explicit `__ENV` value and custom aliases still default their container
+to the alias. New profile types use their manifest's environment and container
+defaults. External and dataset manifests can explicitly override the defaults.
 
 ## schema.yaml
 
@@ -192,7 +194,7 @@ becomes the document id rather than a source field.
 Consistency caveat for cross-backend comparisons: the Postgres-family backends
 are transactional and read-your-writes, while Elasticsearch and OpenSearch are
 near-real-time — documents only become searchable after a refresh, and there
-are no multi-document transactions. That makes them a fit when the workload is
+are no multi-document transactions. That makes them a fit when the profile is
 append-only and absolute correctness of reads isn't required; benchmark
 numbers implicitly compare against that weaker consistency model, so loads
 always refresh (see each dataset's `post.json`) before queries run.
@@ -212,10 +214,10 @@ the matching width — e.g. a `smallint` schema column should be `SMALLINT` in
 Postgres-family `pre.sql` and `Int16` in ClickHouse.
 
 The k6 `db.loader().openDocuments()` helper is separate from the CLI loader: it
-is still a CSV-only reader for ingest and update workloads and does not apply
+is still a CSV-only reader for ingest and update profiles and does not apply
 `schema.yaml` type conversion. For typed streaming reads from CSV, Parquet, or
 Parquet shard directories, use `db.loader().openDocumentStream(path, {schema})`.
-See [streaming workloads](scripting.md#streaming-csv-and-parquet-workloads).
+See [streaming profiles](scripting.md#streaming-csv-and-parquet-profiles).
 
 ## Pre/Post Scripts
 

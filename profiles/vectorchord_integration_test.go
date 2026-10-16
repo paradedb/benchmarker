@@ -1,6 +1,6 @@
 //go:build integration
 
-package workloads_test
+package profiles_test
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 
 	"github.com/paradedb/benchmarker/backends/shared/postgres"
 	"github.com/paradedb/benchmarker/metrics"
-	"github.com/paradedb/benchmarker/workloads"
+	"github.com/paradedb/benchmarker/profiles"
 )
 
 func TestVectorChordLoadIndexUpdateAndQuery(t *testing.T) {
@@ -20,11 +20,11 @@ func TestVectorChordLoadIndexUpdateAndQuery(t *testing.T) {
 	if connString == "" {
 		t.Skip("set BENCHMARKER_VECTORCHORD_VECTOR_URL to run the VectorChord smoke test")
 	}
-	workload, err := workloads.Builtin("vectorchord")
+	profile, err := profiles.Builtin("vectorchord")
 	if err != nil {
 		t.Fatal(err)
 	}
-	driver, err := workload.NewDriver(connString)
+	driver, err := profile.NewDriver(connString)
 	if err != nil {
 		t.Fatal(err)
 	}

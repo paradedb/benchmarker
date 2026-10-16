@@ -10,7 +10,7 @@ import (
 	"github.com/grafana/sobek"
 	"github.com/paradedb/benchmarker/backends"
 	"github.com/paradedb/benchmarker/metrics"
-	"github.com/paradedb/benchmarker/workloads"
+	"github.com/paradedb/benchmarker/profiles"
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 
@@ -19,7 +19,6 @@ import (
 	_ "github.com/paradedb/benchmarker/backends/elasticsearch"
 	_ "github.com/paradedb/benchmarker/backends/mongodb"
 	_ "github.com/paradedb/benchmarker/backends/opensearch"
-	_ "github.com/paradedb/benchmarker/backends/paradedb"
 	_ "github.com/paradedb/benchmarker/backends/postgres"
 )
 
@@ -68,8 +67,6 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	ctx := context.Background()
 
 	datasetPath := parseDatasetPath(config, m.vu)
-	defaults := backends.DefaultConnections()
-	defaultContainers := backends.DefaultContainers()
 
 	// Capture dataset.yaml (written by `loader pull`) if present.
 	if datasetPath != "" {
@@ -94,8 +91,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	}
 
 	for _, item := range backendsArray {
-		var backendType, alias, container, color, conn, workloadName string
-		var workload *workloads.Workload
+		var backendType, alias, container, color, conn string
 		var aliasExplicit, colorExplicit bool
 		// containerExplicit tracks whether the user set the container field at all
 		// (including to ""). An explicit empty string opts the backend out of
@@ -116,14 +112,6 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 				return nil
 			}
 			alias = backendType
-			if raw, exists := v["workload"]; exists {
-				var valid bool
-				workloadName, valid = raw.(string)
-				if !valid || workloadName == "" {
-					m.configErrorf("backends: workload must be a non-empty string")
-					return nil
-				}
-			}
 			if a, ok := v["alias"].(string); ok {
 				alias = a
 				aliasExplicit = true
@@ -146,64 +134,41 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 			return nil
 		}
 
-		// Explicit workload selection opts into manifest defaults and environment
-		// resolution. Legacy configurations retain their historical behavior.
-		directoryName := backendType
-		if workloadName != "" {
-			dir, _ := config["workloadsDir"].(string)
-			w, err := workloads.Resolve(workloadName, datasetPath, dir)
-			if err == nil {
-				err = w.CheckBackend(backendType)
-			}
-			if err != nil {
-				m.configErrorf("backends: %v", err)
-				return nil
-			}
-			workload = &w
-			backendType = w.Backend
-			directoryName = w.Name
-			if !aliasExplicit {
-				alias = w.Name
-			}
-			if !containerExplicit {
-				container = w.ContainerName()
-				containerExplicit = true
-			}
-			if !colorExplicit {
-				color = w.Color
-			}
-			conn, err = w.ResolveConnection(conn)
-			if err != nil {
-				m.configErrorf("backends: %v", err)
-				return nil
-			}
-		} else if !colorExplicit {
-			// Legacy calls use embedded colors without opting into filesystem
-			// manifests or changing connection/container defaults.
-			if w, err := workloads.Builtin(backendType); err == nil {
-				color = w.Color
-			}
-		}
-
-		// Validate backend type
-		backendCfg, ok := backends.GetConfig(backendType)
-		if !ok {
-			m.configErrorf("backends: unknown backend type '%s'. Valid types: %v",
-				backendType, backends.RegisteredBackends())
+		// A type names a profile; the manifest selects the registered driver.
+		dir, _ := config["profilesDir"].(string)
+		profile, err := profiles.Resolve(backendType, datasetPath, dir)
+		if err != nil {
+			m.configErrorf("backends: %v", err)
 			return nil
 		}
-
-		// Apply defaults
-		if conn == "" {
-			conn = defaults[backendType]
+		legacy := profiles.LegacyType(backendType)
+		backendCfg, err := profile.BackendConfig()
+		if err != nil {
+			m.configErrorf("backends: %v", err)
+			return nil
 		}
-		// Only default the container name if the user didn't explicitly set it.
-		// An explicit "" opts out of docker capture (off-host backends).
+		if !aliasExplicit {
+			alias = profile.Name
+		}
 		if !containerExplicit {
-			if alias != backendType {
-				container = alias // default container to alias if alias is set
-			} else {
-				container = defaultContainers[backendType]
+			container = profile.ContainerName()
+			if legacy && alias != profile.Name {
+				container = alias
+			}
+		}
+		if !colorExplicit {
+			color = profile.Color
+		}
+		if legacy {
+			// Existing k6 types historically require explicit __ENV values.
+			if conn == "" {
+				conn = profile.Connection
+			}
+		} else {
+			conn, err = profile.ResolveConnection(conn)
+			if err != nil {
+				m.configErrorf("backends: %v", err)
+				return nil
 			}
 		}
 
@@ -213,13 +178,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 			return nil
 		}
 
-		var driver backends.Driver
-		var err error
-		if workload != nil {
-			driver, err = workload.NewDriver(conn)
-		} else {
-			driver, err = backends.NewDriver(backendType, conn)
-		}
+		driver, err := profile.NewDriver(conn)
 		if err != nil {
 			m.configErrorf("backends: failed to create '%s': %v", alias, err)
 			return nil
@@ -242,7 +201,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 		}
 
 		driver.CaptureConfig(ctx, alias)
-		metrics.CapturePrePostScripts(alias, directoryName, datasetPath, backendCfg.FileType)
+		metrics.CapturePrePostScripts(alias, profile.Name, datasetPath, backendCfg.FileType)
 	}
 
 	// Auto-create metrics collector for enabled containers

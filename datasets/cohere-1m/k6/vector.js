@@ -12,8 +12,7 @@ const backends = db.backends({
   datasetPath: "../",
   backends: [
     {
-      type: "postgres",
-      workload: "paradedb",
+      type: "paradedb",
       alias: "paradedb",
       connection: __ENV.PARADEDB_URL,
       container: __ENV.PARADEDB_CONTAINER || "paradedb",
@@ -22,8 +21,7 @@ const backends = db.backends({
     {
       // Filtered scenario needs its own probe operating point; GUCs are
       // per-connection, so it rides a second connection string.
-      type: "postgres",
-      workload: "paradedb",
+      type: "paradedb",
       alias: "paradedb_filtered",
       connection:
         __ENV.PARADEDB_FILTERED_URL ||

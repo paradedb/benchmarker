@@ -25,14 +25,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	_ "github.com/paradedb/benchmarker" // triggers backend init() via backends.go imports
 	"github.com/paradedb/benchmarker/backends"
-	"github.com/paradedb/benchmarker/workloads"
+	"github.com/paradedb/benchmarker/profiles"
 	"gopkg.in/yaml.v3"
 )
 
 func main() {
 	loadCmd := flag.NewFlagSet("load", flag.ContinueOnError)
-	loadBackend := loadCmd.String("backend", "", "Specific backend ("+strings.Join(backends.RegisteredBackends(), ", ")+")")
-	loadWorkload := workloadFlags(loadCmd)
+	loadBackend := loadCmd.String("backend", "", "Specific backend ("+strings.Join(profiles.DefaultNames(), ", ")+")")
+	loadProfile := profileFlags(loadCmd)
 	loadBatchSize := loadCmd.Int("batch-size", 10000, "Batch size for bulk loading")
 	loadWorkers := loadCmd.Int("workers", 1, "Number of parallel workers")
 	loadPreOnly := loadCmd.Bool("pre-only", false, "Run pre and data load; skip post")
@@ -40,7 +40,7 @@ func main() {
 
 	dropCmd := flag.NewFlagSet("drop", flag.ContinueOnError)
 	dropBackend := dropCmd.String("backend", "", "Specific backend to drop")
-	dropWorkload := workloadFlags(dropCmd)
+	dropProfile := profileFlags(dropCmd)
 
 	pullCmd := flag.NewFlagSet("pull", flag.ContinueOnError)
 	pullDataset := pullCmd.String("dataset", "", "Dataset name (creates ./datasets/<name>/)")
@@ -69,12 +69,12 @@ func main() {
 		}
 		if loadCmd.NArg() < 1 {
 			fmt.Fprintln(os.Stderr, "Error: dataset directory required")
-			fmt.Fprintln(os.Stderr, "Usage: loader load [--backend <name>] [--workload <name>] <dataset-dir>")
+			fmt.Fprintln(os.Stderr, "Usage: loader load [--backend <name>] <dataset-dir>")
 			os.Exit(1)
 		}
 		if loadCmd.NArg() > 1 {
 			fmt.Fprintf(os.Stderr, "Error: unexpected argument: %s\n", loadCmd.Arg(1))
-			fmt.Fprintln(os.Stderr, "Usage: loader load [--backend <name>] [--workload <name>] <dataset-dir>")
+			fmt.Fprintln(os.Stderr, "Usage: loader load [--backend <name>] <dataset-dir>")
 			os.Exit(1)
 		}
 		loadMode, err := selectLoadMode(*loadPreOnly, *loadPostOnly)
@@ -82,7 +82,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		runLoad(loadCmd.Arg(0), *loadBackend, *loadBatchSize, *loadWorkers, loadMode, *loadWorkload)
+		runLoad(loadCmd.Arg(0), *loadBackend, *loadBatchSize, *loadWorkers, loadMode, *loadProfile)
 
 	case "drop":
 		if err := dropCmd.Parse(os.Args[2:]); err != nil {
@@ -93,15 +93,15 @@ func main() {
 		}
 		if dropCmd.NArg() < 1 {
 			fmt.Fprintln(os.Stderr, "Error: dataset directory required")
-			fmt.Fprintln(os.Stderr, "Usage: loader drop [--backend <name>] [--workload <name>] <dataset-dir>")
+			fmt.Fprintln(os.Stderr, "Usage: loader drop [--backend <name>] <dataset-dir>")
 			os.Exit(1)
 		}
 		if dropCmd.NArg() > 1 {
 			fmt.Fprintf(os.Stderr, "Error: unexpected argument: %s\n", dropCmd.Arg(1))
-			fmt.Fprintln(os.Stderr, "Usage: loader drop [--backend <name>] [--workload <name>] <dataset-dir>")
+			fmt.Fprintln(os.Stderr, "Usage: loader drop [--backend <name>] <dataset-dir>")
 			os.Exit(1)
 		}
-		runDrop(dropCmd.Arg(0), *dropBackend, *dropWorkload)
+		runDrop(dropCmd.Arg(0), *dropBackend, *dropProfile)
 
 	case "pull":
 		if err := pullCmd.Parse(os.Args[2:]); err != nil {
@@ -137,8 +137,8 @@ func printUsage() {
 	fmt.Println(`Loader - Bulk load data into search backends
 
 Usage:
-  loader load [--backend <name>] [--workload <name>] [--batch-size <n>] [--workers <n>] [--pre-only | --post-only] <dataset-dir>
-  loader drop [--backend <name>] [--workload <name>] <dataset-dir>
+  loader load [--backend <name>] [--batch-size <n>] [--workers <n>] [--pre-only | --post-only] <dataset-dir>
+  loader drop [--backend <name>] <dataset-dir>
   loader pull --dataset <name> --source <s3-url> [--anonymous] [--exclude <relative-path>]
   loader help
 
@@ -148,14 +148,13 @@ Commands:
   pull    Download dataset from S3 to ./datasets/<name>/ (auto-extracts .tar.gz/.tgz and .csv.gz objects)
   help    Show this help message
 
-Backends:
-  ` + strings.Join(backends.RegisteredBackends(), ", ") + `
+Default profiles:
+  ` + strings.Join(profiles.DefaultNames(), ", ") + `
 
 Options:
-  --backend <name>           Load/drop specific backend (default: all backends)
-  --workload <name>          Resolve an index/query strategy manifest
-  --connection <url>         Override the selected workload/backend connection
-  --workloads-dir <path>     Global manifests (default: ./workloads, then embedded)
+  --backend <name>           Load/drop a profile (default: historical targets)
+  --connection <url>         Override the selected profile/backend connection
+  --profiles-dir <path>     Global manifests (default: ./profiles, then embedded)
   --batch-size <n>           Rows per batch (default: 10000)
   --workers <n>              Parallel workers (default: 1)
   --pre-only                 Run pre scripts and load data; skip post scripts
@@ -190,74 +189,48 @@ Examples:
   PARADEDB_URL=postgres://user:pass@host:5432/db loader load --backend paradedb ./datasets/sample`)
 }
 
-type workloadOptions struct {
-	name       string
+type profileOptions struct {
 	connection string
 	dir        string
 }
 
-func workloadFlags(fs *flag.FlagSet) *workloadOptions {
-	opts := &workloadOptions{}
-	fs.StringVar(&opts.name, "workload", "", "Workload manifest and dataset subdirectory")
-	fs.StringVar(&opts.connection, "connection", "", "Connection override for selected backend/workload")
-	fs.StringVar(&opts.dir, "workloads-dir", "", "Global workload manifest directory")
+func profileFlags(fs *flag.FlagSet) *profileOptions {
+	opts := &profileOptions{}
+	fs.StringVar(&opts.connection, "connection", "", "Connection override for selected backend/profile")
+	fs.StringVar(&opts.dir, "profiles-dir", "", "Global profile manifest directory")
 	return opts
 }
 
-func selectLoaders(dataset, backend string, options workloadOptions) ([]*backends.CLILoader, error) {
-	if options.name == "" && options.dir == "" {
-		// Keep enumeration, defaults, and legacy factory behavior unchanged.
-		if backend == "" {
-			if options.connection != "" {
-				return nil, fmt.Errorf("--connection requires --backend or --workload")
+func selectLoaders(dataset, name string, options profileOptions) ([]*backends.CLILoader, error) {
+	if name == "" {
+		if options.connection != "" || options.dir != "" {
+			return nil, fmt.Errorf("--connection and --profiles-dir require --backend")
+		}
+		// Retain the historical default targets, including ParadeDB, without
+		// registering extension profiles as separate database drivers.
+		var loaders []*backends.CLILoader
+		for _, name := range profiles.DefaultNames() {
+			selected, err := selectLoaders(dataset, name, options)
+			if err != nil {
+				return nil, err
 			}
-			return backends.GetAllCLILoaders(getConnection), nil
+			loaders = append(loaders, selected...)
 		}
-		connection := options.connection
-		if connection == "" {
-			connection = getConnection(backend)
-		}
-		loader := backends.GetCLILoader(backend, connection)
-		if loader == nil {
-			return nil, fmt.Errorf("unknown backend '%s'", backend)
-		}
-		return []*backends.CLILoader{loader}, nil
+		return loaders, nil
 	}
-	name := options.name
-	if name == "" {
-		name = backend
-	}
-	if name == "" {
-		return nil, fmt.Errorf("--workloads-dir requires --backend or --workload")
-	}
-	w, err := workloads.Resolve(name, dataset, options.dir)
-	if err == nil {
-		err = w.CheckBackend(backend)
-	}
+	profile, err := profiles.Resolve(name, dataset, options.dir)
 	if err != nil {
 		return nil, err
 	}
-	connection, err := w.ResolveConnection(options.connection)
+	connection, err := profile.ResolveConnection(options.connection)
 	if err != nil {
 		return nil, err
 	}
-	loader, err := w.CLILoader(connection)
+	loader, err := profile.CLILoader(connection)
 	if err != nil {
 		return nil, err
 	}
 	return []*backends.CLILoader{loader}, nil
-}
-
-// getConnection returns the connection string for a backend.
-func getConnection(name string) string {
-	cfg, ok := backends.GetConfig(name)
-	if !ok {
-		return ""
-	}
-	if val := os.Getenv(cfg.EnvVar); val != "" {
-		return val
-	}
-	return cfg.DefaultConn
 }
 
 type loadMode int
@@ -281,7 +254,7 @@ func selectLoadMode(preOnly, postOnly bool) (loadMode, error) {
 	return loadAll, nil
 }
 
-func runLoad(datasetDir string, backendName string, batchSize int, workers int, mode loadMode, options workloadOptions) {
+func runLoad(datasetDir string, backendName string, batchSize int, workers int, mode loadMode, options profileOptions) {
 	schema, err := loadSchema(datasetDir)
 	if err != nil {
 		fmt.Printf("Error loading schema: %v\n", err)
@@ -389,7 +362,7 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int, 
 	fmt.Println("\nDone!")
 }
 
-func runDrop(datasetDir string, backendName string, options workloadOptions) {
+func runDrop(datasetDir string, backendName string, options profileOptions) {
 	schema, err := loadSchema(datasetDir)
 	if err != nil {
 		fmt.Printf("Error loading schema: %v\n", err)

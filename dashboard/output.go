@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/paradedb/benchmarker/metrics"
-	"github.com/paradedb/benchmarker/workloads"
+	"github.com/paradedb/benchmarker/profiles"
 	"go.k6.io/k6/output"
 )
 
@@ -1605,7 +1605,7 @@ func displayColor(backend, color string) string {
 	if color != "" {
 		return color
 	}
-	if w, err := workloads.Builtin(backend); err == nil {
+	if w, err := profiles.Builtin(backend); err == nil {
 		return w.Color
 	}
 	return ""

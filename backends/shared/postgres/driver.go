@@ -49,7 +49,7 @@ type Driver struct {
 	extraGUCs             []string      // Additional GUCs to capture (e.g., "paradedb.xxx")
 	extraGUCPrefixes      []string      // GUC prefixes captured wholesale (e.g., "paradedb")
 	extraQueries          []ConfigQuery // Additional SQL queries to capture
-	extraQueryColumnNames bool          // Workload SQL can derive capture keys from column names
+	extraQueryColumnNames bool          // Profile SQL can derive capture keys from column names
 }
 
 // New creates a new PostgreSQL driver.

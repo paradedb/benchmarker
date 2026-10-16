@@ -67,7 +67,7 @@ const backends = db.backends({
   backends: [
     "paradedb",  // String shorthand - uses defaults
     {
-      type: "paradedb",           // Required: backend type
+      type: "paradedb",           // Required: profile name
       alias: "paradedb-v2",       // Display name (defaults to type)
       connection: "postgres://localhost:5433/benchmark",
       container: "paradedb-v2",   // Docker container for metrics
@@ -83,18 +83,21 @@ backends.get("paradedb-v2").query(...);
 backends.get("elasticsearch").query(...);
 ```
 
-### Workload Configuration
+### Profile Configuration
 
-Use `workload` to select an index/query strategy independently from `type`:
+Use `type` to select a profile. Its manifest chooses the database driver:
 
 ```javascript
+import db from "k6/x/database";
+
 const backends = db.backends({
   datasetPath: "../",
   // Optional directory relative to the process working directory:
-  // workloadsDir: "/path/to/my-workloads",
+  // profilesDir: "/path/to/my-profiles",
   backends: [
-    { type: "postgres", workload: "postgres", alias: "pg-fts" },
-    { type: "postgres", workload: "paradedb" },
+    { type: "postgres", alias: "pg-fts" },
+    { type: "paradedb", connection: __ENV.PARADEDB_URL },
+    { type: "vectorchord" },
   ],
 });
 
@@ -102,34 +105,33 @@ backends.get("pg-fts").query("SELECT id FROM documents LIMIT 10");
 backends.get("paradedb").query("SELECT id FROM documents LIMIT 10");
 ```
 
-With explicit workload selection, `alias` defaults to the workload name.
-Connection precedence is the block's `connection`, then the manifest's environment
-variable, then its default connection. `container` and `color` override manifest
-values, including `container: ""` to disable Docker metrics. An explicit alias
-does not change the manifest's container. Metric tags and dashboard results
-remain keyed by alias, so workloads sharing an engine stay independent.
+All three profiles use the `postgres` driver. `alias` defaults to the profile
+name. Explicit `connection`, `container`, and `color` values override profile
+defaults; `container: ""` disables Docker metrics. SELECT statements remain in
+your script, while dataset directories supply schema/index scripts.
 
-When `workload` is omitted, the existing type-based behavior is unchanged:
-connection environment variables must still be passed explicitly via `__ENV`,
-custom aliases still default the container to the alias, and external workload
-manifests are not read. Existing `backends.get("paradedb")` calls and shorthand
-strings remain valid. See [Workloads](datasets.md#workloads) for the manifest
-format and optional per-dataset overrides.
+New profile types resolve connections as explicit `connection`, then the
+manifest's environment variable, then its default connection. For compatibility,
+the original types (`paradedb`, `postgres`, `clickhouse`, `mongodb`,
+`elasticsearch`, and `opensearch`) still require explicit `__ENV` values and
+still default a custom alias's container to that alias. Their omitted connection
+uses the resolved profile's default. Metric tags and results remain keyed by
+alias. See [Profiles](datasets.md#profiles) for manifest lookup and overrides.
 
-The generic k6 loading helper accepts the same selection in its config:
+Use `profilesDir` to select an external manifest directory.
+
+The generic k6 loading helper also accepts a profile name:
 
 ```javascript
-loader.load("postgres", "", {
-  workload: "paradedb",
+loader.load("vectorchord", "", {
   file: "../data.csv",
   dataset: "../",
 });
 ```
 
-The second argument is an explicit connection override; when empty with a
-workload selected, the manifest/environment supplies the connection. Existing
-calls to `load`, `loadParadeDB`, and the other named helpers retain their
-behavior when no workload is supplied.
+For new profile names, an empty connection uses the environment/manifest.
+Existing `loadParadeDB` and other named helpers retain their connection argument
+semantics and now construct their drivers through profiles.
 
 ## Available Backend Types
 
@@ -142,10 +144,10 @@ The framework is database-agnostic - the current backends and datasets are focus
 | `paradedb` | ParadeDB with pg_search (BM25) |
 | `postgres` | PostgreSQL                     |
 
-`vectorsearch` and `vectorchord` are PostgreSQL workloads. Select `{ type: "postgres", workload: "vectorsearch" }` or
-`{ type: "postgres", workload: "vectorchord" }`; aliases still default to the
-workload names. See the
-[three-workload example](../datasets/cohere-1m/k6/postgres-workloads.js).
+`vectorsearch` and `vectorchord` are PostgreSQL profiles. Select `{ type: "vectorsearch" }` or
+`{ type: "vectorchord" }`; aliases still default to the
+profile names. See the
+[three-profile example](../datasets/cohere-1m/k6/postgres-profiles.js).
 
 **Elasticsearch-based** (shared driver):
 
@@ -286,7 +288,7 @@ precedence, then a Unix-socket `DOCKER_HOST`, then the active context in
 
 ParadeDB and PostgreSQL register repeating telemetry queries alongside their
 ordinary backend configuration. Add a `backend` scenario tag to associate a
-native k6 workload window with the configured backend alias:
+native k6 profile window with the configured backend alias:
 
 ```javascript
 const scenarios = {
@@ -309,7 +311,7 @@ series. They are shown in generic dashboard charts and written under
 
 For sequential timer windows, keep a non-zero `gap`. The collector uses that
 gap to finalize the previous backend and capture the next backend's baseline
-before its measured workload starts.
+before its measured profile starts.
 
 ### Pattern 3: Parallel Query + Ingest
 
@@ -507,9 +509,9 @@ export const options = { scenarios };
 
 ## Ingest Benchmarks
 
-The primary purpose of ingest scenarios is to put write pressure on the database while queries are running, simulating realistic mixed workloads where the index is being updated concurrently with queries. This is more useful for measuring how query latency degrades under write load than for comparing raw ingest throughput across backends, since each database handles write consistency, indexing, and flush semantics differently.
+The primary purpose of ingest scenarios is to put write pressure on the database while queries are running, simulating realistic mixed profiles where the index is being updated concurrently with queries. This is more useful for measuring how query latency degrades under write load than for comparing raw ingest throughput across backends, since each database handles write consistency, indexing, and flush semantics differently.
 
-To run an ingest workload, use the loader to open a CSV document file and insert
+To run an ingest profile, use the loader to open a CSV document file and insert
 batches. The data file used for ingest must contain documents that are not
 already in the database. If you pre-loaded a dataset with the loader CLI or a
 setup function, you will need a separate CSV file (e.g. `ingest_data.csv`) with
@@ -544,7 +546,7 @@ export function updateTest() {
 
 The `nextBatchSwapped()` method lazily builds a copy of all documents with adjacent values of the given field swapped, then paginates through them atomically. The optional third argument is a pool key, same as `nextBatch()`.
 
-## Streaming CSV and Parquet Workloads
+## Streaming CSV and Parquet Profiles
 
 Open a reader in the script's init context, then consume it in a VU function:
 
@@ -606,7 +608,7 @@ export function ingest() {
 For updates, keep the existing ID and mutate the fields in the returned batch
 before calling `backend.updateBatch()`. PostgreSQL/ParadeDB implements this as
 an upsert, so the ID needs a unique index and missing IDs will insert rows.
-Keep adjacent-value swapping in the workload script; the reader does not modify
+Keep adjacent-value swapping in the profile script; the reader does not modify
 source files. With an odd batch size, a script that swaps pairs must explicitly
 handle or leave unchanged its final unpaired row.
 
@@ -657,7 +659,7 @@ because `updateBatch()` uses an upsert. Both scripts accept CSV, a Parquet file,
 or a shard directory through `DATA_FILE`.
 
 Each inserted document gets a fresh UUID; title and content are preserved.
-Existing rows are left intact, and repeating the workload adds another copy of
+Existing rows are left intact, and repeating the profile adds another copy of
 the source data with new IDs. Each script consumes the source once, in batches
 of 100, then closes its stream. Searches continue for `DURATION` (default 30s).
 The bundled sample has only five rows, so its write phase is brief; choose a

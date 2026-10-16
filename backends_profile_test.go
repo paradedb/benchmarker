@@ -10,25 +10,25 @@ import (
 
 	"github.com/paradedb/benchmarker/backends"
 	"github.com/paradedb/benchmarker/metrics"
-	"github.com/paradedb/benchmarker/workloads"
+	"github.com/paradedb/benchmarker/profiles"
 )
 
-type workloadTestDriver struct{ connection string }
+type profileTestDriver struct{ connection string }
 
-func (*workloadTestDriver) Close() error                                       { return nil }
-func (*workloadTestDriver) Exec(context.Context, string) error                 { return nil }
-func (*workloadTestDriver) Query(context.Context, string, ...any) (int, error) { return 0, nil }
-func (*workloadTestDriver) Insert(context.Context, string, []string, [][]any) (int, error) {
+func (*profileTestDriver) Close() error                                       { return nil }
+func (*profileTestDriver) Exec(context.Context, string) error                 { return nil }
+func (*profileTestDriver) Query(context.Context, string, ...any) (int, error) { return 0, nil }
+func (*profileTestDriver) Insert(context.Context, string, []string, [][]any) (int, error) {
 	return 0, nil
 }
-func (*workloadTestDriver) Update(context.Context, string, []string, []string, [][]any) (int, error) {
+func (*profileTestDriver) Update(context.Context, string, []string, []string, [][]any) (int, error) {
 	return 0, nil
 }
-func (d *workloadTestDriver) CaptureConfig(_ context.Context, alias string) {
+func (d *profileTestDriver) CaptureConfig(_ context.Context, alias string) {
 	metrics.RegisterBackendConfig(alias, map[string]interface{}{"connection_used": d.connection})
 }
-func (*workloadTestDriver) TelemetryEnabled() bool { return true }
-func (*workloadTestDriver) ReadTelemetry(context.Context) ([]metrics.TelemetryPoint, error) {
+func (*profileTestDriver) TelemetryEnabled() bool { return true }
+func (*profileTestDriver) ReadTelemetry(context.Context) ([]metrics.TelemetryPoint, error) {
 	return nil, nil
 }
 
@@ -39,12 +39,12 @@ func fakeBackend(t *testing.T, name string) {
 		t.Fatal(name)
 	}
 	cfg := original
-	cfg.Factory = func(conn string) (backends.Driver, error) { return &workloadTestDriver{connection: conn}, nil }
+	cfg.Factory = func(conn string) (backends.Driver, error) { return &profileTestDriver{connection: conn}, nil }
 	backends.Register(name, cfg)
 	t.Cleanup(func() { backends.Register(name, original) })
 }
 
-func writeWorkloadTestFile(t *testing.T, path, data string) {
+func writeProfileTestFile(t *testing.T, path, data string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
@@ -55,15 +55,17 @@ func writeWorkloadTestFile(t *testing.T, path, data string) {
 }
 
 func TestLegacyBackendConfigurationsRetainDefaults(t *testing.T) {
-	for _, name := range backends.RegisteredBackends() {
+	for _, name := range profiles.DefaultNames() {
 		t.Run(name, func(t *testing.T) {
-			fakeBackend(t, name)
-			cfg, _ := backends.GetConfig(name)
-			t.Setenv(cfg.EnvVar, "must-not-change-legacy-k6")
+			p, err := profiles.Builtin(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fakeBackend(t, p.Backend)
+			cfg, _ := backends.GetConfig(p.Backend)
+			t.Setenv(p.EnvironmentVariable(), "must-not-change-legacy-k6")
 			dataset := t.TempDir()
-			writeWorkloadTestFile(t, filepath.Join(dataset, name, "pre."+cfg.FileType), "old-pre")
-			// Legacy calls must not acquire a new filesystem dependency.
-			writeWorkloadTestFile(t, filepath.Join(dataset, name, "workload.yaml"), "invalid: [")
+			writeProfileTestFile(t, filepath.Join(dataset, name, "pre."+cfg.FileType), "old-pre")
 			m := &ModuleInstance{}
 			clients := m.newBackends(map[string]interface{}{
 				"datasetPath": dataset,
@@ -74,8 +76,8 @@ func TestLegacyBackendConfigurationsRetainDefaults(t *testing.T) {
 					t.Fatal("missing legacy client", alias)
 				}
 				got := metrics.GetBackendOptions(alias)
-				w, _ := workloads.Builtin(name)
-				wantContainer, wantConnection, wantColor := cfg.Container, cfg.DefaultConn, w.Color
+				w, _ := profiles.Builtin(name)
+				wantContainer, wantConnection, wantColor := w.ContainerName(), w.Connection, w.Color
 				if alias == "replica" {
 					wantContainer = "replica"
 				}
@@ -94,21 +96,21 @@ func TestLegacyBackendConfigurationsRetainDefaults(t *testing.T) {
 	}
 }
 
-func TestMultipleWorkloadsShareEngineButKeepIndependentIdentity(t *testing.T) {
+func TestMultipleProfilesShareEngineButKeepIndependentIdentity(t *testing.T) {
 	fakeBackend(t, "postgres")
 	dir, dataset := t.TempDir(), t.TempDir()
 	for _, name := range []string{"fts", "bm25"} {
-		writeWorkloadTestFile(t, filepath.Join(dir, name+".yaml"), "backend: postgres\nconnection: "+name+"-default\ncontainer: shared-postgres\ncolor: purple\n")
-		writeWorkloadTestFile(t, filepath.Join(dataset, name, "pre.sql"), name+"-pre")
+		writeProfileTestFile(t, filepath.Join(dir, name+".yaml"), "backend: postgres\nconnection: "+name+"-default\ncontainer: shared-postgres\ncolor: purple\n")
+		writeProfileTestFile(t, filepath.Join(dataset, name, "pre.sql"), name+"-pre")
 	}
-	writeWorkloadTestFile(t, filepath.Join(dataset, "fts", "workload.yaml"), "connection: dataset-default\n")
+	writeProfileTestFile(t, filepath.Join(dataset, "fts", "profile.yaml"), "connection: dataset-default\n")
 	t.Setenv("FTS_URL", "fts-env")
 	m := &ModuleInstance{}
 	clients := m.newBackends(map[string]interface{}{
-		"datasetPath": dataset, "workloadsDir": dir,
+		"datasetPath": dataset, "profilesDir": dir,
 		"backends": []interface{}{
-			map[string]interface{}{"type": "postgres", "workload": "fts"},
-			map[string]interface{}{"type": "postgres", "workload": "bm25", "alias": "custom", "container": "", "connection": "explicit", "color": "red"},
+			map[string]interface{}{"type": "fts"},
+			map[string]interface{}{"type": "bm25", "alias": "custom", "container": "", "connection": "explicit", "color": "red"},
 		},
 	})
 	if clients.Get("fts") == nil || clients.Get("custom") == nil || clients.Get("postgres") != nil {
@@ -131,16 +133,15 @@ func TestMultipleWorkloadsShareEngineButKeepIndependentIdentity(t *testing.T) {
 	}
 }
 
-func TestWorkloadConfigurationErrors(t *testing.T) {
+func TestProfileConfigurationErrors(t *testing.T) {
 	fakeBackend(t, "postgres")
 	for _, tc := range []struct {
 		blocks []interface{}
 		want   string
 	}{
-		{[]interface{}{map[string]interface{}{"type": "postgres", "workload": 42}}, "non-empty string"},
-		{[]interface{}{map[string]interface{}{"type": "mongodb", "workload": "paradedb"}}, "uses backend"},
-		{[]interface{}{map[string]interface{}{"type": "postgres", "workload": "missing-workload"}}, "unknown workload"},
-		{[]interface{}{map[string]interface{}{"type": "postgres", "workload": "postgres"}, map[string]interface{}{"type": "postgres", "workload": "postgres"}}, "duplicate alias"},
+		{[]interface{}{map[string]interface{}{"type": 42}}, "type"},
+		{[]interface{}{map[string]interface{}{"type": "missing-profile"}}, "unknown profile"},
+		{[]interface{}{map[string]interface{}{"type": "postgres"}, map[string]interface{}{"type": "postgres"}}, "duplicate alias"},
 	} {
 		t.Run(tc.want, func(t *testing.T) {
 			defer func() {
@@ -150,6 +151,33 @@ func TestWorkloadConfigurationErrors(t *testing.T) {
 				}
 			}()
 			(&ModuleInstance{}).newBackends(map[string]interface{}{"datasetPath": "", "backends": tc.blocks})
+		})
+	}
+}
+
+func TestPostgresExtensionTypesResolveWithoutDriverAliases(t *testing.T) {
+	fakeBackend(t, "postgres")
+	for _, name := range []string{"paradedb", "vectorchord", "vectorsearch"} {
+		t.Run(name, func(t *testing.T) {
+			if _, registered := backends.GetConfig(name); registered {
+				t.Fatal("extension registered as a driver", name)
+			}
+			p, _ := profiles.Builtin(name)
+			t.Setenv(p.EnvironmentVariable(), "from-environment")
+			clients := (&ModuleInstance{}).newBackends(map[string]interface{}{
+				"backends": []interface{}{name},
+			})
+			if clients.Get(name) == nil {
+				t.Fatal("profile identity lost")
+			}
+			want := "from-environment"
+			if name == "paradedb" {
+				want = p.Connection // retain the original k6 connection semantics
+			}
+			if got := metrics.GetBackendConfig(name)["connection_used"]; got != want {
+				t.Fatalf("connection = %v, want %s", got, want)
+			}
+
 		})
 	}
 }

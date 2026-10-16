@@ -1,4 +1,4 @@
-package workloads_test
+package profiles_test
 
 import (
 	"context"
@@ -8,25 +8,24 @@ import (
 	"testing"
 
 	"github.com/paradedb/benchmarker/backends"
-	"github.com/paradedb/benchmarker/backends/paradedb"
 	pg "github.com/paradedb/benchmarker/backends/shared/postgres"
 	"github.com/paradedb/benchmarker/metrics"
-	"github.com/paradedb/benchmarker/workloads"
+	"github.com/paradedb/benchmarker/profiles"
 )
 
 // These tests use read-only queries. Supplying the URLs opts into live checks.
-func TestLiveWorkloadQueriesAndOverrides(t *testing.T) {
+func TestLiveProfileQueriesAndOverrides(t *testing.T) {
 	conn := os.Getenv("BENCHMARKER_POSTGRES_TEST_URL")
 	if conn == "" {
-		t.Skip("set BENCHMARKER_POSTGRES_TEST_URL for live workload checks")
+		t.Skip("set BENCHMARKER_POSTGRES_TEST_URL for live profile checks")
 	}
-	w, err := workloads.Builtin("postgres")
+	w, err := profiles.Builtin("postgres")
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.Extras = workloads.Extras{
+	w.Extras = profiles.Extras{
 		GUCs: []string{"maintenance_work_mem"},
-		Queries: []workloads.Query{
+		Queries: []profiles.Query{
 			{SQL: "SELECT 'column-value'::text AS custom_version"},
 			{Key: "stable.key", SQL: "SELECT 'explicit-value'::text AS ignored_column_name"},
 			{Key: "rows", SQL: "SELECT 'custom.first'::text, 'one'::text UNION ALL SELECT 'custom.second', 'two'"},
@@ -38,8 +37,8 @@ func TestLiveWorkloadQueriesAndOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	d.CaptureConfig(context.Background(), "workload-query-test")
-	got := metrics.GetBackendConfig("workload-query-test")
+	d.CaptureConfig(context.Background(), "profile-query-test")
+	got := metrics.GetBackendConfig("profile-query-test")
 	if got["custom_version"] != "column-value" || got["stable.key"] != "explicit-value" {
 		t.Fatalf("query keys/values: %+v", got)
 	}
@@ -70,7 +69,7 @@ func TestLiveParadeDBCompatibility(t *testing.T) {
 	if conn == "" {
 		t.Skip("set BENCHMARKER_PARADEDB_TEST_URL for live compatibility checks")
 	}
-	// Recreate the pre-workload factory as the independent compatibility oracle.
+	// Recreate the pre-profile factory as the independent compatibility oracle.
 	old, err := pg.New(conn)
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +92,7 @@ func TestLiveParadeDBCompatibility(t *testing.T) {
 	if want["paradedb.version"] == nil || want["paradedb"] == nil {
 		t.Fatalf("ParadeDB not available: %+v", want)
 	}
-	w, err := workloads.Builtin("paradedb")
+	w, err := profiles.Builtin("paradedb")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,8 +100,7 @@ func TestLiveParadeDBCompatibility(t *testing.T) {
 		name    string
 		factory backends.DriverFactory
 	}{
-		{"legacy-go-api", paradedb.New}, {"explicit-workload", w.NewDriver},
-		{"legacy-registry", func(conn string) (backends.Driver, error) { return backends.NewDriver("paradedb", conn) }},
+		{"profile", w.NewDriver},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, err := tc.factory(conn)

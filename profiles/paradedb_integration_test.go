@@ -1,6 +1,6 @@
 //go:build integration
 
-package paradedb
+package profiles_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/paradedb/benchmarker/profiles"
 	"github.com/pgvector/pgvector-go"
 )
 
@@ -18,7 +19,11 @@ func TestParadeDBVectorLoadIndexAndQuerySmoke(t *testing.T) {
 		t.Skip("set BENCHMARKER_PARADEDB_VECTOR_URL to run the ParadeDB vector smoke test")
 	}
 
-	driver, err := New(connString)
+	profile, err := profiles.Builtin("paradedb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := profile.NewDriver(connString)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}

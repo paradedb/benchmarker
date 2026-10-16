@@ -1,4 +1,4 @@
-package workloads_test
+package profiles_test
 
 import (
 	"context"
@@ -10,12 +10,12 @@ import (
 	"github.com/paradedb/benchmarker/backends"
 	pg "github.com/paradedb/benchmarker/backends/shared/postgres"
 	"github.com/paradedb/benchmarker/metrics"
-	"github.com/paradedb/benchmarker/workloads"
+	"github.com/paradedb/benchmarker/profiles"
 )
 
 // Compare against the original uncommitted factories, independently of YAML.
 // The supplied databases must already have their extensions installed.
-func TestLiveVectorWorkloadCaptureParity(t *testing.T) {
+func TestLiveVectorProfileCaptureParity(t *testing.T) {
 	for _, tc := range []struct {
 		name, env, section, key string
 		prefixes, methods       []string
@@ -57,7 +57,7 @@ func TestLiveVectorWorkloadCaptureParity(t *testing.T) {
 			if !ok || section[tc.key] == "" {
 				t.Fatalf("extension capture unavailable: %+v", want)
 			}
-			w, err := workloads.Builtin(tc.name)
+			w, err := profiles.Builtin(tc.name)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -66,7 +66,7 @@ func TestLiveVectorWorkloadCaptureParity(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer d.Close()
-			alias := tc.name + "-workload"
+			alias := tc.name + "-profile"
 			d.CaptureConfig(context.Background(), alias)
 			got := metrics.GetBackendConfig(alias)
 			if !reflect.DeepEqual(got, want) {

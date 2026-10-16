@@ -10,27 +10,27 @@ import (
 	"github.com/paradedb/benchmarker/backends"
 )
 
-type workloadLoaderDriver struct {
+type profileLoaderDriver struct {
 	commands []string
 	rows     int
 }
 
-func (*workloadLoaderDriver) Close() error { return nil }
-func (d *workloadLoaderDriver) Exec(_ context.Context, sql string) error {
+func (*profileLoaderDriver) Close() error { return nil }
+func (d *profileLoaderDriver) Exec(_ context.Context, sql string) error {
 	d.commands = append(d.commands, sql)
 	return nil
 }
-func (*workloadLoaderDriver) Query(context.Context, string, ...any) (int, error) { return 0, nil }
-func (d *workloadLoaderDriver) Insert(_ context.Context, _ string, _ []string, rows [][]any) (int, error) {
+func (*profileLoaderDriver) Query(context.Context, string, ...any) (int, error) { return 0, nil }
+func (d *profileLoaderDriver) Insert(_ context.Context, _ string, _ []string, rows [][]any) (int, error) {
 	d.rows += len(rows)
 	return len(rows), nil
 }
-func (*workloadLoaderDriver) Update(context.Context, string, []string, []string, [][]any) (int, error) {
+func (*profileLoaderDriver) Update(context.Context, string, []string, []string, [][]any) (int, error) {
 	return 0, nil
 }
-func (*workloadLoaderDriver) CaptureConfig(context.Context, string) {}
+func (*profileLoaderDriver) CaptureConfig(context.Context, string) {}
 
-func TestLoadWorkloadAndLegacyDatasetPaths(t *testing.T) {
+func TestLoadProfileAndLegacyDatasetPaths(t *testing.T) {
 	dir := t.TempDir()
 	data := filepath.Join(dir, "data.csv")
 	if err := os.WriteFile(data, []byte("id,title\n1,hello\n2,world\n"), 0600); err != nil {
@@ -50,21 +50,22 @@ func TestLoadWorkloadAndLegacyDatasetPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	var gotConn string
-	var driver *workloadLoaderDriver
+	var driver *profileLoaderDriver
 	backends.Register("loader-test-engine", backends.BackendConfig{FileType: "sql", Factory: func(conn string) (backends.Driver, error) {
 		gotConn = conn
-		driver = &workloadLoaderDriver{}
+		driver = &profileLoaderDriver{}
 		return driver, nil
 	}})
-	for _, explicitWorkload := range []bool{false, true} {
+	for _, selection := range []string{"legacy", "type"} {
 		cfg := map[string]interface{}{"file": data, "dataset": dir}
 		name := "loader-test-engine"
-		if explicitWorkload {
-			cfg["workload"] = "custom"
-			cfg["workloadsDir"] = dir
+		backendName := "loader-test-engine"
+		if selection != "legacy" {
+			backendName = "custom"
+			cfg["profilesDir"] = dir
 			name = "custom"
 		}
-		result := (&Loader{}).Load("loader-test-engine", "explicit", cfg)
+		result := (&Loader{}).Load(backendName, "explicit", cfg)
 		if result["error"] != nil {
 			t.Fatal(result)
 		}

@@ -1,13 +1,12 @@
 import db from "k6/x/database";
 
-// Load this dataset with --workload vectorsearch before running.
+// Load this dataset with --backend vectorsearch before running.
 // Tune recall with VECTORSEARCH_URL's options=-c%20prism.nprobe%3D40.
 const backends = db.backends({
   datasetPath: "../",
   backends: [
     {
-      type: "postgres",
-      workload: "vectorsearch",
+      type: "vectorsearch",
       connection: __ENV.VECTORSEARCH_URL,
       container: __ENV.VECTORSEARCH_CONTAINER ?? "vectorsearch",
     },

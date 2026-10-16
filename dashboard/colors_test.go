@@ -9,19 +9,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paradedb/benchmarker/workloads"
+	"github.com/paradedb/benchmarker/profiles"
 )
 
 func TestManifestColorsSurviveLiveExportAndReplay(t *testing.T) {
 	for _, tc := range []struct{ backend, color string }{
 		{"paradedb", ""}, {"postgres", ""}, {"clickhouse", ""},
 		{"mongodb", ""}, {"elasticsearch", ""}, {"opensearch", ""},
-		{"paradedb", "orange"}, {"my-workload", "#123456"}, {"unknown", ""},
+		{"paradedb", "orange"}, {"my-profile", "#123456"}, {"unknown", ""},
 	} {
 		t.Run(tc.backend+tc.color, func(t *testing.T) {
 			want := tc.color
 			if want == "" && tc.backend != "unknown" {
-				w, err := workloads.Builtin(tc.backend)
+				w, err := profiles.Builtin(tc.backend)
 				if err != nil || w.Color == "" {
 					t.Fatalf("missing builtin color: %+v, %v", w, err)
 				}

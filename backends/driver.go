@@ -523,7 +523,7 @@ func vectorColumns(schema *Schema) []string {
 
 func backendSupportsVectorColumns(name string) bool {
 	switch name {
-	case "paradedb", "postgres":
+	case "postgres":
 		return true
 	case "elasticsearch", "opensearch":
 		// dense_vector / knn_vector mappings; []float32 values marshal as
@@ -674,7 +674,7 @@ func schemaColumnsInOrder(schema *Schema, headers []string) ([]string, error) {
 type CLILoader struct {
 	driver     Driver
 	name       string
-	backend    string // driver identity; name can instead identify a workload
+	backend    string // driver identity; name can instead identify a profile
 	fileType   string // "sql" or "json"
 	connString string
 	factory    DriverFactory
@@ -691,8 +691,8 @@ func NewCLILoader(name, fileType, connString string, factory DriverFactory) *CLI
 	}
 }
 
-// NewWorkloadCLILoader separates dataset directory/label from driver identity.
-func NewWorkloadCLILoader(name, backend, fileType, connString string, factory DriverFactory) *CLILoader {
+// NewProfileCLILoader separates dataset directory/label from driver identity.
+func NewProfileCLILoader(name, backend, fileType, connString string, factory DriverFactory) *CLILoader {
 	l := NewCLILoader(name, fileType, connString, factory)
 	l.backend = backend
 	return l
@@ -744,7 +744,7 @@ func (l *CLILoader) validateTableSchema(schema *Schema) error {
 		return fmt.Errorf("schema has no columns")
 	}
 	if cols := vectorColumns(schema); len(cols) > 0 && !backendSupportsVectorColumns(l.backendName()) {
-		return fmt.Errorf("backend %q does not support vector columns: %s (supported backends: paradedb, postgres, elasticsearch, opensearch)",
+		return fmt.Errorf("backend %q does not support vector columns: %s (supported backends: postgres, elasticsearch, opensearch)",
 			l.name, strings.Join(cols, ", "))
 	}
 	for col, schemaType := range schema.Columns {
