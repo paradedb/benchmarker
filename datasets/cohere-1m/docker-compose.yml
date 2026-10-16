@@ -1,0 +1,189 @@
+# Cohere 1M engines: 4 CPUs and 8 GiB per service.
+# From the repository root:
+# docker compose -f datasets/cohere-1m/docker-compose.yml up -d --build --wait
+services:
+  paradedb:
+    image: paradedb/paradedb:v0.26.0-pg18
+    container_name: paradedb
+    shm_size: 4g
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: benchmark_1m
+    ports:
+      - "5432:5432"
+    volumes:
+      - paradedb_data:/var/lib/postgresql/18/docker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    cpus: 4
+    mem_limit: 8g
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=pg_search,pg_cron"
+      - "-c"
+      - "shared_buffers=2GB"
+      - "-c"
+      - "effective_cache_size=4GB"
+      - "-c"
+      - "work_mem=256MB"
+      - "-c"
+      - "maintenance_work_mem=1GB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=256MB"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "max_parallel_workers_per_gather=2"
+      - "-c"
+      - "max_parallel_workers=2"
+      - "-c"
+      - "max_worker_processes=16"
+      - "-c"
+      - "jit=off"
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=50"
+      - bootstrap.memory_lock=true
+      - thread_pool.search.size=4
+      - thread_pool.search.queue_size=2000
+      - thread_pool.write.size=4
+      - indices.memory.index_buffer_size=20%
+      - indices.queries.cache.size=20%
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    cpus: 4
+    mem_limit: 8g
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  vectorsearch:
+    build: ../../docker/vectorsearch
+    image: benchmarker/vectorsearch:local
+    container_name: vectorsearch
+    shm_size: 4g
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: benchmark
+    ports:
+      - "5434:5432"
+    volumes:
+      - vectorsearch_data:/var/lib/postgresql/18/docker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    cpus: 4
+    mem_limit: 8g
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=2GB"
+      - "-c"
+      - "effective_cache_size=4GB"
+      - "-c"
+      - "work_mem=256MB"
+      - "-c"
+      - "maintenance_work_mem=1GB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=256MB"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "max_parallel_workers_per_gather=2"
+      - "-c"
+      - "max_parallel_workers=2"
+      - "-c"
+      - "max_worker_processes=16"
+      - "-c"
+      - "jit=off"
+
+  vectorchord:
+    image: tensorchord/vchord-postgres:pg18-v1.1.1
+    container_name: vectorchord
+    shm_size: 4g
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: benchmark
+    ports:
+      - "5435:5432"
+    volumes:
+      - vectorchord_data:/var/lib/postgresql/18/docker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    cpus: 4
+    mem_limit: 8g
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=vchord,vector"
+      - "-c"
+      - "shared_buffers=2GB"
+      - "-c"
+      - "effective_cache_size=4GB"
+      - "-c"
+      - "work_mem=256MB"
+      - "-c"
+      - "maintenance_work_mem=1GB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=256MB"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "max_parallel_workers_per_gather=2"
+      - "-c"
+      - "max_parallel_workers=2"
+      - "-c"
+      - "max_worker_processes=16"
+      - "-c"
+      - "jit=off"
+
+volumes:
+  paradedb_data:
+  elasticsearch_data:
+  vectorsearch_data:
+  vectorchord_data:
