@@ -437,3 +437,29 @@ func TestAggregateExportDataHandlesNativeGoTypes(t *testing.T) {
 		t.Fatalf("timeline is empty; native-typed samples were dropped: %v", q["timeline"])
 	}
 }
+
+func TestWorkloadAliasesKeepExistingDashboardJSONIdentity(t *testing.T) {
+	o := &Output{data: &DashboardData{StartTime: time.Unix(0, 0), Runs: map[string]*RunMetrics{}}}
+	for alias, color := range map[string]string{"fts-workload": "#112233", "bm25-workload": "#445566"} {
+		metrics.RegisterBackendOptions(alias, &metrics.BackendOptions{Alias: alias, Container: "shared-postgres", Color: color})
+		metrics.RegisterBackendConfig(alias, map[string]interface{}{"version": "same engine", "pre_script": alias})
+		t.Cleanup(func() { metrics.RegisterBackendConfig(alias, nil) })
+		o.getOrCreateRun(alias+"_search", alias, nil)
+	}
+	summary := o.getSummary()
+	runs := summary["runs"].(map[string]interface{})
+	captures := summary["backends"].(map[string]interface{})
+	if len(runs) != 2 {
+		t.Fatalf("workloads collapsed: %v", runs)
+	}
+	for alias, color := range map[string]string{"fts-workload": "#112233", "bm25-workload": "#445566"} {
+		run := runs[alias+"_search"].(map[string]interface{})
+		if run["backend"] != alias || run["alias"] != alias || run["color"] != color || run["container"] != "shared-postgres" {
+			t.Fatalf("existing fields changed: %v", run)
+		}
+		capture := captures[alias].(map[string]interface{})["config"].(map[string]interface{})
+		if capture["pre_script"] != alias {
+			t.Fatalf("capture identity changed: %v", capture)
+		}
+	}
+}

@@ -61,12 +61,13 @@ benchmarks/
 │   ├── shared/
 │   │   ├── postgres/      # Shared PostgreSQL driver (paradedb, postgres)
 │   │   └── elastic/       # Shared Elasticsearch/OpenSearch driver
-│   ├── paradedb/          # ParadeDB registration
+│   ├── paradedb/          # Legacy API wrapper for the ParadeDB workload
 │   ├── postgres/          # PostgreSQL registration
 │   ├── elasticsearch/     # Elasticsearch registration
 │   ├── opensearch/        # OpenSearch registration
 │   ├── clickhouse/        # ClickHouse driver
 │   └── mongodb/           # MongoDB driver
+├── workloads/             # Embedded manifests, resolution, driver configuration
 ├── metrics/               # k6 metrics + Docker container stats
 ├── dashboard/             # Real-time dashboard + SSE output
 ├── loader/                # k6 data loader module
@@ -92,9 +93,30 @@ Backends use a **registry pattern** with factory functions:
 
 `metrics/collector.go` reads Docker container stats through the active local Docker context (falling back to `/var/run/docker.sock`) and emits `container_cpu_percent` and `container_memory_bytes` gauges.
 
+## Adding a Workload
+
+To benchmark another index/query strategy on an existing engine, add a manifest
+and dataset scripts; no new driver package or rebuild is needed. See
+[Workloads](docs/datasets.md#workloads) for the manifest schema and precedence.
+External manifests are selected explicitly with `--workload` or the k6
+`workload` field. Manifests shipped in `workloads/` are embedded at build time.
+
+`paradedb` is implemented as a workload on `postgres`. Its Go package and
+registration remain as compatibility wrappers. Keep existing registry names,
+exported constructors, CLI defaults, k6 shorthand, result keys, and dataset
+paths working when changing this layer. Do not change legacy environment or
+container resolution to match new workload defaults.
+
+Run `go test ./...` for the compatibility matrix. To also compare the old
+ParadeDB capture/telemetry behavior against the new factory and exercise live
+PostgreSQL config queries, set `BENCHMARKER_PARADEDB_TEST_URL` and
+`BENCHMARKER_POSTGRES_TEST_URL` when running `go test ./workloads -v`.
+Those workload tests issue read-only queries against the supplied databases.
+
 ## Adding a Backend
 
-This is the most common type of contribution. Here's a step-by-step guide.
+Add a backend when a new database driver or protocol is required. Here is a
+step-by-step guide.
 
 ### 1. The Driver Interface
 

@@ -1,0 +1,6 @@
+backend: clickhouse
+container: clickhouse
+connection: clickhouse://default:clickhouse@localhost:9000/default
+envVar: CLICKHOUSE_URL
+description: ClickHouse
+color: "#FACC15"

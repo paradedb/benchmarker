@@ -43,12 +43,13 @@ type ConfigQuery struct {
 
 // Driver implements the backends.Driver interface for PostgreSQL.
 type Driver struct {
-	pool             *pgxpool.Pool
-	connString       string
-	telemetryQueries []TelemetryQuery
-	extraGUCs        []string      // Additional GUCs to capture (e.g., "paradedb.xxx")
-	extraGUCPrefixes []string      // GUC prefixes captured wholesale (e.g., "paradedb")
-	extraQueries     []ConfigQuery // Additional SQL queries to capture
+	pool                  *pgxpool.Pool
+	connString            string
+	telemetryQueries      []TelemetryQuery
+	extraGUCs             []string      // Additional GUCs to capture (e.g., "paradedb.xxx")
+	extraGUCPrefixes      []string      // GUC prefixes captured wholesale (e.g., "paradedb")
+	extraQueries          []ConfigQuery // Additional SQL queries to capture
+	extraQueryColumnNames bool          // Workload SQL can derive capture keys from column names
 }
 
 // New creates a new PostgreSQL driver.
@@ -132,6 +133,14 @@ func (d *Driver) SetExtraGUCPrefixes(prefixes []string) {
 // See ConfigQuery for the supported result shapes.
 func (d *Driver) SetExtraQueries(queries []ConfigQuery) {
 	d.extraQueries = queries
+	d.extraQueryColumnNames = false
+}
+
+// SetExtraQueriesWithColumnNames opts into deriving empty query keys from SQL
+// column names. SetExtraQueries retains its legacy empty-key behavior.
+func (d *Driver) SetExtraQueriesWithColumnNames(queries []ConfigQuery) {
+	d.SetExtraQueries(queries)
+	d.extraQueryColumnNames = true
 }
 
 // Exec executes SQL statements separated by semicolons.
@@ -327,7 +336,11 @@ func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 			} else {
 				var result string
 				if rows.Scan(&result) == nil {
-					config[q.Key] = result
+					key := q.Key
+					if key == "" && d.extraQueryColumnNames {
+						key = rows.FieldDescriptions()[0].Name
+					}
+					config[key] = result
 				}
 			}
 		}

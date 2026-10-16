@@ -83,6 +83,54 @@ backends.get("paradedb-v2").query(...);
 backends.get("elasticsearch").query(...);
 ```
 
+### Workload Configuration
+
+Use `workload` to select an index/query strategy independently from `type`:
+
+```javascript
+const backends = db.backends({
+  datasetPath: "../",
+  // Optional directory relative to the process working directory:
+  // workloadsDir: "/path/to/my-workloads",
+  backends: [
+    { type: "postgres", workload: "postgres", alias: "pg-fts" },
+    { type: "postgres", workload: "paradedb" },
+  ],
+});
+
+backends.get("pg-fts").query("SELECT id FROM documents LIMIT 10");
+backends.get("paradedb").query("SELECT id FROM documents LIMIT 10");
+```
+
+With explicit workload selection, `alias` defaults to the workload name.
+Connection precedence is the block's `connection`, then the manifest's environment
+variable, then its default connection. `container` and `color` override manifest
+values, including `container: ""` to disable Docker metrics. An explicit alias
+does not change the manifest's container. Metric tags and dashboard results
+remain keyed by alias, so workloads sharing an engine stay independent.
+
+When `workload` is omitted, the existing type-based behavior is unchanged:
+connection environment variables must still be passed explicitly via `__ENV`,
+custom aliases still default the container to the alias, and external workload
+manifests are not read. Existing `backends.get("paradedb")` calls and shorthand
+strings remain valid. See [Workloads](datasets.md#workloads) for the manifest
+format and optional per-dataset overrides.
+
+The generic k6 loading helper accepts the same selection in its config:
+
+```javascript
+loader.load("postgres", "", {
+  workload: "paradedb",
+  file: "../data.csv",
+  dataset: "../",
+});
+```
+
+The second argument is an explicit connection override; when empty with a
+workload selected, the manifest/environment supplies the connection. Existing
+calls to `load`, `loadParadeDB`, and the other named helpers retain their
+behavior when no workload is supplied.
+
 ## Available Backend Types
 
 The framework is database-agnostic - the current backends and datasets are focused on full-text search, but the same infrastructure works for any query workload. See [CONTRIBUTING.md](../CONTRIBUTING.md) for how to add a new backend.
