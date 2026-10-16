@@ -194,6 +194,9 @@ import (
 
 ### 4. Add Docker Compose Service
 
+Cloud-only backends such as Turbopuffer skip this step and leave `Container`
+and `DefaultConn` empty. Their factory validates the required cloud settings.
+
 Add a service with a profile in `docker-compose.yml`:
 
 ```yaml
@@ -263,10 +266,12 @@ SQL backends use `.sql` files, HTTP backends (Elasticsearch, OpenSearch, MongoDB
 
 The CLI loader imports one source into one `schema.yaml` table per dataset.
 Scalar CSV and Parquet columns work across backends; `vector(n)` columns are
-limited to ParadeDB and PostgreSQL. For k6 ingest/update workloads,
+supported by ParadeDB, PostgreSQL, Elasticsearch,
+OpenSearch, and Turbopuffer. For k6 ingest/update workloads,
 `db.loader().openDocumentStream(path, {schema})` reads typed CSV, Parquet files,
-and Parquet shard directories. The existing `openDocuments()` and
-`loader.load...()` helpers remain CSV-only.
+and Parquet shard directories. `loader.load(..., {schema: "../schema.yaml", ...})`
+uses the same typed reader for setup loads. `openDocuments()` and setup loads
+without `schema` remain CSV-only string readers.
 
 ## Pull Request Workflow
 

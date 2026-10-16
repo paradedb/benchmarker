@@ -13,6 +13,7 @@ import (
 type workloadLoaderDriver struct {
 	commands []string
 	rows     int
+	firstID  any
 }
 
 func (*workloadLoaderDriver) Close() error { return nil }
@@ -21,8 +22,13 @@ func (d *workloadLoaderDriver) Exec(_ context.Context, sql string) error {
 	return nil
 }
 func (*workloadLoaderDriver) Query(context.Context, string, ...any) (int, error) { return 0, nil }
-func (d *workloadLoaderDriver) Insert(_ context.Context, _ string, _ []string, rows [][]any) (int, error) {
+func (d *workloadLoaderDriver) Insert(_ context.Context, _ string, cols []string, rows [][]any) (int, error) {
 	d.rows += len(rows)
+	for i, col := range cols {
+		if col == "id" && len(rows) > 0 {
+			d.firstID = rows[0][i]
+		}
+	}
 	return len(rows), nil
 }
 func (*workloadLoaderDriver) Update(context.Context, string, []string, []string, [][]any) (int, error) {
@@ -56,20 +62,34 @@ func TestLoadWorkloadAndLegacyDatasetPaths(t *testing.T) {
 		driver = &workloadLoaderDriver{}
 		return driver, nil
 	}})
-	for _, explicitWorkload := range []bool{false, true} {
-		cfg := map[string]interface{}{"file": data, "dataset": dir}
-		name := "loader-test-engine"
-		if explicitWorkload {
-			cfg["workload"] = "custom"
-			cfg["workloadsDir"] = dir
-			name = "custom"
-		}
-		result := (&Loader{}).Load("loader-test-engine", "explicit", cfg)
-		if result["error"] != nil {
-			t.Fatal(result)
-		}
-		if gotConn != "explicit" || driver.rows != 2 || !reflect.DeepEqual(driver.commands, []string{name + "-pre", name + "-post"}) {
-			t.Fatalf("connection=%s, driver=%+v", gotConn, driver)
+	schema := filepath.Join(dir, "schema.yaml")
+	if err := os.WriteFile(schema, []byte("table: documents\ncolumns:\n  id: bigint\n  title: text\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, typed := range []bool{false, true} {
+		for _, explicitWorkload := range []bool{false, true} {
+			cfg := map[string]interface{}{"file": data, "dataset": dir}
+			if typed {
+				cfg["schema"] = schema
+			}
+			name := "loader-test-engine"
+			if explicitWorkload {
+				cfg["workload"] = "custom"
+				cfg["workloadsDir"] = dir
+				name = "custom"
+			}
+			result := (&Loader{}).Load("loader-test-engine", "explicit", cfg)
+			if result["error"] != nil {
+				t.Fatal(result)
+			}
+			if gotConn != "explicit" || driver.rows != 2 || !reflect.DeepEqual(driver.commands, []string{name + "-pre", name + "-post"}) {
+				t.Fatalf("connection=%s, driver=%+v", gotConn, driver)
+			}
+			if typed {
+				if _, ok := driver.firstID.(int64); !ok {
+					t.Fatalf("typed load lost ID type: %T", driver.firstID)
+				}
+			}
 		}
 	}
 }

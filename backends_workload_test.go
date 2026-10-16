@@ -74,7 +74,7 @@ func TestLegacyBackendConfigurationsRetainDefaults(t *testing.T) {
 				}
 				got := metrics.GetBackendOptions(alias)
 				wantContainer, wantConnection, wantColor := cfg.Container, cfg.DefaultConn, ""
-				if alias == "replica" {
+				if alias == "replica" && cfg.Container != "" {
 					wantContainer = "replica"
 				}
 				if alias == "remote" {

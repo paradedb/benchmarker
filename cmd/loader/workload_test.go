@@ -72,7 +72,7 @@ func TestLegacyLoaderSelectionAndEnvironment(t *testing.T) {
 }
 
 func TestWorkloadLoaderUsesEngineForSchemaAndDrop(t *testing.T) {
-	for _, name := range []string{"postgres", "elasticsearch", "mongodb"} {
+	for _, name := range []string{"postgres", "elasticsearch", "mongodb", "turbopuffer"} {
 		t.Run(name, func(t *testing.T) {
 			cfg, _ := backends.GetConfig(name)
 			original := cfg
@@ -113,6 +113,7 @@ func TestWorkloadLoaderUsesEngineForSchemaAndDrop(t *testing.T) {
 				"postgres":      `DROP TABLE IF EXISTS documents CASCADE`,
 				"elasticsearch": `[{"index":"documents","method":"DELETE"}]`,
 				"mongodb":       `{"collection":"documents","database":"benchmark","drop":true}`,
+				"turbopuffer":   `[{"method":"DELETE","namespace":"documents"}]`,
 			}[name]
 			if driver.commands[0] != want {
 				t.Fatalf("drop=%s, want %s", driver.commands[0], want)

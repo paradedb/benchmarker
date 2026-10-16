@@ -36,10 +36,8 @@ func (l *Loader) OpenDocumentStream(path string, options map[string]interface{})
 	if path == "" {
 		return nil, fmt.Errorf("openDocumentStream: data path is required")
 	}
-	if l.vu != nil && l.vu.InitEnv() != nil {
-		path = l.vu.InitEnv().GetAbsFilePath(path)
-		schemaPath = l.vu.InitEnv().GetAbsFilePath(schemaPath)
-	}
+	path = l.resolvePath(path)
+	schemaPath = l.resolvePath(schemaPath)
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("openDocumentStream: %w", err)

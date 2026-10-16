@@ -130,14 +130,17 @@ top-level `table`). It supports scalar CSV and Parquet columns for every
 backend, including sharded Parquet directories. Single-table data lives at the
 dataset root (`data.parquet`, `data.csv`, or `data/`); multi-table data lives
 under `data/` as `<table>.parquet`, `<table>.csv`, or a `<table>/` shard
-directory per table. `vector(n)` schema columns are supported only for ParadeDB
-and PostgreSQL; the CLI checks this before running `pre.sql`.
+directory per table. `vector(n)` schema columns are supported for ParadeDB,
+PostgreSQL, Elasticsearch, OpenSearch, and Turbopuffer; the CLI checks support
+before running setup scripts.
 
 The k6-side loader API is separate from this CLI. `db.loader().openDocuments()`
-and `loader.load...()` remain CSV-only helpers for script setup, ingest, and
-update workloads. `db.loader().openDocumentStream(path, {schema})` reads CSV,
-Parquet files, and Parquet shard directories directly using the CLI's type
-conversion. See [streaming workloads](scripting.md#streaming-csv-and-parquet-workloads).
+remains a CSV-only helper that returns strings. `loader.load()` also uses string
+CSV values unless you supply `schema: "../schema.yaml"`; with a schema it uses
+the CLI's typed reader for CSV, Parquet files, and Parquet shard directories.
+`db.loader().openDocumentStream(path, {schema})` provides the same typed data for
+insert/update workloads. Use typed loading for numeric IDs and vectors so
+subsequent writes preserve their types. See [streaming workloads](scripting.md#streaming-csv-and-parquet-workloads).
 
 ## Integration Smoke Tests
 
@@ -149,6 +152,15 @@ go test -tags integration ./backends/shared/postgres
 
 BENCHMARKER_PARADEDB_VECTOR_URL="postgres://postgres:postgres@localhost:5432/benchmark" \
 go test -tags integration ./backends/paradedb
+```
+
+With `TURBOPUFFER_API_KEY` and `TURBOPUFFER_REGION` exported, the cloud lifecycle
+test checks CSV/Parquet loading, inserts, updates, vector queries, and BM25 in
+a temporary namespace that it deletes afterward:
+
+```bash
+BENCHMARKER_TURBOPUFFER_LIVE=1 \
+go test -tags integration -run '^TestLiveTurbopufferLifecycle$' -count=1 -v ./backends/turbopuffer
 ```
 
 ## Dataset Structure
@@ -164,3 +176,136 @@ pull. Partially decompressed CSV files are removed if extraction fails or the
 limit is exceeded.
 
 Downloads cannot escape the destination through parent paths or symlinks, and duplicate file entries are rejected. New files use mode `0600` and new directories use `0750`.
+
+## Turbopuffer (Cloud)
+
+Turbopuffer uses the same loader and JSON query pattern as Elasticsearch, with
+namespaces in place of indexes. It has no Docker Compose service or container
+CPU/memory metrics. Query, ingest, update, and dashboard metrics work normally.
+
+Set an API key and choose your [region](https://turbopuffer.com/docs/regions):
+
+The commands below assume the dataset includes its Turbopuffer `pre.json`,
+`post.json`, and k6 scripts. These files are distributed with datasets separately
+from the backend code; download them with `loader pull` or create them using
+the examples below.
+
+```bash
+export TURBOPUFFER_API_KEY="your-api-key"
+export TURBOPUFFER_REGION="aws-us-east-1"
+# Alternatively, set an explicit regional endpoint:
+# export TURBOPUFFER_URL="https://aws-us-east-1.turbopuffer.com"
+
+make loader k6
+./bin/loader load --backend turbopuffer --batch-size 1000 ./datasets/sample
+./k6 run --out dashboard datasets/sample/k6/turbopuffer.js
+```
+
+The sample requires its usual `data.csv` (see [Datasets](datasets.md)). Its
+`pre.json` resets the cloud namespace `documents`, deleting any previous contents.
+Change the dataset's table name, namespace in pre/post scripts, and query target
+if you want to use a different namespace. All commands use your cloud account.
+
+Connection precedence is an explicit k6 `connection`, then `TURBOPUFFER_URL`,
+then the endpoint derived from `TURBOPUFFER_REGION`. The API key always comes
+from `TURBOPUFFER_API_KEY`; keep it out of URLs and scripts. Both the CLI and k6
+support these environment variables. HTTPS certificate verification is enabled.
+
+Turbopuffer creates namespaces on the first document write. A setup object in
+`turbopuffer/pre.json` configures subsequent writes on that driver:
+
+```json
+{
+  "namespace": "documents",
+  "reset": true,
+  "schema": {
+    "id": "uuid",
+    "content": { "type": "string", "full_text_search": true }
+  }
+}
+```
+
+`reset` defaults to false. When true it deletes the namespace before loading;
+a missing namespace is allowed. `schema` is attached to every batch, including
+batches sent by parallel loader workers. See Turbopuffer's [write API](https://turbopuffer.com/docs/write)
+for schema options. Each document must have an `id` or `_id`; `_id` is mapped
+to Turbopuffer's `id`. IDs are preserved, so repeated IDs replace existing rows.
+`insertBatch` and `updateBatch` both upsert complete documents, including vectors.
+They replace the existing document, so include every attribute you want to retain.
+Mixed batches preserve fields present in later documents; absent fields become null.
+IDs must be non-empty strings of up to 64 bytes or non-negative integers. For
+numeric IDs above JavaScript's safe-integer range, use typed data without converting
+the ID to a JS Number, or use string IDs consistently across loading and queries.
+
+For vector datasets, declare `vector(n)` in `schema.yaml` and the corresponding
+Turbopuffer type in `pre.json`, for example:
+
+```json
+{
+  "namespace": "documents",
+  "distance_metric": "euclidean_squared",
+  "schema": {
+    "embedding": { "type": "[128]f32", "ann": true }
+  }
+}
+```
+
+Vectors retain their dataset column names. The default distance metric is
+`cosine_distance`; set `distance_metric` in setup or use
+`TURBOPUFFER_URL="https://aws-us-east-1.turbopuffer.com?distance_metric=euclidean_squared"`.
+Use the same metric for every write to that namespace, including later k6
+insert/update workloads. Load the namespace and its schema before running k6
+insert/update workloads; those drivers use the stored schema and the distance
+metric from their connection URL.
+
+Typed float32 vectors with a configured vector schema (or named `vector`) use
+Turbopuffer's lossless base64 wire format to reduce bulk-upload size. Ordinary
+numeric arrays and vectors supplied as JavaScript arrays remain JSON arrays.
+
+Arrays in pre/post files can contain setup objects for multiple namespaces and
+HTTP operations, similar to Elasticsearch:
+
+```json
+[
+  {
+    "namespace": "documents",
+    "wait_for_index": true,
+    "timeout": "15m"
+  },
+  {
+    "namespace": "documents",
+    "method": "GET",
+    "endpoint": "hint_cache_warm"
+  }
+]
+```
+
+Supported endpoints are the namespace root (omit `endpoint`), `query`,
+`metadata`, and `hint_cache_warm`. `body` is sent as native JSON and the default
+method is POST. An explicit DELETE at the namespace root deletes its data;
+`loader drop --backend turbopuffer` does the same for each dataset table.
+For an existing namespace, schema-only changes can be sent as a POST operation
+with `body: {"schema": ...}`. The setup-object form only configures future writes.
+
+`wait_for_index` polls namespace metadata until its index is up to date. Its
+timeout defaults to 15 minutes and can be overridden as shown above. The sample
+post script waits for indexing, then sends a [cache-warming hint](https://turbopuffer.com/docs/warm-cache).
+The hint does not wait for warming to finish; include a warmup phase for warm
+latency measurements. HTTP failures, including rate limits, are reported without
+automatic retries so they remain visible in benchmark results.
+
+For bulk imports, setup accepts `disable_backpressure: true`, as recommended in
+Turbopuffer's [ingestion guide](https://turbopuffer.com/docs/ingestion). This allows
+loading to continue when indexing falls behind. Use `wait_for_index` afterward
+before benchmarking strongly consistent queries. Regular k6 writes default to
+backpressure enabled. The Cohere 1M Turbopuffer scripts configure this bulk-load
+flow and include a vector benchmark:
+
+```bash
+./bin/loader pull --dataset cohere-1m --source s3://paradedb-benchmarker/datasets/cohere-1m/ --anonymous
+./bin/loader load --backend turbopuffer --workers 4 --batch-size 1000 ./datasets/cohere-1m
+./k6 run datasets/cohere-1m/k6/turbopuffer.js
+```
+
+The Cohere setup resets `cohere_wiki`; use a separate namespace for independent
+runs. Set `TURBOPUFFER_NAMESPACE` to target that namespace in the k6 script.
