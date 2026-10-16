@@ -32,7 +32,7 @@ func (*selectionDriver) Update(context.Context, string, []string, []string, [][]
 func (*selectionDriver) CaptureConfig(context.Context, string) {}
 
 func TestLegacyLoaderSelectionAndEnvironment(t *testing.T) {
-	want := []string{"clickhouse", "elasticsearch", "mongodb", "opensearch", "paradedb", "postgres"}
+	want := []string{"clickhouse", "elasticsearch", "mongodb", "opensearch", "paradedb", "postgres", "turbopuffer"}
 	loaders, err := selectLoaders("", "", profileOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestLegacyLoaderSelectionAndEnvironment(t *testing.T) {
 	}
 	for _, name := range want {
 		t.Run(name, func(t *testing.T) {
-			profile, _ := profiles.Builtin(name)
+			profile, _ := profiles.Resolve(name, "", "")
 			cfg, _ := backends.GetConfig(profile.Backend)
 			original := cfg
 			var driver *selectionDriver
@@ -56,6 +56,17 @@ func TestLegacyLoaderSelectionAndEnvironment(t *testing.T) {
 			}
 			backends.Register(profile.Backend, cfg)
 			t.Cleanup(func() { backends.Register(profile.Backend, original) })
+			t.Setenv(profile.EnvironmentVariable(), "")
+			defaults, err := selectLoaders("", name, profileOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := defaults[0].Drop(context.Background(), &backends.Schema{Table: "documents"}); err != nil {
+				t.Fatal(err)
+			}
+			if driver.connection != profile.Connection {
+				t.Fatalf("default connection = %q, want %q", driver.connection, profile.Connection)
+			}
 			t.Setenv(profile.EnvironmentVariable(), "legacy-environment")
 			selected, err := selectLoaders("", name, profileOptions{})
 			if err != nil {
@@ -75,7 +86,7 @@ func TestLegacyLoaderSelectionAndEnvironment(t *testing.T) {
 }
 
 func TestProfileLoaderUsesEngineForSchemaAndDrop(t *testing.T) {
-	for _, name := range []string{"postgres", "elasticsearch", "mongodb"} {
+	for _, name := range []string{"postgres", "elasticsearch", "mongodb", "turbopuffer"} {
 		t.Run(name, func(t *testing.T) {
 			cfg, _ := backends.GetConfig(name)
 			original := cfg
@@ -116,6 +127,7 @@ func TestProfileLoaderUsesEngineForSchemaAndDrop(t *testing.T) {
 				"postgres":      `DROP TABLE IF EXISTS documents CASCADE`,
 				"elasticsearch": `[{"index":"documents","method":"DELETE"}]`,
 				"mongodb":       `{"collection":"documents","database":"benchmark","drop":true}`,
+				"turbopuffer":   `[{"method":"DELETE","namespace":"documents"}]`,
 			}[name]
 			if driver.commands[0] != want {
 				t.Fatalf("drop=%s, want %s", driver.commands[0], want)

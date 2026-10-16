@@ -223,7 +223,9 @@ func selectLoaders(dataset, name string, options profileOptions) ([]*backends.CL
 		return nil, err
 	}
 	connection, err := profile.ResolveConnection(options.connection)
-	if err != nil {
+	// Existing drivers may resolve an empty connection themselves (for example,
+	// Turbopuffer uses TURBOPUFFER_REGION when no URL is supplied).
+	if err != nil && !profiles.LegacyType(name) {
 		return nil, err
 	}
 	loader, err := profile.CLILoader(connection)

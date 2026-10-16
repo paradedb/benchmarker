@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/grafana/sobek"
+	"github.com/paradedb/benchmarker/metrics"
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/lib"
 	"go.k6.io/k6/lib/executor"
@@ -236,5 +237,36 @@ func TestCLILoaderLoadFailsOnInvalidTypedValue(t *testing.T) {
 	}
 	if driver.inserted != 0 {
 		t.Fatalf("expected no rows inserted, got %d", driver.inserted)
+	}
+}
+
+func TestNormalOperationsHonorVUCancellationAndTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	client := NewK6Client(driverFakeVU{ctx: ctx}, &recordingDriver{}, "test")
+	client.SetTimeout(2)
+	operation, cleanup := client.operationContext(metrics.WarmupPhase{}, client.timeout)
+	defer cleanup()
+	deadline, ok := operation.Deadline()
+	if !ok || time.Until(deadline) > 2*time.Second {
+		t.Fatal("missing configured timeout")
+	}
+	cancel()
+	if operation.Err() != context.Canceled {
+		t.Fatal("VU cancellation did not reach operation")
+	}
+}
+
+func TestCLILoaderReportsCancellation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.csv")
+	if err := os.WriteFile(path, []byte("id\n1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	loader := NewCLILoader("test", "sql", "", func(string) (Driver, error) { return &recordingDriver{}, nil })
+	_, err := loader.Load(ctx, &Schema{Table: "docs", Columns: map[string]string{"id": "int"}}, path, 10, 2)
+	if err != context.Canceled {
+		t.Fatalf("canceled load returned %v", err)
 	}
 }

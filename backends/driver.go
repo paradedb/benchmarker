@@ -254,7 +254,7 @@ func (c *K6Client) emitInitMetrics() {
 // but can never let work cross it.
 func (c *K6Client) operationContext(phase metrics.WarmupPhase, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx := context.Background()
-	if phase.Active && c.vu != nil && c.vu.Context() != nil {
+	if c.vu != nil && c.vu.Context() != nil {
 		ctx = c.vu.Context()
 	}
 
@@ -329,6 +329,30 @@ func (c *K6Client) Query(query string, args ...any) map[string]interface{} {
 	return result.ToMap()
 }
 
+// documentRows preserves every field in a batch, including fields absent from
+// its first document. Missing attributes become null in the rectangular rows.
+func documentRows(docs []map[string]interface{}) ([]string, [][]any) {
+	fields := make(map[string]bool)
+	for _, doc := range docs {
+		for col := range doc {
+			fields[col] = true
+		}
+	}
+	cols := make([]string, 0, len(fields))
+	for col := range fields {
+		cols = append(cols, col)
+	}
+	sort.Strings(cols)
+	rows := make([][]any, len(docs))
+	for i, doc := range docs {
+		rows[i] = make([]any, len(cols))
+		for j, col := range cols {
+			rows[i][j] = doc[col]
+		}
+	}
+	return cols, rows
+}
+
 // InsertBatch inserts documents and emits metrics.
 func (c *K6Client) InsertBatch(table string, docs []map[string]interface{}) map[string]interface{} {
 	c.emitInitMetrics()
@@ -338,23 +362,9 @@ func (c *K6Client) InsertBatch(table string, docs []map[string]interface{}) map[
 		return map[string]interface{}{"rows": 0, "latencyMs": 0.0}
 	}
 
-	// Extract columns from first doc
-	var cols []string
-	for col := range docs[0] {
-		cols = append(cols, col)
-	}
+	cols, rows := documentRows(docs)
 
-	// Convert docs to rows
-	rows := make([][]any, len(docs))
-	for i, doc := range docs {
-		row := make([]any, len(cols))
-		for j, col := range cols {
-			row[j] = doc[col]
-		}
-		rows[i] = row
-	}
-
-	ctx, cancel := c.operationContext(warmup, 0)
+	ctx, cancel := c.operationContext(warmup, c.timeout)
 	defer cancel()
 	start := time.Now()
 	count, err := c.driver.Insert(ctx, table, cols, rows)
@@ -390,7 +400,7 @@ func (c *K6Client) Insert(table string, doc map[string]interface{}) map[string]i
 }
 
 // UpdateBatch updates documents and emits metrics.
-// The first column is used as the key for matching existing rows.
+// The id or _id column is used as the key for matching existing rows.
 func (c *K6Client) UpdateBatch(table string, docs []map[string]interface{}) map[string]interface{} {
 	c.emitInitMetrics()
 	warmup := metrics.GetWarmupPhase(c.vu)
@@ -399,29 +409,15 @@ func (c *K6Client) UpdateBatch(table string, docs []map[string]interface{}) map[
 		return map[string]interface{}{"rows": 0, "latencyMs": 0.0}
 	}
 
-	// Extract columns from first doc; "id" is the key column
+	allCols, rows := documentRows(docs)
 	var keyCols []string
-	var valCols []string
-	for col := range docs[0] {
+	for _, col := range allCols {
 		if col == "id" || col == "_id" {
 			keyCols = append(keyCols, col)
-		} else {
-			valCols = append(valCols, col)
 		}
 	}
-	allCols := append(keyCols, valCols...)
 
-	// Convert docs to rows
-	rows := make([][]any, len(docs))
-	for i, doc := range docs {
-		row := make([]any, len(allCols))
-		for j, col := range allCols {
-			row[j] = doc[col]
-		}
-		rows[i] = row
-	}
-
-	ctx, cancel := c.operationContext(warmup, 0)
+	ctx, cancel := c.operationContext(warmup, c.timeout)
 	defer cancel()
 	start := time.Now()
 	count, err := c.driver.Update(ctx, table, keyCols, allCols, rows)
@@ -525,9 +521,9 @@ func backendSupportsVectorColumns(name string) bool {
 	switch name {
 	case "postgres":
 		return true
-	case "elasticsearch", "opensearch":
-		// dense_vector / knn_vector mappings; []float32 values marshal as
-		// plain JSON arrays in the bulk payload.
+	case "elasticsearch", "opensearch", "turbopuffer":
+		// HTTP backends accept typed vectors, with vector types configured
+		// in their backend-specific schema.
 		return true
 	default:
 		return false
@@ -744,7 +740,7 @@ func (l *CLILoader) validateTableSchema(schema *Schema) error {
 		return fmt.Errorf("schema has no columns")
 	}
 	if cols := vectorColumns(schema); len(cols) > 0 && !backendSupportsVectorColumns(l.backendName()) {
-		return fmt.Errorf("backend %q does not support vector columns: %s (supported backends: postgres, elasticsearch, opensearch)",
+		return fmt.Errorf("backend %q does not support vector columns: %s (supported backends: postgres, elasticsearch, opensearch, turbopuffer)",
 			l.name, strings.Join(cols, ", "))
 	}
 	for col, schemaType := range schema.Columns {
@@ -759,6 +755,12 @@ func (l *CLILoader) validateTableSchema(schema *Schema) error {
 // information that can be invalidated by pre scripts (e.g. CREATE EXTENSION).
 type TypeReloader interface {
 	ReloadTypes(ctx context.Context) error
+}
+
+// LoadWorkerFactory preserves driver-local setup when creating loader workers.
+// Workers must not replay pre scripts, which can delete existing data.
+type LoadWorkerFactory interface {
+	NewLoadWorker() (Driver, error)
 }
 
 func (l *CLILoader) RunPre(ctx context.Context, dir string, schema *Schema) error {
@@ -823,7 +825,11 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, dataPath string, b
 	drivers := make([]Driver, 0, workers)
 	drivers = append(drivers, l.driver)
 	for i := 1; i < workers; i++ {
-		d, err := l.factory(l.connString)
+		factory := func() (Driver, error) { return l.factory(l.connString) }
+		if provider, ok := l.driver.(LoadWorkerFactory); ok {
+			factory = provider.NewLoadWorker
+		}
+		d, err := factory()
 		if err != nil {
 			for j := 1; j < len(drivers); j++ {
 				drivers[j].Close()
@@ -909,7 +915,7 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, dataPath string, b
 		}
 	}
 
-	if firstErr == nil && len(batch) > 0 {
+	if workerCtx.Err() == nil && len(batch) > 0 {
 		sendBatch(batch)
 	}
 	close(batchCh)
@@ -918,7 +924,7 @@ func (l *CLILoader) Load(ctx context.Context, schema *Schema, dataPath string, b
 	if firstErr != nil {
 		return total, firstErr
 	}
-	if workerCtx.Err() != nil && workerCtx.Err() != context.Canceled {
+	if workerCtx.Err() != nil {
 		return total, workerCtx.Err()
 	}
 
@@ -976,6 +982,12 @@ func (l *CLILoader) dropTarget(ctx context.Context, target string) error {
 		return l.driver.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", table))
 	case "json":
 		switch l.backendName() {
+		case "turbopuffer":
+			data, err := json.Marshal([]map[string]any{{"method": "DELETE", "namespace": target}})
+			if err != nil {
+				return err
+			}
+			return l.driver.Exec(ctx, string(data))
 		case "elasticsearch", "opensearch":
 			ops := []map[string]interface{}{
 				{

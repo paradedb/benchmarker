@@ -13,6 +13,7 @@ import (
 type profileLoaderDriver struct {
 	commands []string
 	rows     int
+	firstID  any
 }
 
 func (*profileLoaderDriver) Close() error { return nil }
@@ -21,8 +22,13 @@ func (d *profileLoaderDriver) Exec(_ context.Context, sql string) error {
 	return nil
 }
 func (*profileLoaderDriver) Query(context.Context, string, ...any) (int, error) { return 0, nil }
-func (d *profileLoaderDriver) Insert(_ context.Context, _ string, _ []string, rows [][]any) (int, error) {
+func (d *profileLoaderDriver) Insert(_ context.Context, _ string, cols []string, rows [][]any) (int, error) {
 	d.rows += len(rows)
+	for i, col := range cols {
+		if col == "id" && len(rows) > 0 {
+			d.firstID = rows[0][i]
+		}
+	}
 	return len(rows), nil
 }
 func (*profileLoaderDriver) Update(context.Context, string, []string, []string, [][]any) (int, error) {
@@ -56,21 +62,33 @@ func TestLoadProfileAndLegacyDatasetPaths(t *testing.T) {
 		driver = &profileLoaderDriver{}
 		return driver, nil
 	}})
-	for _, selection := range []string{"legacy", "type"} {
-		cfg := map[string]interface{}{"file": data, "dataset": dir}
-		name := "loader-test-engine"
-		backendName := "loader-test-engine"
-		if selection != "legacy" {
-			backendName = "custom"
-			cfg["profilesDir"] = dir
-			name = "custom"
-		}
-		result := (&Loader{}).Load(backendName, "explicit", cfg)
-		if result["error"] != nil {
-			t.Fatal(result)
-		}
-		if gotConn != "explicit" || driver.rows != 2 || !reflect.DeepEqual(driver.commands, []string{name + "-pre", name + "-post"}) {
-			t.Fatalf("connection=%s, driver=%+v", gotConn, driver)
+	schema := filepath.Join(dir, "schema.yaml")
+	if err := os.WriteFile(schema, []byte("table: documents\ncolumns:\n  id: bigint\n  title: text\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, typed := range []bool{false, true} {
+		for _, explicitProfile := range []bool{false, true} {
+			cfg := map[string]interface{}{"file": data, "dataset": dir}
+			if typed {
+				cfg["schema"] = schema
+			}
+			name := "loader-test-engine"
+			if explicitProfile {
+				cfg["profilesDir"] = dir
+				name = "custom"
+			}
+			result := (&Loader{}).Load(name, "explicit", cfg)
+			if result["error"] != nil {
+				t.Fatal(result)
+			}
+			if gotConn != "explicit" || driver.rows != 2 || !reflect.DeepEqual(driver.commands, []string{name + "-pre", name + "-post"}) {
+				t.Fatalf("connection=%s, driver=%+v", gotConn, driver)
+			}
+			if typed {
+				if _, ok := driver.firstID.(int64); !ok {
+					t.Fatalf("typed load lost ID type: %T", driver.firstID)
+				}
+			}
 		}
 	}
 }

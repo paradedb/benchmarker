@@ -57,7 +57,7 @@ func writeProfileTestFile(t *testing.T, path, data string) {
 func TestLegacyBackendConfigurationsRetainDefaults(t *testing.T) {
 	for _, name := range profiles.DefaultNames() {
 		t.Run(name, func(t *testing.T) {
-			p, err := profiles.Builtin(name)
+			p, err := profiles.Resolve(name, "", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -76,9 +76,8 @@ func TestLegacyBackendConfigurationsRetainDefaults(t *testing.T) {
 					t.Fatal("missing legacy client", alias)
 				}
 				got := metrics.GetBackendOptions(alias)
-				w, _ := profiles.Builtin(name)
-				wantContainer, wantConnection, wantColor := w.ContainerName(), w.Connection, w.Color
-				if alias == "replica" {
+				wantContainer, wantConnection, wantColor := p.ContainerName(), p.Connection, p.Color
+				if alias == "replica" && p.ContainerName() != "" {
 					wantContainer = "replica"
 				}
 				if alias == "remote" {

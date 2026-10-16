@@ -20,6 +20,7 @@ import (
 	_ "github.com/paradedb/benchmarker/backends/mongodb"
 	_ "github.com/paradedb/benchmarker/backends/opensearch"
 	_ "github.com/paradedb/benchmarker/backends/postgres"
+	_ "github.com/paradedb/benchmarker/backends/turbopuffer"
 )
 
 // Backends holds all configured backend clients.
@@ -152,7 +153,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 		}
 		if !containerExplicit {
 			container = profile.ContainerName()
-			if legacy && alias != profile.Name {
+			if legacy && alias != profile.Name && container != "" {
 				container = alias
 			}
 		}

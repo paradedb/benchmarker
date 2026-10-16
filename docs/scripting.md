@@ -158,10 +158,11 @@ profile names. See the
 
 **Other**:
 
-| Type         | Description               |
-| ------------ | ------------------------- |
-| `clickhouse` | ClickHouse                |
-| `mongodb`    | MongoDB with Atlas Search |
+| Type          | Description                                          |
+| ------------- | ---------------------------------------------------- |
+| `clickhouse`  | ClickHouse                                           |
+| `mongodb`     | MongoDB with Atlas Search                            |
+| `turbopuffer` | Turbopuffer (cloud-only vector and full-text search) |
 
 ## Benchmark Patterns
 
@@ -546,7 +547,7 @@ export function updateTest() {
 
 The `nextBatchSwapped()` method lazily builds a copy of all documents with adjacent values of the given field swapped, then paginates through them atomically. The optional third argument is a pool key, same as `nextBatch()`.
 
-## Streaming CSV and Parquet Profiles
+## Streaming CSV and Parquet Workloads
 
 Open a reader in the script's init context, then consume it in a VU function:
 
@@ -674,11 +675,11 @@ and stream lifetime without requiring a running database.
 
 Each backend returned by `backends.get()` also exposes:
 
-| Method                | Description                                       |
-| --------------------- | ------------------------------------------------- |
-| `setTimeout(seconds)` | Set the query timeout for this backend            |
-| `insert(table, doc)`  | Insert a single document                          |
-| `update(table, doc)`  | Update a single document (keyed by `id` or `_id`) |
+| Method                | Description                                                |
+| --------------------- | ---------------------------------------------------------- |
+| `setTimeout(seconds)` | Set the query, insert, and update timeout for this backend |
+| `insert(table, doc)`  | Insert a single document                                   |
+| `update(table, doc)`  | Update a single document (keyed by `id` or `_id`)          |
 
 Call `backends.setTimeout(seconds)` to set the timeout on all backends at once, or `backends.close()` to close all connections.
 
@@ -716,8 +717,21 @@ loader.loadMongoDB("mongodb://...", { file: "../data.csv", dataset: "../" });
 
 Returns `{ loaded, loadTimeMs, indexTimeMs, totalTimeMs, error }`. The `dataset`
 path points to the dataset directory containing backend-specific `pre`/`post`
-scripts. For Parquet datasets or schema-driven type conversion, use
-`./bin/loader load` instead.
+scripts. Supply `schema` to load typed CSV, a Parquet file, or a directory of
+Parquet shards. Paths remain relative to the script in setup and VU functions:
+
+```javascript
+loader.load("turbopuffer", "", {
+  file: "../data/",
+  schema: "../schema.yaml",
+  dataset: "../",
+  batchSize: 1000,
+});
+```
+
+The typed path uses the table name and columns from the schema; `table` can
+override the name. `columns` cannot be combined with `schema`. Without `schema`,
+the helper retains its CSV-only string conversion behavior.
 
 ## Backend Query Reference
 
@@ -799,3 +813,39 @@ backends: [{ alias: "test" }];
 backends: ["paradedb", { type: "paradedb" }];
 // → panic: backends: duplicate alias 'paradedb'
 ```
+
+### Turbopuffer
+
+Configure [cloud credentials](loader.md#turbopuffer-cloud) before starting k6.
+The shorthand `backends: ["turbopuffer"]` reads them from the environment.
+An alias also defaults to no Docker metrics:
+
+```javascript
+const backends = db.backends({
+  backends: [{ type: "turbopuffer", alias: "tpuf" }],
+});
+
+backends.get("tpuf").query("documents", {
+  rank_by: ["content", "BM25", "search terms"],
+  top_k: 10,
+  include_attributes: ["title"],
+});
+
+// For a namespace loaded with vectors:
+backends.get("tpuf").query("vectors", {
+  rank_by: ["vector", "ANN", [0.1, 0.2, 0.3]],
+  top_k: 10,
+});
+```
+
+Queries use the native [Turbopuffer query API](https://turbopuffer.com/docs/query).
+You can also pass `query(JSON.stringify(body), "namespace")`; the namespace
+defaults to `documents` in this form. Hits count returned rows, aggregation
+groups, or the first integer aggregation in alphabetical name order. Multi-query
+responses sum the hit counts of their individual results.
+
+Use `db.loader().load("turbopuffer", "", config)` with a `schema` for typed CSV
+and Parquet setup loads, or `insertBatch` / `updateBatch` with typed document
+streams. Both batch methods replace complete documents by ID. Dataset-specific
+scripts are distributed with the datasets; see the
+[loading guide](loader.md#turbopuffer-cloud) for configuration examples.
