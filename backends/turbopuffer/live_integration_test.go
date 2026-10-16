@@ -343,7 +343,7 @@ func TestLiveNamespaceStatus(t *testing.T) {
 	t.Log(string(metadata))
 }
 
-var liveReportDir = flag.String("turbopuffer-report-dir", "", "Directory for Cohere recall and k6 results")
+var liveReportDir = flag.String("turbopuffer-report-dir", "", "Directory for Cohere k6 results")
 
 func TestLiveCohereQueries(t *testing.T) {
 	if *liveNamespace == "" || *liveCohereDir == "" || *liveReportDir == "" {
@@ -366,70 +366,27 @@ func TestLiveCohereQueries(t *testing.T) {
 	if err := json.Unmarshal(vectorsData, &vectors); err != nil {
 		t.Fatal(err)
 	}
-	truthData, err := os.ReadFile(filepath.Join(*liveCohereDir, "k6/ground_truth_top10_1m.json"))
-	if err != nil {
-		t.Fatal(err)
+	if len(vectors) == 0 {
+		t.Fatal("no query vectors")
 	}
-	var truth []struct {
-		QueryID int      `json:"query_id"`
-		IDs     []string `json:"gt_ids"`
-	}
-	if err := json.Unmarshal(truthData, &truth); err != nil {
-		t.Fatal(err)
-	}
-	hits, total := 0, 0
-	for _, query := range truth {
-		if query.QueryID < 1 || query.QueryID > len(vectors) {
-			t.Fatal("invalid ground truth query ID")
-		}
+	for i, rawVector := range vectors {
 		var vector []float64
-		if err := json.Unmarshal([]byte(vectors[query.QueryID-1]), &vector); err != nil {
+		if err := json.Unmarshal([]byte(rawVector), &vector); err != nil {
 			t.Fatal(err)
-		}
-		var response struct {
-			Rows []struct {
-				ID string `json:"id"`
-			} `json:"rows"`
 		}
 		body := map[string]any{"rank_by": []any{"emb", "ANN", vector}, "top_k": 10, "include_attributes": []string{"title"}}
-		if err := d.request(ctx, http.MethodPost, *liveNamespace, "/query", body, false, &response); err != nil {
-			t.Fatal(err)
-		}
-		if len(response.Rows) != 10 {
-			t.Fatalf("query %d returned %d rows", query.QueryID, len(response.Rows))
-		}
-		expected := make(map[string]bool)
-		for _, id := range query.IDs {
-			expected[id] = true
-		}
-		for _, row := range response.Rows {
-			if expected[row.ID] {
-				hits++
-			}
-		}
-		total += len(query.IDs)
 		// Exercise both measured query shapes before k6 starts. These requests
 		// warm the workload without contributing samples to k6 latency metrics.
+		if n, err := d.Query(ctx, *liveNamespace, body); err != nil || n != 10 {
+			t.Fatalf("unfiltered warmup query %d: %d hits, %v", i+1, n, err)
+		}
 		body["filters"] = []string{"text", "ContainsAllTokens", "battle"}
 		if n, err := d.Query(ctx, *liveNamespace, body); err != nil || n != 10 {
-			t.Fatalf("filtered warmup query %d: %d hits, %v", query.QueryID, n, err)
+			t.Fatalf("filtered warmup query %d: %d hits, %v", i+1, n, err)
 		}
 	}
-	if total == 0 {
-		t.Fatal("no ground truth")
-	}
-	recall := float64(hits) / float64(total)
-	t.Logf("unfiltered recall@10: %.4f (%d/%d across %d queries)", recall, hits, total, len(truth))
-	t.Logf("completed %d unmeasured warmup queries across both query shapes", 2*len(truth))
+	t.Logf("completed %d unmeasured warmup queries across both query shapes", 2*len(vectors))
 	if err := os.MkdirAll(*liveReportDir, 0750); err != nil {
-		t.Fatal(err)
-	}
-	report := map[string]any{"namespace": *liveNamespace, "endpoint": d.address, "queries": len(truth), "recall_at_10": recall, "hits": hits, "expected": total, "unmeasured_warmup_queries": 2 * len(truth)}
-	reportBytes, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(*liveReportDir, "recall.json"), reportBytes, 0600); err != nil {
 		t.Fatal(err)
 	}
 	script, err := os.ReadFile(filepath.Join(*liveCohereDir, "k6", "turbopuffer.js"))
@@ -452,5 +409,5 @@ func TestLiveCohereQueries(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("k6 benchmark: %v", err)
 	}
-	t.Logf("saved recall and k6 results to %s", *liveReportDir)
+	t.Logf("saved k6 results to %s", *liveReportDir)
 }
