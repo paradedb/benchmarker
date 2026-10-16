@@ -21,8 +21,6 @@ import (
 	_ "github.com/paradedb/benchmarker/backends/opensearch"
 	_ "github.com/paradedb/benchmarker/backends/paradedb"
 	_ "github.com/paradedb/benchmarker/backends/postgres"
-	_ "github.com/paradedb/benchmarker/backends/vectorchord"
-	_ "github.com/paradedb/benchmarker/backends/vectorsearch"
 )
 
 // Backends holds all configured backend clients.

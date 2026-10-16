@@ -116,9 +116,9 @@ the container for resource metrics, or an empty string for a remote database.
 
 ParadeDB, Timescale pg_vectorsearch, and VectorChord all use the `postgres`
 driver. Their manifests in `workloads/` define connection/container defaults,
-extension settings capture, metadata queries, and index telemetry. The existing
-`--backend paradedb`, `--backend vectorsearch`, and `--backend vectorchord`
-forms remain available as compatibility wrappers.
+extension settings capture, metadata queries, and index telemetry. Select them
+with `--workload`. The existing `--backend paradedb` form remains available
+through its compatibility wrapper.
 
 The dataset's `paradedb/workload.yaml` selects `benchmark_1m` and
 `vectorchord/workload.yaml` preserves the 42-probe connection default. The

@@ -63,8 +63,6 @@ benchmarks/
 │   │   └── elastic/       # Shared Elasticsearch/OpenSearch driver
 │   ├── paradedb/          # Legacy API wrapper for the ParadeDB workload
 │   ├── postgres/          # PostgreSQL registration
-│   ├── vectorchord/       # Legacy API wrapper for the VectorChord workload
-│   ├── vectorsearch/      # Legacy API wrapper + pg_vectorsearch Docker build
 │   ├── elasticsearch/     # Elasticsearch registration
 │   ├── opensearch/        # OpenSearch registration
 │   ├── clickhouse/        # ClickHouse driver
@@ -76,6 +74,7 @@ benchmarks/
 ├── cmd/
 │   ├── loader/            # Loader CLI
 │   └── dashboard-viewer/  # Dashboard replay CLI
+├── docker/                # Extension-specific Docker builds
 ├── datasets/              # Sample datasets + k6 scripts
 └── docker-compose.yml     # Local backend setup
 ```
@@ -117,8 +116,8 @@ Those workload tests issue read-only queries against the supplied databases.
 For the migrated vector workloads, set `BENCHMARKER_VECTORSEARCH_URL` and
 `BENCHMARKER_VECTORCHORD_VECTOR_URL` to databases with those extensions installed
 and run `go test ./workloads -run TestLiveVectorWorkloadCaptureParity -v`.
-The corresponding `go test -tags integration ./backends/vectorsearch
-./backends/vectorchord` checks also create and drop temporary vector tables.
+The corresponding `go test -tags integration ./workloads` checks also create
+and drop temporary vector tables.
 
 ## Adding a Backend
 

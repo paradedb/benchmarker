@@ -33,24 +33,23 @@ func TestVectorWorkloadsPreserveSourceSpecializations(t *testing.T) {
 			if !reflect.DeepEqual(keys, tc.keys) {
 				t.Fatalf("capture key/order changed: %v", keys)
 			}
-			if err := w.CheckBackend(tc.name); err != nil {
+			if err := w.CheckBackend("postgres"); err != nil {
 				t.Fatal(err)
 			}
-			// Both old backend names and the new workload path must load vectors.
-			cfg, _ := backends.GetConfig(tc.name)
-			legacy := backends.GetCLILoader(tc.name, cfg.DefaultConn)
-			modern, err := w.CLILoader(w.Connection)
+			// Workloads use PostgreSQL schema validation without their own registration.
+			if _, registered := backends.GetConfig(tc.name); registered {
+				t.Fatal("vector workload must not register a separate backend")
+			}
+			l, err := w.CLILoader(w.Connection)
 			if err != nil {
 				t.Fatal(err)
 			}
 			schema := &backends.Schema{Table: "cohere_wiki", Columns: map[string]string{"_id": "text", "emb": "vector(1024)"}}
-			for _, l := range []*backends.CLILoader{legacy, modern} {
-				if l.Name() != tc.name {
-					t.Fatalf("identity changed: %s", l.Name())
-				}
-				if err := l.ValidateSchema(schema); err != nil {
-					t.Fatal(err)
-				}
+			if l.Name() != tc.name {
+				t.Fatalf("identity changed: %s", l.Name())
+			}
+			if err := l.ValidateSchema(schema); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

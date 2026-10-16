@@ -1,6 +1,6 @@
 //go:build integration
 
-package vectorchord
+package workloads_test
 
 import (
 	"context"
@@ -12,14 +12,19 @@ import (
 
 	"github.com/paradedb/benchmarker/backends/shared/postgres"
 	"github.com/paradedb/benchmarker/metrics"
+	"github.com/paradedb/benchmarker/workloads"
 )
 
-func TestVectorLoadIndexUpdateAndQuery(t *testing.T) {
+func TestVectorChordLoadIndexUpdateAndQuery(t *testing.T) {
 	connString := os.Getenv("BENCHMARKER_VECTORCHORD_VECTOR_URL")
 	if connString == "" {
 		t.Skip("set BENCHMARKER_VECTORCHORD_VECTOR_URL to run the VectorChord smoke test")
 	}
-	driver, err := New(connString)
+	workload, err := workloads.Builtin("vectorchord")
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := workload.NewDriver(connString)
 	if err != nil {
 		t.Fatal(err)
 	}
