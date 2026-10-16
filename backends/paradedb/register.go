@@ -4,6 +4,7 @@ package paradedb
 import (
 	"github.com/paradedb/benchmarker/backends"
 	"github.com/paradedb/benchmarker/backends/shared/postgres"
+	"github.com/paradedb/benchmarker/workloads"
 )
 
 func init() {
@@ -16,37 +17,17 @@ func init() {
 	})
 }
 
-// New creates a new ParadeDB driver with ParadeDB-specific GUC capture.
+// New retains the legacy Go API while constructing the embedded ParadeDB
+// workload on the PostgreSQL driver. Filesystem manifests are opt-in.
 func New(connString string) (backends.Driver, error) {
+	workload, err := workloads.Builtin("paradedb")
+	if err != nil {
+		return nil, err
+	}
 	driver, err := postgres.New(connString)
 	if err != nil {
 		return nil, err
 	}
-
-	pgDriver := driver.(*postgres.Driver)
-	telemetryQueries := postgres.StandardTelemetryQueries()
-	telemetryQueries = append(telemetryQueries,
-		postgres.IndexIOTelemetryQueries("paradedb", "bm25")...)
-	pgDriver.SetTelemetryQueries(telemetryQueries...)
-
-	// Capture every paradedb.* GUC rather than a hardcoded list, so new or
-	// renamed GUCs show up without code changes
-	pgDriver.SetExtraGUCPrefixes([]string{"paradedb"})
-
-	// Add ParadeDB-specific queries to capture
-	pgDriver.SetExtraQueries([]postgres.ConfigQuery{
-		// version_info() returns a composite record; cast so it scans as text
-		{Key: "paradedb.version", Query: "SELECT paradedb.version_info()::text"},
-		// Segment count of every ParadeDB index. Config capture runs at benchmark
-		// setup, after the dataset load, so this is the run-start layout.
-		{Key: "segments_at_run_start", Query: `
-			SELECT 'paradedb.segments_at_run_start.' || c.relname,
-			       (SELECT count(*) FROM paradedb.index_info(c.oid::regclass))::text
-			FROM pg_class c
-			JOIN pg_am am ON c.relam = am.oid
-			WHERE am.amname = 'paradedb'
-			ORDER BY c.relname`},
-	})
-
+	workload.ConfigureDriver(driver)
 	return driver, nil
 }

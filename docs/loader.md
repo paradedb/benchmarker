@@ -52,6 +52,39 @@ Build the loader with:
 make loader
 ```
 
+## Workload Selection
+
+```bash
+# Use ParadeDB's workload on the PostgreSQL engine
+./bin/loader load --workload paradedb ./datasets/sample
+
+# Explicit engine and connection; engine must match the manifest
+./bin/loader load --backend postgres --workload paradedb \
+  --connection postgres://postgres:postgres@localhost:5432/benchmark ./datasets/sample
+
+# Drop the selected workload's tables/indexes
+./bin/loader drop --workload paradedb ./datasets/sample
+
+# Load a custom strategy using an external manifest directory
+./bin/loader load --workload custom --workloads-dir ./my-workloads ./datasets/sample
+```
+
+Connection precedence with workload selection is `--connection`, then the
+manifest's `envVar`, then its `connection`; a missing connection is an error.
+`--connection` also works with the existing `--backend` flag. A connection
+without a selected backend or workload is rejected.
+
+`--pre-only`, `--post-only`, `--workers`, CSV, Parquet, and multi-table loading
+work with explicit workloads. The workload selects the dataset subdirectory;
+the backend selects data conversion and drop behavior. See
+[Workloads](datasets.md#workloads) for manifests and dataset overrides.
+
+Omitting both selectors preserves the existing set and order of registered
+backends; adding a manifest does not silently add another load or drop target.
+`--backend paradedb` and the existing environment variables continue to work.
+External manifests are opt-in through `--workload` (or `--workloads-dir` with
+`--backend`, which uses the backend name as the workload name).
+
 ## Connection Strings
 
 The loader reads connection strings from environment variables:

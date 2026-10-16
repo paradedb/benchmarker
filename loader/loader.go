@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/workloads"
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 )
@@ -513,27 +514,56 @@ func (l *Loader) Load(backendName, connectionString string, config map[string]in
 	if batchSize <= 0 {
 		return map[string]interface{}{"error": "batchSize must be greater than 0"}
 	}
-	if _, ok := config["schema"]; ok {
-		return l.loadTyped(backendName, connectionString, config, filePath, dataset, batchSize)
-	}
 	filePath = l.resolvePath(filePath)
 	dataset = l.resolvePath(dataset)
+
+	directoryName := backendName
+	driverBackend := backendName
+	factory := cfg.Factory
+	if raw, exists := config["workload"]; exists {
+		name, ok := raw.(string)
+		if !ok || name == "" {
+			return map[string]interface{}{"error": "workload must be a non-empty string"}
+		}
+		dir, _ := config["workloadsDir"].(string)
+		w, err := workloads.Resolve(name, dataset, dir)
+		if err == nil {
+			err = w.CheckBackend(backendName)
+		}
+		if err != nil {
+			return map[string]interface{}{"error": err.Error()}
+		}
+		cfg, err = w.BackendConfig()
+		if err != nil {
+			return map[string]interface{}{"error": err.Error()}
+		}
+		connectionString, err = w.ResolveConnection(connectionString)
+		if err != nil {
+			return map[string]interface{}{"error": err.Error()}
+		}
+		directoryName, driverBackend, factory = w.Name, w.Backend, w.NewDriver
+	}
+
+	if _, ok := config["schema"]; ok {
+		cli := backends.NewWorkloadCLILoader(directoryName, driverBackend, cfg.FileType, connectionString, factory)
+		return l.loadTyped(cli, config, filePath, dataset, batchSize)
+	}
 
 	columns, err := parseColumns(config, filePath)
 	if err != nil {
 		return map[string]interface{}{"error": fmt.Sprintf("failed to determine columns: %v", err)}
 	}
 
-	driver, err := cfg.Factory(connectionString)
+	driver, err := factory(connectionString)
 	if err != nil {
 		return map[string]interface{}{"error": fmt.Sprintf("connect failed: %v", err)}
 	}
 	defer driver.Close()
 
 	if cfg.FileType == "json" {
-		return loadWithDriverJSON(driver, tableName, filePath, dataset, backendName, columns, batchSize)
+		return loadWithDriverJSON(driver, tableName, filePath, dataset, directoryName, columns, batchSize)
 	}
-	return loadWithDriver(driver, tableName, filePath, dataset, backendName, columns, batchSize)
+	return loadWithDriver(driver, tableName, filePath, dataset, directoryName, columns, batchSize)
 }
 
 // LoadParadeDB loads CSV data into ParadeDB.

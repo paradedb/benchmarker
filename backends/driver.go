@@ -670,6 +670,7 @@ func schemaColumnsInOrder(schema *Schema, headers []string) ([]string, error) {
 type CLILoader struct {
 	driver     Driver
 	name       string
+	backend    string // driver identity; name can instead identify a workload
 	fileType   string // "sql" or "json"
 	connString string
 	factory    DriverFactory
@@ -679,10 +680,25 @@ type CLILoader struct {
 func NewCLILoader(name, fileType, connString string, factory DriverFactory) *CLILoader {
 	return &CLILoader{
 		name:       name,
+		backend:    name,
 		fileType:   fileType,
 		connString: connString,
 		factory:    factory,
 	}
+}
+
+// NewWorkloadCLILoader separates dataset directory/label from driver identity.
+func NewWorkloadCLILoader(name, backend, fileType, connString string, factory DriverFactory) *CLILoader {
+	l := NewCLILoader(name, fileType, connString, factory)
+	l.backend = backend
+	return l
+}
+
+func (l *CLILoader) backendName() string {
+	if l.backend != "" {
+		return l.backend
+	}
+	return l.name
 }
 
 func (l *CLILoader) ensureDriver() error {
@@ -723,7 +739,7 @@ func (l *CLILoader) validateTableSchema(schema *Schema) error {
 	if len(schema.Columns) == 0 {
 		return fmt.Errorf("schema has no columns")
 	}
-	if cols := vectorColumns(schema); len(cols) > 0 && !backendSupportsVectorColumns(l.name) {
+	if cols := vectorColumns(schema); len(cols) > 0 && !backendSupportsVectorColumns(l.backendName()) {
 		return fmt.Errorf("backend %q does not support vector columns: %s (supported backends: paradedb, postgres, elasticsearch, opensearch, turbopuffer)",
 			l.name, strings.Join(cols, ", "))
 	}
@@ -965,7 +981,7 @@ func (l *CLILoader) dropTarget(ctx context.Context, target string) error {
 		}
 		return l.driver.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", table))
 	case "json":
-		switch l.name {
+		switch l.backendName() {
 		case "turbopuffer":
 			data, err := json.Marshal([]map[string]any{{"method": "DELETE", "namespace": target}})
 			if err != nil {

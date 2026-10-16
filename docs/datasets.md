@@ -35,6 +35,84 @@ Each backend subdirectory contains pre/post scripts that the loader runs before 
 
 The `k6/` directory holds your benchmark scripts and any supporting data like search terms.
 
+## Workloads
+
+A backend supplies the database driver. A workload supplies an index/query
+strategy, its connection and container defaults, and its dataset scripts. For
+example, both the `postgres` and `paradedb` workloads use the `postgres` driver.
+Existing dataset directory names remain valid.
+
+Select a workload with `loader load --workload paradedb ./datasets/sample` or
+`{ type: "postgres", workload: "paradedb" }` in a k6 backend block. The workload
+name selects `datasets/<dataset>/<workload>/pre.sql` and `post.sql` (or `.json`
+for JSON-based drivers). Query SQL remains in your k6 script.
+
+Global manifests live in `workloads/<name>.yaml`. Built-in manifests are also
+embedded in the binaries, so a checkout is not required at runtime. An external
+manifest replaces the embedded manifest of the same name. Lookup uses
+`./workloads` relative to the process working directory, or `--workloads-dir`
+(CLI) / `workloadsDir` (k6) when specified. A missing explicitly selected
+directory is an error. Registered third-party backends without a manifest can
+still be selected as workloads using their registered defaults.
+
+An optional `datasets/<dataset>/<workload>/workload.yaml` replaces individual
+top-level fields from the global manifest. Nested fields are **not** deep-merged:
+an override containing `extras` replaces the entire `extras` block. Empty
+strings and empty lists are honored; `container: ""` disables Docker metrics.
+
+```yaml
+backend: postgres
+container: paradedb
+connection: postgres://postgres:postgres@localhost:5432/benchmark
+envVar: PARADEDB_URL
+description: ParadeDB pg_search BM25 index
+color: "#7C3AED"
+extras:
+  gucPrefixes: [paradedb]
+  indexAccessMethods: [paradedb, bm25]
+  queries:
+    - key: paradedb.version
+      query: SELECT paradedb.version_info()::text
+```
+
+| Field         | Default                                                                 | Meaning                                                               |
+| ------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `backend`     | Required                                                                | Registered driver name                                                |
+| `container`   | Workload name                                                           | Docker container, or `""` to disable Docker metrics                   |
+| `connection`  | None                                                                    | Connection used when no explicit value or environment override is set |
+| `envVar`      | Uppercase workload name, hyphens replaced with underscores, plus `_URL` | Connection environment variable; `""` disables it                     |
+| `description` | Empty                                                                   | Human-readable description                                            |
+| `color`       | Dashboard palette                                                       | Chart color; explicit k6 colors take precedence                       |
+| `extras`      | Empty                                                                   | Optional PostgreSQL configuration capture and telemetry settings      |
+
+PostgreSQL extras support:
+
+- `gucs`: individual settings to capture in addition to the driver's standard settings.
+- `gucPrefixes`: complete setting namespaces, such as `paradedb`.
+- `queries`: SQL strings returning one text column (its column name becomes the
+  capture key), or `{ key, query }` mappings with an explicit key. Queries returning
+  two text columns capture `(name, value)` rows grouped by the name's dot-prefix.
+  Use explicit keys when preserving a historical result format. Cast non-text
+  values to text. Each entry should be one SQL statement.
+- `indexAccessMethods`: replace the PostgreSQL index-I/O telemetry access methods
+  while retaining standard database telemetry. An explicit empty list disables
+  index-I/O capture only; omitting the field retains the driver's defaults.
+
+The embedded ParadeDB manifest also captures segment counts and all `paradedb.*`
+settings, preserving the existing result keys and telemetry series.
+
+The existing sample dataset uses the `postgres` directory for native FTS.
+`postgresfts` is also available as a manifest for datasets using that directory
+name; it retains `POSTGRES_URL` and the `postgres` container default.
+
+### Compatibility
+
+Configurations without explicit workload selection keep their existing behavior:
+legacy backend names, dataset paths, registry entries, connection defaults,
+container aliases, and loading helpers continue to work. They do not read external
+workload manifests. Opt into manifests by adding `workload` or `--workload`.
+Built-in defaults remain available even when no manifest files are installed.
+
 ## schema.yaml
 
 ```yaml

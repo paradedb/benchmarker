@@ -11,7 +11,8 @@ import (
 
 // loadTyped reuses the CLI loader so IDs, vectors, booleans, and nulls have the
 // same representation during setup as they do in streamed k6 workloads.
-func (l *Loader) loadTyped(backend, connection string, config map[string]interface{}, path, dataset string, batchSize int) map[string]interface{} {
+func (l *Loader) loadTyped(cli *backends.CLILoader, config map[string]interface{}, path, dataset string, batchSize int) map[string]interface{} {
+	defer cli.Close()
 	failure := func(err error) map[string]interface{} { return map[string]interface{}{"error": err.Error()} }
 	if _, ok := config["columns"]; ok {
 		return failure(fmt.Errorf("load: schema and columns cannot be combined; select columns in the schema"))
@@ -26,8 +27,6 @@ func (l *Loader) loadTyped(backend, connection string, config map[string]interfa
 		schema.Table = table
 	}
 	dataset = l.resolvePath(dataset)
-	cli := backends.GetCLILoader(backend, connection)
-	defer cli.Close()
 	if err := cli.ValidateSchema(&schema); err != nil {
 		return failure(err)
 	}
@@ -37,7 +36,7 @@ func (l *Loader) loadTyped(backend, connection string, config map[string]interfa
 	}
 	start := time.Now()
 	if dataset != "" {
-		if err := cli.RunPre(ctx, filepath.Join(dataset, backend), &schema); err != nil {
+		if err := cli.RunPre(ctx, filepath.Join(dataset, cli.Name()), &schema); err != nil {
 			return failure(fmt.Errorf("pre failed: %w", err))
 		}
 	}
@@ -49,7 +48,7 @@ func (l *Loader) loadTyped(backend, connection string, config map[string]interfa
 	var indexTime time.Duration
 	if dataset != "" {
 		indexStart := time.Now()
-		if err := cli.RunPost(ctx, filepath.Join(dataset, backend), &schema); err != nil {
+		if err := cli.RunPost(ctx, filepath.Join(dataset, cli.Name()), &schema); err != nil {
 			return failure(fmt.Errorf("post failed: %w", err))
 		}
 		indexTime = time.Since(indexStart)
