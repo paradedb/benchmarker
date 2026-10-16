@@ -7,8 +7,7 @@ const backends = db.backends({
   datasetPath: "../",
   backends: [
     {
-      type: "postgres",
-      workload: "vectorchord",
+      type: "vectorchord",
       connection: __ENV.VECTORCHORD_URL,
       container: __ENV.VECTORCHORD_CONTAINER ?? "vectorchord",
     },

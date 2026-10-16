@@ -1,4 +1,4 @@
-package workloads_test
+package profiles_test
 
 import (
 	"path/filepath"
@@ -7,10 +7,10 @@ import (
 	"testing"
 
 	"github.com/paradedb/benchmarker/backends"
-	"github.com/paradedb/benchmarker/workloads"
+	"github.com/paradedb/benchmarker/profiles"
 )
 
-func TestVectorWorkloadsPreserveSourceSpecializations(t *testing.T) {
+func TestVectorProfilesPreserveSourceSpecializations(t *testing.T) {
 	for _, tc := range []struct {
 		name                    string
 		methods, prefixes, keys []string
@@ -19,7 +19,7 @@ func TestVectorWorkloadsPreserveSourceSpecializations(t *testing.T) {
 		{"vectorchord", []string{"vchordrq", "vchordg"}, []string{"vchord", "vchordrq", "vchordg"}, []string{"vectorchord"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			w, err := workloads.Builtin(tc.name)
+			w, err := profiles.Builtin(tc.name)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -33,34 +33,30 @@ func TestVectorWorkloadsPreserveSourceSpecializations(t *testing.T) {
 			if !reflect.DeepEqual(keys, tc.keys) {
 				t.Fatalf("capture key/order changed: %v", keys)
 			}
-			if err := w.CheckBackend(tc.name); err != nil {
-				t.Fatal(err)
+			// Profiles use PostgreSQL schema validation without their own registration.
+			if _, registered := backends.GetConfig(tc.name); registered {
+				t.Fatal("vector profile must not register a separate backend")
 			}
-			// Both old backend names and the new workload path must load vectors.
-			cfg, _ := backends.GetConfig(tc.name)
-			legacy := backends.GetCLILoader(tc.name, cfg.DefaultConn)
-			modern, err := w.CLILoader(w.Connection)
+			l, err := w.CLILoader(w.Connection)
 			if err != nil {
 				t.Fatal(err)
 			}
 			schema := &backends.Schema{Table: "cohere_wiki", Columns: map[string]string{"_id": "text", "emb": "vector(1024)"}}
-			for _, l := range []*backends.CLILoader{legacy, modern} {
-				if l.Name() != tc.name {
-					t.Fatalf("identity changed: %s", l.Name())
-				}
-				if err := l.ValidateSchema(schema); err != nil {
-					t.Fatal(err)
-				}
+			if l.Name() != tc.name {
+				t.Fatalf("identity changed: %s", l.Name())
+			}
+			if err := l.ValidateSchema(schema); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
-	w, _ := workloads.Builtin("vectorsearch")
+	w, _ := profiles.Builtin("vectorsearch")
 	if strings.TrimSpace(w.Extras.Queries[0].SQL) != "SELECT pg_vectorsearch_version()" || !strings.Contains(w.Extras.Queries[1].SQL, "WHERE name LIKE 'prism.%'") {
 		t.Fatalf("PRISM must load its library before capturing GUCs: %+v", w.Extras.Queries)
 	}
 }
 
-func TestCohereWorkloadOverridesRetainScriptDefaults(t *testing.T) {
+func TestCohereProfileOverridesRetainScriptDefaults(t *testing.T) {
 	dataset := filepath.Join("..", "datasets", "cohere-1m")
 	for _, tc := range []struct{ name, want string }{
 		{"paradedb", "postgres://postgres:postgres@localhost:5432/benchmark_1m"},
@@ -68,14 +64,14 @@ func TestCohereWorkloadOverridesRetainScriptDefaults(t *testing.T) {
 		{"vectorchord", "postgres://postgres:postgres@localhost:5435/benchmark?options=-c%20vchordrq.probes%3D42"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			w, err := workloads.Resolve(tc.name, dataset, "")
+			w, err := profiles.Resolve(tc.name, dataset, "")
 			if err != nil {
 				t.Fatal(err)
 			}
 			if w.Connection != tc.want {
 				t.Fatalf("dataset connection = %q, want %q", w.Connection, tc.want)
 			}
-			builtin, _ := workloads.Builtin(tc.name)
+			builtin, _ := profiles.Builtin(tc.name)
 			if !reflect.DeepEqual(w.Extras, builtin.Extras) {
 				t.Fatal("dataset override lost capture/telemetry")
 			}

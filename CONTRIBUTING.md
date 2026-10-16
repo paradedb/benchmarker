@@ -61,21 +61,19 @@ benchmarks/
 │   ├── shared/
 │   │   ├── postgres/      # Shared PostgreSQL driver (paradedb, postgres)
 │   │   └── elastic/       # Shared Elasticsearch/OpenSearch driver
-│   ├── paradedb/          # Legacy API wrapper for the ParadeDB workload
 │   ├── postgres/          # PostgreSQL registration
-│   ├── vectorchord/       # Legacy API wrapper for the VectorChord workload
-│   ├── vectorsearch/      # Legacy API wrapper + pg_vectorsearch Docker build
 │   ├── elasticsearch/     # Elasticsearch registration
 │   ├── opensearch/        # OpenSearch registration
 │   ├── clickhouse/        # ClickHouse driver
 │   └── mongodb/           # MongoDB driver
-├── workloads/             # Embedded manifests, resolution, driver configuration
+├── profiles/              # Embedded manifests, resolution, driver configuration
 ├── metrics/               # k6 metrics + Docker container stats
 ├── dashboard/             # Real-time dashboard + SSE output
 ├── loader/                # k6 data loader module
 ├── cmd/
 │   ├── loader/            # Loader CLI
 │   └── dashboard-viewer/  # Dashboard replay CLI
+├── docker/                # Extension-specific Docker builds
 ├── datasets/              # Sample datasets + k6 scripts
 └── docker-compose.yml     # Local backend setup
 ```
@@ -85,8 +83,8 @@ benchmarks/
 Backends use a **registry pattern** with factory functions:
 
 1. Each backend package calls `backends.Register()` in an `init()` function, providing a `BackendConfig` with a factory, file type, env var, default connection, and container name.
-2. `backends.go` imports each backend package for side-effect registration (e.g., `_ "github.com/paradedb/benchmarker/backends/paradedb"`).
-3. At runtime, `newBackends()` reads the JS config, looks up registered factories, creates drivers, and wraps each in a `K6Client`.
+2. `backends.go` imports each backend package for side-effect registration (e.g., `_ "github.com/paradedb/benchmarker/backends/postgres"`).
+3. At runtime, `newBackends()` resolves each JS `type` to a profile, looks up its `backend` factory, creates drivers, and wraps each in a `K6Client`.
 4. `K6Client` (in `backends/driver.go`) wraps every `Driver` to add k6 metric emission — timing, tagging, and sample pushing.
 
 ### Metrics Flow
@@ -95,30 +93,30 @@ Backends use a **registry pattern** with factory functions:
 
 `metrics/collector.go` reads Docker container stats through the active local Docker context (falling back to `/var/run/docker.sock`) and emits `container_cpu_percent` and `container_memory_bytes` gauges.
 
-## Adding a Workload
+## Adding a Profile
 
 To benchmark another index/query strategy on an existing engine, add a manifest
 and dataset scripts; no new driver package or rebuild is needed. See
-[Workloads](docs/datasets.md#workloads) for the manifest schema and precedence.
-External manifests are selected explicitly with `--workload` or the k6
-`workload` field. Manifests shipped in `workloads/` are embedded at build time.
+[Profiles](docs/datasets.md#profiles) for the manifest schema and precedence.
+Select a profile with `--backend` in the CLI, or the k6
+`type` field. Manifests shipped in `profiles/` are embedded at build time.
 
-`paradedb` is implemented as a workload on `postgres`. Its Go package and
-registration remain as compatibility wrappers. Keep existing registry names,
-exported constructors, CLI defaults, k6 shorthand, result keys, and dataset
-paths working when changing this layer. Do not change legacy environment or
-container resolution to match new workload defaults.
+`paradedb`, `vectorchord`, and `vectorsearch` are profiles on the registered
+`postgres` driver. They have no separate Go packages or driver registrations.
+Keep existing CLI names, k6 shorthand, result keys, dataset paths, and explicit
+connection/container overrides working when changing this layer. Older k6 types
+retain their explicit `__ENV` connection handling and alias-based containers.
 
 Run `go test ./...` for the compatibility matrix. To also compare the old
 ParadeDB capture/telemetry behavior against the new factory and exercise live
 PostgreSQL config queries, set `BENCHMARKER_PARADEDB_TEST_URL` and
-`BENCHMARKER_POSTGRES_TEST_URL` when running `go test ./workloads -v`.
-Those workload tests issue read-only queries against the supplied databases.
-For the migrated vector workloads, set `BENCHMARKER_VECTORSEARCH_URL` and
+`BENCHMARKER_POSTGRES_TEST_URL` when running `go test ./profiles -v`.
+Those profile tests issue read-only queries against the supplied databases.
+For the migrated vector profiles, set `BENCHMARKER_VECTORSEARCH_URL` and
 `BENCHMARKER_VECTORCHORD_VECTOR_URL` to databases with those extensions installed
-and run `go test ./workloads -run TestLiveVectorWorkloadCaptureParity -v`.
-The corresponding `go test -tags integration ./backends/vectorsearch
-./backends/vectorchord` checks also create and drop temporary vector tables.
+and run `go test ./profiles -run TestLiveVectorProfileCaptureParity -v`.
+The corresponding `go test -tags integration ./profiles` checks also create
+and drop temporary vector tables.
 
 ## Adding a Backend
 
@@ -149,37 +147,13 @@ type Driver interface {
 | `Update`        | Bulk upsert rows by key columns, return count updated |
 | `CaptureConfig` | Capture backend version/settings for the dashboard    |
 
-### 2. Use a Shared Driver or Write Your Own
+### 2. Implement and Register the Driver
 
-If your backend is PostgreSQL-based, use the shared postgres driver:
-
-```go
-// backends/mybackend/register.go
-package mybackend
-
-import (
-    "github.com/paradedb/benchmarker/backends"
-    "github.com/paradedb/benchmarker/backends/shared/postgres"
-)
-
-func init() {
-    backends.Register("mybackend", backends.BackendConfig{
-        Factory:     New,
-        FileType:    "sql",
-        EnvVar:      "MYBACKEND_URL",
-        DefaultConn: "postgres://postgres:postgres@localhost:5436/benchmark",
-        Container:   "mybackend",
-    })
-}
-
-func New(connString string) (backends.Driver, error) {
-    return postgres.New(connString)
-}
-```
-
-If your backend is Elasticsearch-compatible, use the shared elasticsearch driver similarly.
-
-For a completely new backend type, implement the `Driver` interface directly. See `backends/clickhouse/` or `backends/mongodb/` for examples of standalone drivers.
+PostgreSQL extensions and other strategies using an existing driver belong in
+`profiles/`; they do not need a new driver package. For a new database protocol,
+implement the `Driver` interface and register its factory with
+`backends.Register()`. See `backends/clickhouse/` and `backends/mongodb/` for
+examples. Elasticsearch and OpenSearch reuse a shared driver implementation.
 
 ### 3. Register the Side-Effect Import
 

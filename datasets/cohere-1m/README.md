@@ -75,13 +75,13 @@ the HNSW graph and costs more than the load itself.
 
 ## VectorChord
 
-The `vectorchord` workload on the `postgres` driver uses the same Parquet data with a cosine `vchordrq`
+The `vectorchord` profile on the `postgres` driver uses the same Parquet data with a cosine `vchordrq`
 index. The root Compose profile exposes it on port 5435, with its own database
 and volume:
 
 ```bash
 docker compose --profile vectorchord up -d
-./bin/loader load --workload vectorchord --workers 4 --batch-size 2000 ./datasets/cohere-1m
+./bin/loader load --backend vectorchord --workers 4 --batch-size 2000 ./datasets/cohere-1m
 VECTORCHORD_URL="postgres://postgres:postgres@localhost:5435/benchmark?options=-c%20vchordrq.probes%3D42" \
 ./k6 run datasets/cohere-1m/k6/vectorchord.js
 ```
@@ -112,32 +112,33 @@ query vectors and checks that every query succeeds and returns ten neighbors.
 Set `DURATION` and `VUS` to adjust the run; use `VECTORCHORD_CONTAINER` to select
 the container for resource metrics, or an empty string for a remote database.
 
-## PostgreSQL workload comparison
+## PostgreSQL profile comparison
 
 ParadeDB, Timescale pg_vectorsearch, and VectorChord all use the `postgres`
-driver. Their manifests in `workloads/` define connection/container defaults,
-extension settings capture, metadata queries, and index telemetry. The existing
-`--backend paradedb`, `--backend vectorsearch`, and `--backend vectorchord`
-forms remain available as compatibility wrappers.
+driver. Their manifests in `profiles/` define connection/container defaults,
+extension settings capture, metadata queries, and index telemetry. Select them
+with the existing `--backend` flag; both resolve the manifest.
 
-The dataset's `paradedb/workload.yaml` selects `benchmark_1m` and
-`vectorchord/workload.yaml` preserves the 42-probe connection default. The
+The dataset's `paradedb/profile.yaml` selects `benchmark_1m` and
+`vectorchord/profile.yaml` preserves the 42-probe connection default. The
 `PARADEDB_URL`, `VECTORSEARCH_URL`, and `VECTORCHORD_URL` environment variables
-override those defaults for both loading and explicit workload-based k6 scripts.
+override those defaults for loading. In k6, the legacy ParadeDB type passes
+`__ENV.PARADEDB_URL` explicitly; new vector profile types resolve their environment
+variables automatically.
 Create `benchmark_1m` on ParadeDB before loading, as in the setup above.
 
 ```bash
 # From the repository root; all three services have independent data volumes.
 docker compose --profile paradedb --profile vectorsearch --profile vectorchord up -d --build
-./bin/loader load --workload paradedb ./datasets/cohere-1m
-./bin/loader load --workload vectorsearch --workers 4 --batch-size 2000 ./datasets/cohere-1m
-./bin/loader load --workload vectorchord --workers 4 --batch-size 2000 ./datasets/cohere-1m
-./k6 run --out dashboard datasets/cohere-1m/k6/postgres-workloads.js
+./bin/loader load --backend paradedb ./datasets/cohere-1m
+./bin/loader load --backend vectorsearch --workers 4 --batch-size 2000 ./datasets/cohere-1m
+./bin/loader load --backend vectorchord --workers 4 --batch-size 2000 ./datasets/cohere-1m
+./k6 run --out dashboard datasets/cohere-1m/k6/postgres-profiles.js
 ```
 
 The comparison runs the three strategies sequentially with separate aliases,
 query metrics, and extension telemetry. Each backend block uses
-`{ type: "postgres", workload: "<name>" }`. Set `DURATION` and `VUS` to adjust
+`{ type: "<name>" }`. Set `DURATION` and `VUS` to adjust
 the run. Set the corresponding `*_CONTAINER` variable to an empty string to
 disable Docker metrics for a remote service.
 

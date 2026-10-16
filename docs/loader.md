@@ -52,40 +52,37 @@ Build the loader with:
 make loader
 ```
 
-## Workload Selection
+## Profile Selection
 
 ```bash
-# Use ParadeDB's workload on the PostgreSQL engine
-./bin/loader load --workload paradedb ./datasets/sample
+# Use ParadeDB's profile on the PostgreSQL engine
+./bin/loader load --backend paradedb ./datasets/sample
 
-# Explicit engine and connection; engine must match the manifest
-./bin/loader load --backend postgres --workload paradedb \
+# The existing --backend flag selects a profile too
+./bin/loader load --backend paradedb \
   --connection postgres://postgres:postgres@localhost:5432/benchmark ./datasets/sample
 
-# Drop the selected workload's tables/indexes
-./bin/loader drop --workload paradedb ./datasets/sample
+# Drop the selected profile's tables/indexes
+./bin/loader drop --backend paradedb ./datasets/sample
 
 # Load a custom strategy using an external manifest directory
-./bin/loader load --workload custom --workloads-dir ./my-workloads ./datasets/sample
+./bin/loader load --backend custom --profiles-dir ./my-profiles ./datasets/sample
 ```
 
-Connection precedence with workload selection is `--connection`, then the
+Connection precedence with profile selection is `--connection`, then the
 manifest's `envVar`, then its `connection`; a missing connection is an error.
-`--connection` also works with the existing `--backend` flag. A connection
-without a selected backend or workload is rejected.
+A connection without a selected `--backend` is rejected.
 
 `--pre-only`, `--post-only`, `--workers`, CSV, Parquet, and multi-table loading
-work with explicit workloads. The workload selects the dataset subdirectory;
+work with explicit profiles. The profile selects the dataset subdirectory;
 the backend selects data conversion and drop behavior. See
-[Workloads](datasets.md#workloads) for manifests and dataset overrides.
+[Profiles](datasets.md#profiles) for manifests and dataset overrides.
 
-Omitting both selectors preserves the existing set and order of registered
-backends; adding a manifest does not silently add another load or drop target.
-`--backend paradedb` and the existing environment variables continue to work.
-External manifests are opt-in through `--workload` (or `--workloads-dir` with
-`--backend`, which uses the backend name as the workload name).
+Omitting `--backend` preserves the historical default target list, including
+ParadeDB; adding a profile does not silently add another load or drop target.
+The `--backend` value selects the profile, and its manifest selects the driver.
 
-## PostgreSQL Vector Workloads
+## PostgreSQL Vector Profiles
 
 `paradedb`, `vectorsearch` (Timescale pg_vectorsearch / PRISM), and `vectorchord`
 all use the shared `postgres` driver. Their manifests supply extension-specific
@@ -93,18 +90,17 @@ capture and telemetry; their dataset directories supply index DDL.
 
 ```bash
 docker compose --profile vectorsearch --profile vectorchord up -d --build
-./bin/loader load --workload vectorsearch --workers 4 ./datasets/cohere-1m
-./bin/loader load --workload vectorchord --workers 4 ./datasets/cohere-1m
+./bin/loader load --backend vectorsearch --workers 4 ./datasets/cohere-1m
+./bin/loader load --backend vectorchord --workers 4 ./datasets/cohere-1m
 ```
 
 The default ports are 5434 for pg_vectorsearch and 5435 for VectorChord.
-`VECTORSEARCH_URL` and `VECTORCHORD_URL` override manifest defaults. The existing
-`--backend vectorsearch` / `--backend vectorchord` forms and k6 type names are
-retained as compatibility wrappers, including vector schema support.
+`VECTORSEARCH_URL` and `VECTORCHORD_URL` override manifest defaults. Select
+these profiles with `--backend`; both use PostgreSQL vector schema support.
 
-For the three-workload comparison, dataset-specific defaults, recall measurement
+For the three-profile comparison, dataset-specific defaults, recall measurement
 scripts, and setup instructions, see the
-[Cohere workload example](../datasets/cohere-1m/README.md#postgresql-workload-comparison).
+[Cohere profile example](../datasets/cohere-1m/README.md#postgresql-profile-comparison).
 
 ## Connection Strings
 
@@ -151,7 +147,7 @@ BENCHMARKER_POSTGRES_VECTOR_URL="postgres://postgres:postgres@localhost:5433/ben
 go test -tags integration ./backends/shared/postgres
 
 BENCHMARKER_PARADEDB_VECTOR_URL="postgres://postgres:postgres@localhost:5432/benchmark" \
-go test -tags integration ./backends/paradedb
+go test -tags integration ./profiles -run TestParadeDB
 ```
 
 With `TURBOPUFFER_API_KEY` and `TURBOPUFFER_REGION` exported, the cloud lifecycle

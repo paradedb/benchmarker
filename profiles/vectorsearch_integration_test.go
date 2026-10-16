@@ -1,6 +1,6 @@
 //go:build integration
 
-package vectorsearch
+package profiles_test
 
 import (
 	"context"
@@ -12,14 +12,19 @@ import (
 
 	"github.com/paradedb/benchmarker/backends/shared/postgres"
 	"github.com/paradedb/benchmarker/metrics"
+	"github.com/paradedb/benchmarker/profiles"
 )
 
-func TestVectorLoadIndexQueryAndCapture(t *testing.T) {
+func TestVectorSearchLoadIndexQueryAndCapture(t *testing.T) {
 	connString := os.Getenv("BENCHMARKER_VECTORSEARCH_URL")
 	if connString == "" {
 		t.Skip("set BENCHMARKER_VECTORSEARCH_URL to run the pg_vectorsearch smoke test")
 	}
-	driver, err := New(connString)
+	profile, err := profiles.Builtin("vectorsearch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := profile.NewDriver(connString)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"flag"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/profiles"
 )
 
 type selectionDriver struct {
@@ -30,8 +32,8 @@ func (*selectionDriver) Update(context.Context, string, []string, []string, [][]
 func (*selectionDriver) CaptureConfig(context.Context, string) {}
 
 func TestLegacyLoaderSelectionAndEnvironment(t *testing.T) {
-	want := backends.RegisteredBackends()
-	loaders, err := selectLoaders("", "", workloadOptions{})
+	want := []string{"clickhouse", "elasticsearch", "mongodb", "opensearch", "paradedb", "postgres", "turbopuffer"}
+	loaders, err := selectLoaders("", "", profileOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,17 +46,29 @@ func TestLegacyLoaderSelectionAndEnvironment(t *testing.T) {
 	}
 	for _, name := range want {
 		t.Run(name, func(t *testing.T) {
-			cfg, _ := backends.GetConfig(name)
+			profile, _ := profiles.Resolve(name, "", "")
+			cfg, _ := backends.GetConfig(profile.Backend)
 			original := cfg
 			var driver *selectionDriver
 			cfg.Factory = func(conn string) (backends.Driver, error) {
 				driver = &selectionDriver{connection: conn}
 				return driver, nil
 			}
-			backends.Register(name, cfg)
-			t.Cleanup(func() { backends.Register(name, original) })
-			t.Setenv(cfg.EnvVar, "legacy-environment")
-			selected, err := selectLoaders("", name, workloadOptions{})
+			backends.Register(profile.Backend, cfg)
+			t.Cleanup(func() { backends.Register(profile.Backend, original) })
+			t.Setenv(profile.EnvironmentVariable(), "")
+			defaults, err := selectLoaders("", name, profileOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := defaults[0].Drop(context.Background(), &backends.Schema{Table: "documents"}); err != nil {
+				t.Fatal(err)
+			}
+			if driver.connection != profile.Connection {
+				t.Fatalf("default connection = %q, want %q", driver.connection, profile.Connection)
+			}
+			t.Setenv(profile.EnvironmentVariable(), "legacy-environment")
+			selected, err := selectLoaders("", name, profileOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -71,7 +85,7 @@ func TestLegacyLoaderSelectionAndEnvironment(t *testing.T) {
 	}
 }
 
-func TestWorkloadLoaderUsesEngineForSchemaAndDrop(t *testing.T) {
+func TestProfileLoaderUsesEngineForSchemaAndDrop(t *testing.T) {
 	for _, name := range []string{"postgres", "elasticsearch", "mongodb", "turbopuffer"} {
 		t.Run(name, func(t *testing.T) {
 			cfg, _ := backends.GetConfig(name)
@@ -88,7 +102,7 @@ func TestWorkloadLoaderUsesEngineForSchemaAndDrop(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("CUSTOM_URL", "environment")
-			selected, err := selectLoaders("", name, workloadOptions{name: "custom", connection: "explicit", dir: dir})
+			selected, err := selectLoaders("", "custom", profileOptions{connection: "explicit", dir: dir})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -125,16 +139,32 @@ func TestWorkloadLoaderUsesEngineForSchemaAndDrop(t *testing.T) {
 func TestInvalidLoaderSelections(t *testing.T) {
 	for _, tc := range []struct {
 		backend string
-		opts    workloadOptions
+		opts    profileOptions
 	}{
-		{"missing", workloadOptions{}},
-		{"", workloadOptions{connection: "ambiguous"}},
-		{"mongodb", workloadOptions{name: "paradedb"}},
-		{"", workloadOptions{name: "../paradedb"}},
-		{"", workloadOptions{dir: t.TempDir()}},
+		{"missing", profileOptions{}},
+		{"", profileOptions{connection: "ambiguous"}},
+		{"../paradedb", profileOptions{}},
+		{"", profileOptions{dir: t.TempDir()}},
 	} {
 		if _, err := selectLoaders("", tc.backend, tc.opts); err == nil {
 			t.Fatalf("invalid selection accepted: %+v", tc)
+		}
+	}
+}
+
+func TestProfileCLIFlagsAndSelection(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	opts := profileFlags(fs)
+	if err := fs.Parse([]string{"--profiles-dir", "custom", "--connection", "explicit"}); err != nil || opts.dir != "custom" || opts.connection != "explicit" {
+		t.Fatalf("profile flags: %+v, %v", opts, err)
+	}
+	for _, name := range []string{"paradedb", "postgres", "vectorsearch", "vectorchord"} {
+		loaders, err := selectLoaders("", name, profileOptions{})
+		if err != nil || len(loaders) != 1 || loaders[0].Name() != name {
+			t.Fatalf("profile %s: %+v, %v", name, loaders, err)
+		}
+		if err := loaders[0].ValidateSchema(&backends.Schema{Table: "docs", Columns: map[string]string{"emb": "vector(3)"}}); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

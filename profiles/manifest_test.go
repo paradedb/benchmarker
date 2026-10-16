@@ -1,4 +1,4 @@
-package workloads_test
+package profiles_test
 
 import (
 	"os"
@@ -11,11 +11,8 @@ import (
 	_ "github.com/paradedb/benchmarker/backends/elasticsearch"
 	_ "github.com/paradedb/benchmarker/backends/mongodb"
 	_ "github.com/paradedb/benchmarker/backends/opensearch"
-	_ "github.com/paradedb/benchmarker/backends/paradedb"
 	_ "github.com/paradedb/benchmarker/backends/postgres"
-	_ "github.com/paradedb/benchmarker/backends/vectorchord"
-	_ "github.com/paradedb/benchmarker/backends/vectorsearch"
-	"github.com/paradedb/benchmarker/workloads"
+	"github.com/paradedb/benchmarker/profiles"
 )
 
 func write(t *testing.T, path, contents string) {
@@ -30,14 +27,14 @@ func write(t *testing.T, path, contents string) {
 
 func TestBuiltinsPreserveRegisteredDefaultsOutsideCheckout(t *testing.T) {
 	t.Chdir(t.TempDir())
-	wantNames := []string{"clickhouse", "elasticsearch", "mongodb", "opensearch", "paradedb", "postgres", "vectorchord", "vectorsearch"}
+	wantNames := []string{"clickhouse", "elasticsearch", "mongodb", "opensearch", "postgres"}
 	for _, name := range wantNames {
 		if _, ok := backends.GetConfig(name); !ok {
 			t.Fatalf("legacy registry entry missing: %s", name)
 		}
 	}
 	for _, name := range wantNames {
-		w, err := workloads.Resolve(name, "", "")
+		w, err := profiles.Resolve(name, "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -49,15 +46,21 @@ func TestBuiltinsPreserveRegisteredDefaultsOutsideCheckout(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	w, err := workloads.Builtin("paradedb")
+	w, err := profiles.Builtin("paradedb")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, registered := backends.GetConfig("paradedb"); registered {
+		t.Fatal("ParadeDB must be a profile, not a registered driver")
+	}
+	if w.Connection != "postgres://postgres:postgres@localhost:5432/benchmark" || w.ContainerName() != "paradedb" || w.EnvironmentVariable() != "PARADEDB_URL" {
+		t.Fatalf("ParadeDB defaults changed: %+v", w)
 	}
 	if w.Backend != "postgres" || !reflect.DeepEqual(w.Extras.GUCPrefixes, []string{"paradedb"}) ||
 		!reflect.DeepEqual(w.Extras.IndexAccessMethods, []string{"paradedb", "bm25"}) || len(w.Extras.Queries) != 2 || w.Extras.Queries[0].Key != "paradedb.version" {
 		t.Fatalf("lost ParadeDB capture/telemetry: %+v", w)
 	}
-	fts, err := workloads.Builtin("postgresfts")
+	fts, err := profiles.Builtin("postgresfts")
 	if err != nil || fts.EnvironmentVariable() != "POSTGRES_URL" {
 		t.Fatalf("FTS env compatibility: %+v, %v", fts, err)
 	}
@@ -73,7 +76,7 @@ extras:
   gucs: [work_mem]
   queries: ["SELECT 'global' AS version"]
 `)
-	write(t, filepath.Join(dataset, "custom", "workload.yaml"), `connection: dataset
+	write(t, filepath.Join(dataset, "custom", "profile.yaml"), `connection: dataset
 container: ""
 color: ""
 extras:
@@ -82,7 +85,7 @@ extras:
     - key: stable.key
       query: SELECT 'legacy'
 `)
-	w, err := workloads.Resolve("custom", dataset, dir)
+	w, err := profiles.Resolve("custom", dataset, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,8 +95,8 @@ extras:
 	if w.Extras.Queries[0].Key != "" || w.Extras.Queries[1].Key != "stable.key" {
 		t.Fatalf("query keys: %+v", w.Extras.Queries)
 	}
-	write(t, filepath.Join(dataset, "custom", "workload.yaml"), "extras: {}\n")
-	w, err = workloads.Resolve("custom", dataset, dir)
+	write(t, filepath.Join(dataset, "custom", "profile.yaml"), "extras: {}\n")
+	w, err = profiles.Resolve("custom", dataset, dir)
 	if err != nil || len(w.Extras.Queries) != 0 || w.ContainerName() != "global-container" {
 		t.Fatalf("clear extras: %+v, %v", w, err)
 	}
@@ -102,7 +105,7 @@ extras:
 func TestConnectionPrecedenceAndCustomDefaults(t *testing.T) {
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "custom-search.yaml"), "backend: postgres\nconnection: manifest\n")
-	w, err := workloads.Resolve("custom-search", "", dir)
+	w, err := profiles.Resolve("custom-search", "", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,35 +142,27 @@ func TestMalformedManifestsFail(t *testing.T) {
 		t.Run(data, func(t *testing.T) {
 			dir := t.TempDir()
 			write(t, filepath.Join(dir, "bad.yaml"), data)
-			if _, err := workloads.Resolve("bad", t.TempDir(), dir); err == nil {
+			if _, err := profiles.Resolve("bad", t.TempDir(), dir); err == nil {
 				t.Fatal("invalid manifest accepted")
 			}
 		})
 	}
 	for _, name := range []string{"", "../paradedb", "/paradedb", "a/b", "a\\b"} {
-		if _, err := workloads.Resolve(name, "", ""); err == nil {
+		if _, err := profiles.Resolve(name, "", ""); err == nil {
 			t.Fatalf("invalid name accepted: %q", name)
 		}
 	}
-	if _, err := workloads.Resolve("unknown", "", t.TempDir()); err == nil {
+	if _, err := profiles.Resolve("unknown", "", t.TempDir()); err == nil {
 		t.Fatal("missing manifest accepted")
 	}
 	dir := t.TempDir()
-	if _, err := workloads.Resolve("postgres", "", filepath.Join(dir, "missing")); err == nil {
+	if _, err := profiles.Resolve("postgres", "", filepath.Join(dir, "missing")); err == nil {
 		t.Fatal("missing explicit directory accepted")
 	}
 }
 
-func TestBackendMismatchAndUnsupportedExtras(t *testing.T) {
-	w, _ := workloads.Builtin("paradedb")
-	for _, name := range []string{"", "postgres", "paradedb"} {
-		if err := w.CheckBackend(name); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := w.CheckBackend("mongodb"); err == nil {
-		t.Fatal("mismatch accepted")
-	}
+func TestUnsupportedDriversAndExtras(t *testing.T) {
+	w, _ := profiles.Builtin("paradedb")
 	w.Backend = "mongodb"
 	if _, err := w.BackendConfig(); err == nil {
 		t.Fatal("postgres extras accepted for MongoDB")
@@ -180,7 +175,7 @@ func TestBackendMismatchAndUnsupportedExtras(t *testing.T) {
 
 func TestRegisteredBackendWithoutManifest(t *testing.T) {
 	backends.Register("custom-http-driver", backends.BackendConfig{FileType: "json", DefaultConn: "http://custom", EnvVar: "CUSTOM_HTTP_URL", Container: ""})
-	w, err := workloads.Resolve("custom-http-driver", "", t.TempDir())
+	w, err := profiles.Resolve("custom-http-driver", "", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

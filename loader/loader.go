@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/paradedb/benchmarker/backends"
-	"github.com/paradedb/benchmarker/workloads"
+	"github.com/paradedb/benchmarker/profiles"
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 )
@@ -502,11 +502,6 @@ func loadWithDriverJSON(driver backends.Driver, tableName, filePath, dataset, ba
 //   - batchSize: batch size for loading (default: 10000)
 //   - schema: schema.yaml path for typed CSV, Parquet, or Parquet shards
 func (l *Loader) Load(backendName, connectionString string, config map[string]interface{}) map[string]interface{} {
-	cfg, ok := backends.GetConfig(backendName)
-	if !ok {
-		return map[string]interface{}{"error": fmt.Sprintf("unknown backend: %s", backendName)}
-	}
-
 	filePath, tableName, dataset, batchSize := parseConfig(config)
 	if filePath == "" {
 		return map[string]interface{}{"error": "missing required config field: file"}
@@ -514,38 +509,30 @@ func (l *Loader) Load(backendName, connectionString string, config map[string]in
 	if batchSize <= 0 {
 		return map[string]interface{}{"error": "batchSize must be greater than 0"}
 	}
+
 	filePath = l.resolvePath(filePath)
 	dataset = l.resolvePath(dataset)
-
-	directoryName := backendName
-	driverBackend := backendName
-	factory := cfg.Factory
-	if raw, exists := config["workload"]; exists {
-		name, ok := raw.(string)
-		if !ok || name == "" {
-			return map[string]interface{}{"error": "workload must be a non-empty string"}
-		}
-		dir, _ := config["workloadsDir"].(string)
-		w, err := workloads.Resolve(name, dataset, dir)
-		if err == nil {
-			err = w.CheckBackend(backendName)
-		}
+	dir, _ := config["profilesDir"].(string)
+	profile, err := profiles.Resolve(backendName, dataset, dir)
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}
+	}
+	cfg, err := profile.BackendConfig()
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}
+	}
+	if !profiles.LegacyType(backendName) {
+		connectionString, err = profile.ResolveConnection(connectionString)
 		if err != nil {
 			return map[string]interface{}{"error": err.Error()}
 		}
-		cfg, err = w.BackendConfig()
-		if err != nil {
-			return map[string]interface{}{"error": err.Error()}
-		}
-		connectionString, err = w.ResolveConnection(connectionString)
-		if err != nil {
-			return map[string]interface{}{"error": err.Error()}
-		}
-		directoryName, driverBackend, factory = w.Name, w.Backend, w.NewDriver
 	}
 
-	if _, ok := config["schema"]; ok {
-		cli := backends.NewWorkloadCLILoader(directoryName, driverBackend, cfg.FileType, connectionString, factory)
+	if _, typed := config["schema"]; typed {
+		cli, err := profile.CLILoader(connectionString)
+		if err != nil {
+			return map[string]interface{}{"error": err.Error()}
+		}
 		return l.loadTyped(cli, config, filePath, dataset, batchSize)
 	}
 
@@ -554,16 +541,16 @@ func (l *Loader) Load(backendName, connectionString string, config map[string]in
 		return map[string]interface{}{"error": fmt.Sprintf("failed to determine columns: %v", err)}
 	}
 
-	driver, err := factory(connectionString)
+	driver, err := profile.NewDriver(connectionString)
 	if err != nil {
 		return map[string]interface{}{"error": fmt.Sprintf("connect failed: %v", err)}
 	}
 	defer driver.Close()
 
 	if cfg.FileType == "json" {
-		return loadWithDriverJSON(driver, tableName, filePath, dataset, directoryName, columns, batchSize)
+		return loadWithDriverJSON(driver, tableName, filePath, dataset, profile.Name, columns, batchSize)
 	}
-	return loadWithDriver(driver, tableName, filePath, dataset, directoryName, columns, batchSize)
+	return loadWithDriver(driver, tableName, filePath, dataset, profile.Name, columns, batchSize)
 }
 
 // LoadParadeDB loads CSV data into ParadeDB.

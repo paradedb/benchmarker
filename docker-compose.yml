@@ -173,7 +173,7 @@ services:
 
   vectorsearch:
     profiles: [vectorsearch, all]
-    build: ./backends/vectorsearch
+    build: ./docker/vectorsearch
     image: benchmarker/vectorsearch:local
     container_name: vectorsearch
     shm_size: 4g

@@ -1,6 +1,6 @@
-// Package workloads resolves declarative index/query strategies independently
+// Package profiles resolves declarative index/query strategies independently
 // of their database drivers. Built-ins are embedded so binaries are portable.
-package workloads
+package profiles
 
 import (
 	"bytes"
@@ -63,19 +63,19 @@ type Manifest struct {
 	Extras      Extras  `yaml:"extras,omitempty"`
 }
 
-type Workload struct {
+type Profile struct {
 	Manifest
 	Name string
 }
 
-func (w Workload) ContainerName() string {
+func (w Profile) ContainerName() string {
 	if w.Container != nil {
 		return *w.Container
 	}
 	return w.Name
 }
 
-func (w Workload) EnvironmentVariable() string {
+func (w Profile) EnvironmentVariable() string {
 	if w.EnvVar != nil {
 		return *w.EnvVar
 	}
@@ -84,7 +84,7 @@ func (w Workload) EnvironmentVariable() string {
 
 // ResolveConnection gives explicit configuration precedence over environment
 // and manifest defaults. Legacy k6 calls do not call this method.
-func (w Workload) ResolveConnection(explicit string) (string, error) {
+func (w Profile) ResolveConnection(explicit string) (string, error) {
 	if explicit != "" {
 		return explicit, nil
 	}
@@ -94,7 +94,7 @@ func (w Workload) ResolveConnection(explicit string) (string, error) {
 	if w.Connection != "" {
 		return w.Connection, nil
 	}
-	return "", fmt.Errorf("workload %q requires a connection (set connection or %s)", w.Name, w.EnvironmentVariable())
+	return "", fmt.Errorf("profile %q requires a connection (set connection or %s)", w.Name, w.EnvironmentVariable())
 }
 
 func decode(data []byte) (Manifest, error) {
@@ -113,48 +113,49 @@ func decode(data []byte) (Manifest, error) {
 
 func validate(name string, m Manifest) error {
 	if !validName.MatchString(name) {
-		return fmt.Errorf("invalid workload name %q", name)
+		return fmt.Errorf("invalid profile name %q", name)
 	}
 	if !validName.MatchString(m.Backend) {
-		return fmt.Errorf("workload %q requires a valid backend", name)
+		return fmt.Errorf("profile %q requires a valid backend", name)
 	}
 	for _, q := range m.Extras.Queries {
 		if strings.TrimSpace(q.SQL) == "" {
-			return fmt.Errorf("workload %q has an empty config query", name)
+			return fmt.Errorf("profile %q has an empty config query", name)
 		}
 	}
 	return nil
 }
 
-// Builtin reads only the embedded manifest. Compatibility factories deliberately
-// ignore filesystem overrides so old APIs retain their original behavior.
-func Builtin(name string) (Workload, error) {
+// Builtin reads only the embedded manifest, including for historical dashboard
+// recordings that must not depend on local overrides.
+func Builtin(name string) (Profile, error) {
 	data, err := builtins.ReadFile(name + ".yaml")
 	if err != nil {
-		return Workload{}, err
+		return Profile{}, err
 	}
 	m, err := decode(data)
 	if err == nil {
 		err = validate(name, m)
 	}
-	return Workload{Manifest: m, Name: name}, err
+	return Profile{Manifest: m, Name: name}, err
 }
 
 // Resolve uses an external global manifest (if present), otherwise an embedded
 // manifest or registered-backend fallback. The optional dataset manifest replaces
 // whole top-level fields, including extras; it does not merge nested lists.
-// dir defaults to ./workloads; an explicitly supplied directory must exist.
-func Resolve(name, dataset, dir string) (Workload, error) {
+// dir defaults to ./profiles; an explicitly supplied directory must exist.
+func Resolve(name, dataset, dir string) (Profile, error) {
 	if !validName.MatchString(name) {
-		return Workload{}, fmt.Errorf("invalid workload name %q", name)
+		return Profile{}, fmt.Errorf("invalid profile name %q", name)
 	}
 	if dir == "" {
-		dir = "workloads"
+		dir = "profiles"
 	} else if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		return Workload{}, fmt.Errorf("workloads directory %q does not exist or is not a directory", dir)
+		return Profile{}, fmt.Errorf("profiles directory %q does not exist or is not a directory", dir)
 	}
 	// #nosec G304 -- Manifest directory is explicitly selected by the local CLI/script; name is validated.
 	data, err := os.ReadFile(filepath.Join(dir, name+".yaml"))
+
 	if os.IsNotExist(err) {
 		data, err = builtins.ReadFile(name + ".yaml")
 		if os.IsNotExist(err) {
@@ -162,7 +163,7 @@ func Resolve(name, dataset, dir string) (Workload, error) {
 		}
 	}
 	if err != nil {
-		return Workload{}, fmt.Errorf("workload %q: %w", name, err)
+		return Profile{}, fmt.Errorf("profile %q: %w", name, err)
 	}
 	// Validate even fields subsequently overridden, to catch typos at their source.
 	baseManifest, err := decode(data)
@@ -170,32 +171,33 @@ func Resolve(name, dataset, dir string) (Workload, error) {
 		err = validate(name, baseManifest)
 	}
 	if err != nil {
-		return Workload{}, fmt.Errorf("workload %q: %w", name, err)
+		return Profile{}, fmt.Errorf("profile %q: %w", name, err)
 	}
 	if dataset != "" {
-		path := filepath.Join(dataset, name, "workload.yaml")
+		path := filepath.Join(dataset, name, "profile.yaml")
 		// #nosec G304 -- Dataset directory is explicitly selected by the local CLI/script; name is validated.
 		override, err := os.ReadFile(path)
+
 		if err == nil {
 			if _, err := decode(override); err != nil {
-				return Workload{}, fmt.Errorf("%s: %w", path, err)
+				return Profile{}, fmt.Errorf("%s: %w", path, err)
 			}
 			var base, patch map[string]yaml.Node
 			if err := yaml.Unmarshal(data, &base); err != nil {
-				return Workload{}, err
+				return Profile{}, err
 			}
 			if err := yaml.Unmarshal(override, &patch); err != nil {
-				return Workload{}, err
+				return Profile{}, err
 			}
 			for k, v := range patch {
 				base[k] = v
 			}
 			data, err = yaml.Marshal(base)
 			if err != nil {
-				return Workload{}, err
+				return Profile{}, err
 			}
 		} else if !os.IsNotExist(err) {
-			return Workload{}, err
+			return Profile{}, err
 		}
 	}
 	m, err := decode(data)
@@ -203,7 +205,7 @@ func Resolve(name, dataset, dir string) (Workload, error) {
 		err = validate(name, m)
 	}
 	if err != nil {
-		return Workload{}, fmt.Errorf("workload %q: %w", name, err)
+		return Profile{}, fmt.Errorf("profile %q: %w", name, err)
 	}
-	return Workload{Manifest: m, Name: name}, nil
+	return Profile{Manifest: m, Name: name}, nil
 }

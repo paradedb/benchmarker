@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/paradedb/benchmarker/metrics"
+	"github.com/paradedb/benchmarker/profiles"
 	"go.k6.io/k6/output"
 )
 
@@ -985,7 +986,7 @@ func (o *Output) getSummary() map[string]interface{} {
 			"backend":        rm.Backend,
 			"container":      rm.Container,
 			"alias":          rm.Alias,
-			"color":          rm.Color,
+			"color":          displayColor(rm.Backend, rm.Color),
 			"chart":          rm.Chart,
 			"ingestRate":     rm.IngestRate,
 			"totalIngested":  rm.TotalIngested,
@@ -1008,7 +1009,7 @@ func (o *Output) getSummary() map[string]interface{} {
 			"name":    cm.Name,
 			"backend": cm.Backend,
 			"alias":   cm.Alias,
-			"color":   cm.Color,
+			"color":   displayColor(cm.Backend, cm.Color),
 			"cpu":     cm.CPU,
 			"memory":  cm.Memory,
 		}
@@ -1084,7 +1085,7 @@ func (o *Output) getExportData() map[string]interface{} {
 			"backend":       rm.Backend,
 			"container":     rm.Container,
 			"alias":         rm.Alias,
-			"color":         rm.Color,
+			"color":         displayColor(rm.Backend, rm.Color),
 			"chart":         rm.Chart,
 			"ingestRate":    rm.IngestRate,
 			"totalIngested": rm.TotalIngested,
@@ -1105,7 +1106,7 @@ func (o *Output) getExportData() map[string]interface{} {
 			"name":    cm.Name,
 			"backend": cm.Backend,
 			"alias":   cm.Alias,
-			"color":   cm.Color,
+			"color":   displayColor(cm.Backend, cm.Color),
 			"cpu":     cm.CPU,
 			"memory":  cm.Memory,
 		}
@@ -1139,6 +1140,26 @@ func aggregateExportData(rawData map[string]interface{}, broadcast, window time.
 	}
 	result["broadcastInterval"] = broadcast.Milliseconds()
 	result["timelineWindow"] = window.Milliseconds()
+	// Older exports relied on frontend defaults. Resolve missing colors from
+	// embedded manifests for both replay and standalone HTML, without mutating
+	// the caller's original data or reading filesystem overrides.
+	if rawContainers, ok := rawData["containers"].(map[string]interface{}); ok {
+		containers := make(map[string]interface{}, len(rawContainers))
+		for name, raw := range rawContainers {
+			containers[name] = raw
+			if cm, ok := raw.(map[string]interface{}); ok {
+				container := make(map[string]interface{}, len(cm))
+				for k, v := range cm {
+					container[k] = v
+				}
+				backend, _ := cm["backend"].(string)
+				color, _ := cm["color"].(string)
+				container["color"] = displayColor(backend, color)
+				containers[name] = container
+			}
+		}
+		result["containers"] = containers
+	}
 
 	runsRaw, ok := rawData["runs"].(map[string]interface{})
 	if !ok {
@@ -1160,6 +1181,9 @@ func aggregateExportData(rawData map[string]interface{}, broadcast, window time.
 				run[k] = v
 			}
 		}
+		backend, _ := rm["backend"].(string)
+		color, _ := rm["color"].(string)
+		run["color"] = displayColor(backend, color)
 		if updateSummary := summarizeRawUpdateMetrics(rm["updateMetrics"]); updateSummary != nil {
 			run["updates"] = updateSummary
 		}
@@ -1575,6 +1599,18 @@ func getQueryPattern(backend, chart, qName string) string {
 	return metrics.GetQueryPattern(backend, chart, qName)
 }
 
+// displayColor preserves recorded overrides and supplies manifest defaults for
+// older recordings and clients that do not register display options.
+func displayColor(backend, color string) string {
+	if color != "" {
+		return color
+	}
+	if w, err := profiles.Builtin(backend); err == nil {
+		return w.Color
+	}
+	return ""
+}
+
 // buildBackendsBlock returns the deduplicated per-backend snapshot for the
 // dashboard JSON. Each entry combines the backend's database config (postgres
 // GUCs, version, pre/post scripts), the docker-inspect data for its container,
@@ -1586,7 +1622,7 @@ func buildBackendsBlock() map[string]interface{} {
 		entry := map[string]interface{}{
 			"alias":     opt.Alias,
 			"container": opt.Container,
-			"color":     opt.Color,
+			"color":     displayColor(alias, opt.Color),
 		}
 		if cfg := metrics.GetBackendConfig(alias); cfg != nil {
 			entry["config"] = cfg

@@ -1,4 +1,4 @@
-package workloads_test
+package profiles_test
 
 import (
 	"context"
@@ -10,12 +10,12 @@ import (
 	"github.com/paradedb/benchmarker/backends"
 	pg "github.com/paradedb/benchmarker/backends/shared/postgres"
 	"github.com/paradedb/benchmarker/metrics"
-	"github.com/paradedb/benchmarker/workloads"
+	"github.com/paradedb/benchmarker/profiles"
 )
 
 // Compare against the original uncommitted factories, independently of YAML.
 // The supplied databases must already have their extensions installed.
-func TestLiveVectorWorkloadCaptureParity(t *testing.T) {
+func TestLiveVectorProfileCaptureParity(t *testing.T) {
 	for _, tc := range []struct {
 		name, env, section, key string
 		prefixes, methods       []string
@@ -57,51 +57,41 @@ func TestLiveVectorWorkloadCaptureParity(t *testing.T) {
 			if !ok || section[tc.key] == "" {
 				t.Fatalf("extension capture unavailable: %+v", want)
 			}
-			w, err := workloads.Builtin(tc.name)
+			w, err := profiles.Builtin(tc.name)
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, variant := range []string{"legacy", "workload"} {
-				t.Run(variant, func(t *testing.T) {
-					var d backends.Driver
-					var err error
-					if variant == "legacy" {
-						d, err = backends.NewDriver(tc.name, conn)
-					} else {
-						d, err = w.NewDriver(conn)
-					}
+			d, err := w.NewDriver(conn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			alias := tc.name + "-profile"
+			d.CaptureConfig(context.Background(), alias)
+			got := metrics.GetBackendConfig(alias)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("capture changed from source factory\ngot: %+v\nwant: %+v", got, want)
+			}
+			identities := func(provider backends.TelemetryProvider) map[string]bool {
+				points, err := provider.ReadTelemetry(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(points) == 0 {
+					t.Fatal("missing telemetry")
+				}
+				result := map[string]bool{}
+				for _, p := range points {
+					labels, err := json.Marshal(p.Labels)
 					if err != nil {
 						t.Fatal(err)
 					}
-					defer d.Close()
-					alias := tc.name + "-" + variant
-					d.CaptureConfig(context.Background(), alias)
-					got := metrics.GetBackendConfig(alias)
-					if !reflect.DeepEqual(got, want) {
-						t.Fatalf("capture changed from source factory\ngot: %+v\nwant: %+v", got, want)
-					}
-					identities := func(provider backends.TelemetryProvider) map[string]bool {
-						points, err := provider.ReadTelemetry(context.Background())
-						if err != nil {
-							t.Fatal(err)
-						}
-						if len(points) == 0 {
-							t.Fatal("missing telemetry")
-						}
-						result := map[string]bool{}
-						for _, p := range points {
-							labels, err := json.Marshal(p.Labels)
-							if err != nil {
-								t.Fatal(err)
-							}
-							result[p.Name+":"+string(p.Kind)+":"+p.Unit+":"+string(labels)] = true
-						}
-						return result
-					}
-					if !reflect.DeepEqual(identities(baseline), identities(d.(backends.TelemetryProvider))) {
-						t.Fatal("telemetry identities changed from source factory")
-					}
-				})
+					result[p.Name+":"+string(p.Kind)+":"+p.Unit+":"+string(labels)] = true
+				}
+				return result
+			}
+			if !reflect.DeepEqual(identities(baseline), identities(d.(backends.TelemetryProvider))) {
+				t.Fatal("telemetry identities changed from source factory")
 			}
 		})
 	}
