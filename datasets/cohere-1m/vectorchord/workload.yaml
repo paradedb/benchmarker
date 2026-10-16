@@ -1,0 +1,2 @@
+# Preserve the Cohere script's default probe setting, including remote rebuilds.
+connection: postgres://postgres:postgres@localhost:5435/benchmark?options=-c%20vchordrq.probes%3D42

@@ -99,7 +99,12 @@ PostgreSQL extras support:
   index-I/O capture only; omitting the field retains the driver's defaults.
 
 The embedded ParadeDB manifest also captures segment counts and all `paradedb.*`
-settings, preserving the existing result keys and telemetry series.
+settings, preserving the existing result keys and telemetry series. The
+`vectorsearch` manifest captures the pg_vectorsearch version and `prism.*`
+settings, and `vectorchord` captures extension versions and `vchord*` settings.
+All three select `backend: postgres` and declare their index access methods for
+telemetry. The [Cohere example](../datasets/cohere-1m/README.md#postgresql-workload-comparison)
+shows them together.
 
 The existing sample dataset uses the `postgres` directory for native FTS.
 `postgresfts` is also available as a manifest for datasets using that directory

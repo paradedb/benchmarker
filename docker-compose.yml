@@ -115,6 +115,118 @@ services:
       - "-c"
       - "jit=off"
 
+  vectorchord:
+    profiles: [vectorchord, all]
+    image: tensorchord/vchord-postgres:pg18-v1.1.1
+    container_name: vectorchord
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: benchmark
+    ports:
+      - "5435:5432"
+    volumes:
+      - vectorchord_data:/var/lib/postgresql/18/docker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G
+        reservations:
+          cpus: "2"
+          memory: 4G
+    cpus: 4
+    mem_limit: 8g
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=vchord,vector"
+      - "-c"
+      - "shared_buffers=2GB"
+      - "-c"
+      - "effective_cache_size=4GB"
+      - "-c"
+      - "work_mem=256MB"
+      - "-c"
+      - "maintenance_work_mem=1GB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=256MB"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "max_parallel_workers_per_gather=2"
+      - "-c"
+      - "max_parallel_workers=2"
+      - "-c"
+      - "max_worker_processes=16"
+      - "-c"
+      - "jit=off"
+
+  vectorsearch:
+    profiles: [vectorsearch, all]
+    build: ./backends/vectorsearch
+    image: benchmarker/vectorsearch:local
+    container_name: vectorsearch
+    shm_size: 4g
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: benchmark
+    ports:
+      - "5434:5432"
+    volumes:
+      - vectorsearch_data:/var/lib/postgresql/18/docker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G
+        reservations:
+          cpus: "2"
+          memory: 4G
+    cpus: 4
+    mem_limit: 8g
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=2GB"
+      - "-c"
+      - "effective_cache_size=4GB"
+      - "-c"
+      - "work_mem=256MB"
+      - "-c"
+      - "maintenance_work_mem=1GB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=256MB"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "max_parallel_workers_per_gather=2"
+      - "-c"
+      - "max_parallel_workers=2"
+      - "-c"
+      - "max_worker_processes=16"
+      - "-c"
+      - "jit=off"
+
   elasticsearch:
     profiles: [elasticsearch, all]
     image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
@@ -257,6 +369,8 @@ services:
 volumes:
   paradedb_data:
   postgres_data:
+  vectorchord_data:
+  vectorsearch_data:
   elasticsearch_data:
   opensearch_data:
   clickhouse_data:

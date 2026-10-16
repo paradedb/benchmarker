@@ -52,9 +52,13 @@ python3 measure_recall_pdb.py --db benchmark_1m --ground-truth ground_truth_top1
 Measured against the current indexes (both cover `text` for the filtered
 shape; ES as-loaded multi-segment, no force-merge).
 
+The following ES/ParadeDB figures are historical measurements from the previous
+index build. The imported single-segment ParadeDB setup now uses probe `0.0156`
+(the source checkout records 95.0% recall); remeasure before comparing latency.
+
 Unfiltered — ES: 40 → 0.890, 80 → 0.949, 95 → 0.961, 110 → 0.962,
 150 → 0.975. ParadeDB: 0.03 → 0.954, **0.035 → 0.959**, 0.04 → 0.964.
-Matched defaults: ES `num_candidates=95` (0.961) vs
+Previously matched defaults: ES `num_candidates=95` (0.961) vs
 `paradedb.vector_cluster_max_probe=0.035` (0.959).
 
 Filtered (1%-selective `text` filter, 'battle'): both engines saturate —
@@ -68,3 +72,79 @@ pgvector is excluded from the 1m comparison (HNSW build wants the whole
 ~5GB graph in maintenance_work_mem and was cut rather than sized around);
 ES runs unmerged (33 segments) since the single-segment force-merge rebuilds
 the HNSW graph and costs more than the load itself.
+
+## VectorChord
+
+The `vectorchord` workload on the `postgres` driver uses the same Parquet data with a cosine `vchordrq`
+index. The root Compose profile exposes it on port 5435, with its own database
+and volume:
+
+```bash
+docker compose --profile vectorchord up -d
+./bin/loader load --workload vectorchord --workers 4 --batch-size 2000 ./datasets/cohere-1m
+VECTORCHORD_URL="postgres://postgres:postgres@localhost:5435/benchmark?options=-c%20vchordrq.probes%3D42" \
+./k6 run datasets/cohere-1m/k6/vectorchord.js
+```
+
+`post.sql` uses 2,000 partitions and sets `vchordrq.probes=42` for new database
+connections. With VectorChord 1.1.1, this measured **95.0% recall@10** across the
+100 supplied queries (950 of 1,000 ground-truth neighbors). Nearby settings:
+
+| Probes | Recall@10 |
+| ------ | --------- |
+| 40     | 94.6%     |
+| 41     | 94.6%     |
+| 42     | 95.0%     |
+| 43     | 95.2%     |
+| 44     | 95.4%     |
+| 45     | 95.5%     |
+
+These measurements apply to this index build and query set. Remeasure after
+rebuilding, since partition training can change recall:
+
+```bash
+VECTORCHORD_URL="postgres://postgres:postgres@localhost:5435/benchmark" \
+python3 datasets/cohere-1m/k6/measure_recall_vectorchord.py --probes 40,41,42,43,44,45
+```
+
+The script uses the dataset's 100
+query vectors and checks that every query succeeds and returns ten neighbors.
+Set `DURATION` and `VUS` to adjust the run; use `VECTORCHORD_CONTAINER` to select
+the container for resource metrics, or an empty string for a remote database.
+
+## PostgreSQL workload comparison
+
+ParadeDB, Timescale pg_vectorsearch, and VectorChord all use the `postgres`
+driver. Their manifests in `workloads/` define connection/container defaults,
+extension settings capture, metadata queries, and index telemetry. The existing
+`--backend paradedb`, `--backend vectorsearch`, and `--backend vectorchord`
+forms remain available as compatibility wrappers.
+
+The dataset's `paradedb/workload.yaml` selects `benchmark_1m` and
+`vectorchord/workload.yaml` preserves the 42-probe connection default. The
+`PARADEDB_URL`, `VECTORSEARCH_URL`, and `VECTORCHORD_URL` environment variables
+override those defaults for both loading and explicit workload-based k6 scripts.
+Create `benchmark_1m` on ParadeDB before loading, as in the setup above.
+
+```bash
+# From the repository root; all three services have independent data volumes.
+docker compose --profile paradedb --profile vectorsearch --profile vectorchord up -d --build
+./bin/loader load --workload paradedb ./datasets/cohere-1m
+./bin/loader load --workload vectorsearch --workers 4 --batch-size 2000 ./datasets/cohere-1m
+./bin/loader load --workload vectorchord --workers 4 --batch-size 2000 ./datasets/cohere-1m
+./k6 run --out dashboard datasets/cohere-1m/k6/postgres-workloads.js
+```
+
+The comparison runs the three strategies sequentially with separate aliases,
+query metrics, and extension telemetry. Each backend block uses
+`{ type: "postgres", workload: "<name>" }`. Set `DURATION` and `VUS` to adjust
+the run. Set the corresponding `*_CONTAINER` variable to an empty string to
+disable Docker metrics for a remote service.
+
+`vectorsearch` is Timescale's **pg_vectorsearch / PRISM**, not pgvectorscale /
+DiskANN. The Dockerfile builds the pinned revision from the source checkout.
+Use `k6/vectorsearch.js` for a standalone run and
+`k6/measure_recall_vectorsearch.py` to measure its recall. Its `VECTORSEARCH_URL`
+can include session options such as `options=-c%20prism.nprobe%3D40`.
+Remeasure recall for all strategies after rebuilding or changing index settings;
+the comparison script checks query success and result counts, not recall parity.

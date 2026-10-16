@@ -1,0 +1,2 @@
+# Keep this dataset separate from the default benchmark database.
+connection: postgres://postgres:postgres@localhost:5432/benchmark_1m

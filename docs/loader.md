@@ -85,6 +85,27 @@ backends; adding a manifest does not silently add another load or drop target.
 External manifests are opt-in through `--workload` (or `--workloads-dir` with
 `--backend`, which uses the backend name as the workload name).
 
+## PostgreSQL Vector Workloads
+
+`paradedb`, `vectorsearch` (Timescale pg_vectorsearch / PRISM), and `vectorchord`
+all use the shared `postgres` driver. Their manifests supply extension-specific
+capture and telemetry; their dataset directories supply index DDL.
+
+```bash
+docker compose --profile vectorsearch --profile vectorchord up -d --build
+./bin/loader load --workload vectorsearch --workers 4 ./datasets/cohere-1m
+./bin/loader load --workload vectorchord --workers 4 ./datasets/cohere-1m
+```
+
+The default ports are 5434 for pg_vectorsearch and 5435 for VectorChord.
+`VECTORSEARCH_URL` and `VECTORCHORD_URL` override manifest defaults. The existing
+`--backend vectorsearch` / `--backend vectorchord` forms and k6 type names are
+retained as compatibility wrappers, including vector schema support.
+
+For the three-workload comparison, dataset-specific defaults, recall measurement
+scripts, and setup instructions, see the
+[Cohere workload example](../datasets/cohere-1m/README.md#postgresql-workload-comparison).
+
 ## Connection Strings
 
 The loader reads connection strings from environment variables:
