@@ -142,8 +142,7 @@ The framework is database-agnostic - the current backends and datasets are focus
 | `paradedb` | ParadeDB with pg_search (BM25) |
 | `postgres` | PostgreSQL                     |
 
-`vectorsearch` and `vectorchord` are also retained as legacy PostgreSQL type
-names. New scripts select `{ type: "postgres", workload: "vectorsearch" }` or
+`vectorsearch` and `vectorchord` are PostgreSQL workloads. Select `{ type: "postgres", workload: "vectorsearch" }` or
 `{ type: "postgres", workload: "vectorchord" }`; aliases still default to the
 workload names. See the
 [three-workload example](../datasets/cohere-1m/k6/postgres-workloads.js).

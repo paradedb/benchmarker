@@ -98,9 +98,8 @@ docker compose --profile vectorsearch --profile vectorchord up -d --build
 ```
 
 The default ports are 5434 for pg_vectorsearch and 5435 for VectorChord.
-`VECTORSEARCH_URL` and `VECTORCHORD_URL` override manifest defaults. The existing
-`--backend vectorsearch` / `--backend vectorchord` forms and k6 type names are
-retained as compatibility wrappers, including vector schema support.
+`VECTORSEARCH_URL` and `VECTORCHORD_URL` override manifest defaults. Select
+these workloads with `--workload`; both use PostgreSQL vector schema support.
 
 For the three-workload comparison, dataset-specific defaults, recall measurement
 scripts, and setup instructions, see the
