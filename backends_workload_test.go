@@ -10,6 +10,7 @@ import (
 
 	"github.com/paradedb/benchmarker/backends"
 	"github.com/paradedb/benchmarker/metrics"
+	"github.com/paradedb/benchmarker/workloads"
 )
 
 type workloadTestDriver struct{ connection string }
@@ -73,7 +74,8 @@ func TestLegacyBackendConfigurationsRetainDefaults(t *testing.T) {
 					t.Fatal("missing legacy client", alias)
 				}
 				got := metrics.GetBackendOptions(alias)
-				wantContainer, wantConnection, wantColor := cfg.Container, cfg.DefaultConn, ""
+				w, _ := workloads.Builtin(name)
+				wantContainer, wantConnection, wantColor := cfg.Container, cfg.DefaultConn, w.Color
 				if alias == "replica" {
 					wantContainer = "replica"
 				}

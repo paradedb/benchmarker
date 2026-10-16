@@ -723,15 +723,6 @@
         "#EAB308",
         "#06B6D4",
       ];
-      // Hardcoded brand colors per backend type
-      const BACKEND_COLORS = {
-        paradedb: "#7C3AED", // Purple (ParadeDB brand)
-        postgres: "#3B82F6", // Blue
-        elasticsearch: "#10B981", // Green (Elastic brand)
-        opensearch: "#EF4444", // Red (OpenSearch brand)
-        clickhouse: "#FACC15", // Yellow (ClickHouse brand)
-        mongodb: "#00ED64", // MongoDB Green (their actual brand green)
-      };
       let isDark = false;
       let runColors = {};
       let selectedMetric = "p95";
@@ -834,20 +825,12 @@
         // Use base name for color so same backend has same color across charts
         const baseName = getBaseName(name);
         if (!runColors[baseName]) {
-          // Check for custom color from backend options first
+          // Workload defaults and script overrides arrive with the run data.
           if (runData?.color) {
             const customColor = sanitizeColor(runData.color);
             if (customColor) {
               runColors[baseName] = customColor;
             }
-          }
-          // Then check for backend-specific color
-          if (
-            !runColors[baseName] &&
-            runData?.backend &&
-            BACKEND_COLORS[runData.backend]
-          ) {
-            runColors[baseName] = BACKEND_COLORS[runData.backend];
           }
           // Fall back to cycling colors
           if (!runColors[baseName]) {
@@ -881,11 +864,6 @@
               return getRunColor(runName, runData);
             }
           }
-        }
-        // Check for backend-specific color
-        if (container?.backend && BACKEND_COLORS[container.backend]) {
-          containerColors[name] = BACKEND_COLORS[container.backend];
-          return BACKEND_COLORS[container.backend];
         }
         // Fall back to cycling colors (only cache if no backend info yet)
         if (!containerColors[name]) {

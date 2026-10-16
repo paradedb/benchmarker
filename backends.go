@@ -179,6 +179,12 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 				m.configErrorf("backends: %v", err)
 				return nil
 			}
+		} else if !colorExplicit {
+			// Legacy calls use embedded colors without opting into filesystem
+			// manifests or changing connection/container defaults.
+			if w, err := workloads.Builtin(backendType); err == nil {
+				color = w.Color
+			}
 		}
 
 		// Validate backend type

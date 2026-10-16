@@ -85,6 +85,11 @@ extras:
 | `color`       | Dashboard palette                                                       | Chart color; explicit k6 colors take precedence                       |
 | `extras`      | Empty                                                                   | Optional PostgreSQL configuration capture and telemetry settings      |
 
+Workload manifests are the source of default dashboard colors. Legacy backend
+configurations and saved results without colors use the embedded manifest's
+color; explicit script colors take precedence. Workloads without a color use
+the dashboard's generic palette.
+
 PostgreSQL extras support:
 
 - `gucs`: individual settings to capture in addition to the driver's standard settings.
