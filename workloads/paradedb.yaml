@@ -2,7 +2,7 @@ backend: postgres
 container: paradedb
 connection: postgres://postgres:postgres@localhost:5432/benchmark
 envVar: PARADEDB_URL
-description: ParadeDB pg_search BM25 index
+description: ParadeDB pg_search full-text and vector indexes
 color: "#7C3AED"
 extras:
   gucPrefixes: [paradedb]
