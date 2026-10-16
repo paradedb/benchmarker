@@ -12,18 +12,18 @@ const backends = db.backends({
   datasetPath: "../",
   backends: [
     {
-      type: "paradedb",
+      type: "postgres",
+      workload: "paradedb",
       alias: "paradedb",
-      connection:
-        __ENV.PARADEDB_URL ||
-        "postgres://postgres:postgres@localhost:5432/benchmark_1m",
+      connection: __ENV.PARADEDB_URL,
       container: __ENV.PARADEDB_CONTAINER || "paradedb",
       color: "blue",
     },
     {
       // Filtered scenario needs its own probe operating point; GUCs are
       // per-connection, so it rides a second connection string.
-      type: "paradedb",
+      type: "postgres",
+      workload: "paradedb",
       alias: "paradedb_filtered",
       connection:
         __ENV.PARADEDB_FILTERED_URL ||
@@ -119,7 +119,9 @@ const PARADEDB_KNN_FILTERED = `
 `;
 
 export function paradedbKnnFiltered() {
-  backends.get("paradedb_filtered").query(PARADEDB_KNN_FILTERED, vectors.next());
+  backends
+    .get("paradedb_filtered")
+    .query(PARADEDB_KNN_FILTERED, vectors.next());
 }
 
 // Both engines saturate on the 1%-filtered shape (the filter leaves ~10k

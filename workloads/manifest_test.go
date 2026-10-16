@@ -13,6 +13,8 @@ import (
 	_ "github.com/paradedb/benchmarker/backends/opensearch"
 	_ "github.com/paradedb/benchmarker/backends/paradedb"
 	_ "github.com/paradedb/benchmarker/backends/postgres"
+	_ "github.com/paradedb/benchmarker/backends/vectorchord"
+	_ "github.com/paradedb/benchmarker/backends/vectorsearch"
 	"github.com/paradedb/benchmarker/workloads"
 )
 
@@ -28,7 +30,7 @@ func write(t *testing.T, path, contents string) {
 
 func TestBuiltinsPreserveRegisteredDefaultsOutsideCheckout(t *testing.T) {
 	t.Chdir(t.TempDir())
-	wantNames := []string{"clickhouse", "elasticsearch", "mongodb", "opensearch", "paradedb", "postgres"}
+	wantNames := []string{"clickhouse", "elasticsearch", "mongodb", "opensearch", "paradedb", "postgres", "vectorchord", "vectorsearch"}
 	for _, name := range wantNames {
 		if _, ok := backends.GetConfig(name); !ok {
 			t.Fatalf("legacy registry entry missing: %s", name)

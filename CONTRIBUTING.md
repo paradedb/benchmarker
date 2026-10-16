@@ -63,6 +63,8 @@ benchmarks/
 │   │   └── elastic/       # Shared Elasticsearch/OpenSearch driver
 │   ├── paradedb/          # Legacy API wrapper for the ParadeDB workload
 │   ├── postgres/          # PostgreSQL registration
+│   ├── vectorchord/       # Legacy API wrapper for the VectorChord workload
+│   ├── vectorsearch/      # Legacy API wrapper + pg_vectorsearch Docker build
 │   ├── elasticsearch/     # Elasticsearch registration
 │   ├── opensearch/        # OpenSearch registration
 │   ├── clickhouse/        # ClickHouse driver
@@ -112,6 +114,11 @@ ParadeDB capture/telemetry behavior against the new factory and exercise live
 PostgreSQL config queries, set `BENCHMARKER_PARADEDB_TEST_URL` and
 `BENCHMARKER_POSTGRES_TEST_URL` when running `go test ./workloads -v`.
 Those workload tests issue read-only queries against the supplied databases.
+For the migrated vector workloads, set `BENCHMARKER_VECTORSEARCH_URL` and
+`BENCHMARKER_VECTORCHORD_VECTOR_URL` to databases with those extensions installed
+and run `go test ./workloads -run TestLiveVectorWorkloadCaptureParity -v`.
+The corresponding `go test -tags integration ./backends/vectorsearch
+./backends/vectorchord` checks also create and drop temporary vector tables.
 
 ## Adding a Backend
 

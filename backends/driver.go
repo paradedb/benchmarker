@@ -519,7 +519,7 @@ func vectorColumns(schema *Schema) []string {
 
 func backendSupportsVectorColumns(name string) bool {
 	switch name {
-	case "paradedb", "postgres":
+	case "paradedb", "postgres", "vectorchord", "vectorsearch":
 		return true
 	case "elasticsearch", "opensearch", "turbopuffer":
 		// HTTP backends accept typed vectors, with vector types configured
@@ -740,7 +740,7 @@ func (l *CLILoader) validateTableSchema(schema *Schema) error {
 		return fmt.Errorf("schema has no columns")
 	}
 	if cols := vectorColumns(schema); len(cols) > 0 && !backendSupportsVectorColumns(l.backendName()) {
-		return fmt.Errorf("backend %q does not support vector columns: %s (supported backends: paradedb, postgres, elasticsearch, opensearch, turbopuffer)",
+		return fmt.Errorf("backend %q does not support vector columns: %s (supported backends: paradedb, postgres, vectorchord, vectorsearch, elasticsearch, opensearch, turbopuffer)",
 			l.name, strings.Join(cols, ", "))
 	}
 	for col, schemaType := range schema.Columns {
