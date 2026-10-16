@@ -1,0 +1,6 @@
+backend: postgres
+container: postgres
+connection: postgres://postgres:postgres@localhost:5433/benchmark
+envVar: POSTGRES_URL
+description: PostgreSQL native indexes
+color: "#3B82F6"

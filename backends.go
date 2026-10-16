@@ -10,6 +10,7 @@ import (
 	"github.com/grafana/sobek"
 	"github.com/paradedb/benchmarker/backends"
 	"github.com/paradedb/benchmarker/metrics"
+	"github.com/paradedb/benchmarker/workloads"
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 
@@ -93,7 +94,9 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	}
 
 	for _, item := range backendsArray {
-		var backendType, alias, container, color, conn string
+		var backendType, alias, container, color, conn, workloadName string
+		var workload *workloads.Workload
+		var aliasExplicit, colorExplicit bool
 		// containerExplicit tracks whether the user set the container field at all
 		// (including to ""). An explicit empty string opts the backend out of
 		// docker metrics — used for off-host services like AWS RDS.
@@ -113,8 +116,17 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 				return nil
 			}
 			alias = backendType
+			if raw, exists := v["workload"]; exists {
+				var valid bool
+				workloadName, valid = raw.(string)
+				if !valid || workloadName == "" {
+					m.configErrorf("backends: workload must be a non-empty string")
+					return nil
+				}
+			}
 			if a, ok := v["alias"].(string); ok {
 				alias = a
+				aliasExplicit = true
 			}
 			if raw, ok := v["container"]; ok {
 				containerExplicit = true
@@ -124,6 +136,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 			}
 			if c, ok := v["color"].(string); ok {
 				color = c
+				colorExplicit = true
 			}
 			if c, ok := v["connection"].(string); ok {
 				conn = c
@@ -131,6 +144,39 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 		default:
 			m.configErrorf("backends: each backend must be a string or object")
 			return nil
+		}
+
+		// Explicit workload selection opts into manifest defaults and environment
+		// resolution. Legacy configurations retain their historical behavior.
+		directoryName := backendType
+		if workloadName != "" {
+			dir, _ := config["workloadsDir"].(string)
+			w, err := workloads.Resolve(workloadName, datasetPath, dir)
+			if err == nil {
+				err = w.CheckBackend(backendType)
+			}
+			if err != nil {
+				m.configErrorf("backends: %v", err)
+				return nil
+			}
+			workload = &w
+			backendType = w.Backend
+			directoryName = w.Name
+			if !aliasExplicit {
+				alias = w.Name
+			}
+			if !containerExplicit {
+				container = w.ContainerName()
+				containerExplicit = true
+			}
+			if !colorExplicit {
+				color = w.Color
+			}
+			conn, err = w.ResolveConnection(conn)
+			if err != nil {
+				m.configErrorf("backends: %v", err)
+				return nil
+			}
 		}
 
 		// Validate backend type
@@ -161,7 +207,13 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 			return nil
 		}
 
-		driver, err := backends.NewDriver(backendType, conn)
+		var driver backends.Driver
+		var err error
+		if workload != nil {
+			driver, err = workload.NewDriver(conn)
+		} else {
+			driver, err = backends.NewDriver(backendType, conn)
+		}
 		if err != nil {
 			m.configErrorf("backends: failed to create '%s': %v", alias, err)
 			return nil
@@ -184,7 +236,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 		}
 
 		driver.CaptureConfig(ctx, alias)
-		metrics.CapturePrePostScripts(alias, backendType, datasetPath, backendCfg.FileType)
+		metrics.CapturePrePostScripts(alias, directoryName, datasetPath, backendCfg.FileType)
 	}
 
 	// Auto-create metrics collector for enabled containers

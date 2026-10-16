@@ -11,6 +11,7 @@ on:
       - main
     paths:
       - "**/*.go"
+      - "workloads/*.yaml"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/ci.yml"
