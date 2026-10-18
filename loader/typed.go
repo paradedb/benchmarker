@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/drivers"
 )
 
 // loadTyped reuses the CLI loader so IDs, vectors, booleans, and nulls have the
 // same representation during setup as they do in streamed k6 workloads.
-func (l *Loader) loadTyped(cli *backends.CLILoader, config map[string]interface{}, path, dataset string, batchSize int) map[string]interface{} {
+func (l *Loader) loadTyped(cli *drivers.CLILoader, config map[string]interface{}, path, dataset string, batchSize int) map[string]interface{} {
 	defer cli.Close()
 	failure := func(err error) map[string]interface{} { return map[string]interface{}{"error": err.Error()} }
 	if _, ok := config["columns"]; ok {

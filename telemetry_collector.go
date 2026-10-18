@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/drivers"
 	"github.com/paradedb/benchmarker/metrics"
 )
 
@@ -34,7 +34,7 @@ type telemetryWindow struct {
 }
 
 type backendTelemetryCollector struct {
-	providers map[string]backends.TelemetryProvider
+	providers map[string]drivers.TelemetryProvider
 	windows   []*telemetryWindow
 	startedAt time.Time
 }
@@ -49,7 +49,7 @@ var initialTelemetryBaselines sync.Map
 
 func newBackendTelemetryCollector(
 	scenarios map[string]interface{},
-	providers map[string]backends.TelemetryProvider,
+	providers map[string]drivers.TelemetryProvider,
 	backendCount int,
 	totalDuration time.Duration,
 ) (*backendTelemetryCollector, error) {
@@ -88,7 +88,7 @@ func newBackendTelemetryCollector(
 
 func telemetryWindowsFromScenarios(
 	scenarios map[string]interface{},
-	providers map[string]backends.TelemetryProvider,
+	providers map[string]drivers.TelemetryProvider,
 ) ([]*telemetryWindow, error) {
 	var windows []*telemetryWindow
 	for name, raw := range scenarios {
@@ -169,7 +169,7 @@ func telemetryWindowsFromScenarios(
 	return merged, nil
 }
 
-func hasTaggedTelemetryWorkload(scenarios map[string]interface{}, providers map[string]backends.TelemetryProvider) bool {
+func hasTaggedTelemetryWorkload(scenarios map[string]interface{}, providers map[string]drivers.TelemetryProvider) bool {
 	for _, raw := range scenarios {
 		config, ok := raw.(map[string]interface{})
 		if !ok {
@@ -287,7 +287,7 @@ func optionalDuration(raw interface{}) (time.Duration, error) {
 	return duration, nil
 }
 
-func initialTelemetryBaseline(id string, provider backends.TelemetryProvider) *cachedTelemetryBaseline {
+func initialTelemetryBaseline(id string, provider drivers.TelemetryProvider) *cachedTelemetryBaseline {
 	value, _ := initialTelemetryBaselines.LoadOrStore(id, &cachedTelemetryBaseline{})
 	cache := value.(*cachedTelemetryBaseline)
 	cache.once.Do(func() {
@@ -296,7 +296,7 @@ func initialTelemetryBaseline(id string, provider backends.TelemetryProvider) *c
 	return cache
 }
 
-func readTelemetry(provider backends.TelemetryProvider) ([]metrics.TelemetryPoint, error) {
+func readTelemetry(provider drivers.TelemetryProvider) ([]metrics.TelemetryPoint, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), telemetryQueryTimeout)
 	defer cancel()
 	return provider.ReadTelemetry(ctx)
@@ -346,7 +346,7 @@ func (c *backendTelemetryCollector) collect(now time.Time) {
 
 func (c *backendTelemetryCollector) sample(
 	window *telemetryWindow,
-	provider backends.TelemetryProvider,
+	provider drivers.TelemetryProvider,
 	now time.Time,
 ) {
 	current, err := readTelemetry(provider)

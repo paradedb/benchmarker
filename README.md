@@ -82,7 +82,7 @@ docker compose -f datasets/sample/docker-compose.yml up -d
 ```
 
 The repo-root `docker-compose.yml` is a kitchen-sink template containing every
-supported backend with profiles; it's intended as a starting point when
+supported backend with Compose profiles; it's intended as a starting point when
 authoring a new dataset, not for running an existing one.
 
 For backends running off-host (e.g. AWS RDS, managed Elasticsearch), pass
@@ -91,7 +91,7 @@ metrics for that backend.
 
 Please note the 'sample' dataset which is included does not provide a meaningful benchmark, it's designed to show how to use the system.
 
-See [Docker Setup](docs/docker.md) for all available profiles and services.
+See [Docker Setup](docs/docker.md) for all available backends and services.
 
 ### 3. Load data
 

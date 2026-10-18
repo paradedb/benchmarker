@@ -56,17 +56,17 @@ make clean        # Remove build artifacts
 benchmarks/
 ├── module.go              # k6 module registration
 ├── backends.go            # Backend config for k6 + side-effect imports
-├── backends/
+├── drivers/
 │   ├── driver.go          # Driver interface, registry, K6Client wrapper
 │   ├── shared/
 │   │   ├── postgres/      # Shared PostgreSQL driver (paradedb, postgres)
-│   │   └── elastic/       # Shared Elasticsearch/OpenSearch driver
+│   │   └── elasticsearch/       # Shared Elasticsearch/OpenSearch driver
 │   ├── postgres/          # PostgreSQL registration
 │   ├── elasticsearch/     # Elasticsearch registration
 │   ├── opensearch/        # OpenSearch registration
 │   ├── clickhouse/        # ClickHouse driver
 │   └── mongodb/           # MongoDB driver
-├── profiles/              # Embedded manifests, resolution, driver configuration
+├── backends/              # Embedded manifests, resolution, driver configuration
 ├── metrics/               # k6 metrics + Docker container stats
 ├── dashboard/             # Real-time dashboard + SSE output
 ├── loader/                # k6 data loader module
@@ -80,12 +80,12 @@ benchmarks/
 
 ### How the Plugin System Works
 
-Backends use a **registry pattern** with factory functions:
+Drivers use a **registry pattern** with factory functions; backends select them through manifests:
 
-1. Each backend package calls `backends.Register()` in an `init()` function, providing a `BackendConfig` with a factory, file type, env var, default connection, and container name.
-2. `backends.go` imports each backend package for side-effect registration (e.g., `_ "github.com/paradedb/benchmarker/backends/postgres"`).
-3. At runtime, `newBackends()` resolves each JS `type` to a profile, looks up its `backend` factory, creates drivers, and wraps each in a `K6Client`.
-4. `K6Client` (in `backends/driver.go`) wraps every `Driver` to add k6 metric emission — timing, tagging, and sample pushing.
+1. Each driver package calls `drivers.Register()` in an `init()` function, providing a `DriverConfig` with a factory and file type.
+2. `backends.go` imports each driver package for side-effect registration (e.g., `_ "github.com/paradedb/benchmarker/drivers/postgres"`).
+3. At runtime, `newBackends()` resolves each JS `type` to a backend, looks up its `driver` factory, creates drivers, and wraps each in a `K6Client`.
+4. `K6Client` (in `drivers/driver.go`) wraps every `Driver` to add k6 metric emission — timing, tagging, and sample pushing.
 
 ### Metrics Flow
 
@@ -93,39 +93,39 @@ Backends use a **registry pattern** with factory functions:
 
 `metrics/collector.go` reads Docker container stats through the active local Docker context (falling back to `/var/run/docker.sock`) and emits `container_cpu_percent` and `container_memory_bytes` gauges.
 
-## Adding a Profile
+## Adding a Backend
 
 To benchmark another index/query strategy on an existing engine, add a manifest
 and dataset scripts; no new driver package or rebuild is needed. See
-[Profiles](docs/datasets.md#profiles) for the manifest schema and precedence.
-Select a profile with `--backend` in the CLI, or the k6
-`type` field. Manifests shipped in `profiles/` are embedded at build time.
+[Backends](docs/datasets.md#backends) for the manifest schema and precedence.
+Select a backend with `--backend` in the CLI, or the k6
+`type` field. Manifests shipped in `backends/` are embedded at build time.
 
-`paradedb`, `vectorchord`, and `vectorsearch` are profiles on the registered
+`paradedb`, `vectorchord`, and `pg_vectorsearch` are backends on the registered
 `postgres` driver. They have no separate Go packages or driver registrations.
-Keep existing CLI names, k6 shorthand, result keys, dataset paths, and explicit
-connection/container overrides working when changing this layer. Older k6 types
-retain their explicit `__ENV` connection handling and alias-based containers.
+Connection, container, environment variable, and color defaults belong in the
+backend manifest. Explicit settings override those defaults. Every runnable
+backend needs a manifest, including backends named after their driver.
 
 Run `go test ./...` for the compatibility matrix. To also compare the old
 ParadeDB capture/telemetry behavior against the new factory and exercise live
 PostgreSQL config queries, set `BENCHMARKER_PARADEDB_TEST_URL` and
-`BENCHMARKER_POSTGRES_TEST_URL` when running `go test ./profiles -v`.
-Those profile tests issue read-only queries against the supplied databases.
-For the migrated vector profiles, set `BENCHMARKER_VECTORSEARCH_URL` and
+`BENCHMARKER_POSTGRES_TEST_URL` when running `go test ./backends -v`.
+Those backend tests issue read-only queries against the supplied databases.
+For the migrated vector backends, set `BENCHMARKER_PG_VECTORSEARCH_URL` and
 `BENCHMARKER_VECTORCHORD_VECTOR_URL` to databases with those extensions installed
-and run `go test ./profiles -run TestLiveVectorProfileCaptureParity -v`.
-The corresponding `go test -tags integration ./profiles` checks also create
+and run `go test ./backends -run TestLiveVectorBackendCaptureParity -v`.
+The corresponding `go test -tags integration ./backends` checks also create
 and drop temporary vector tables.
 
-## Adding a Backend
+## Adding a Driver
 
-Add a backend when a new database driver or protocol is required. Here is a
+Add a driver when a new database protocol is required. Here is a
 step-by-step guide.
 
 ### 1. The Driver Interface
 
-Every backend implements this interface from `backends/driver.go`:
+Every driver implements this interface from `drivers/driver.go`:
 
 ```go
 type Driver interface {
@@ -150,10 +150,12 @@ type Driver interface {
 ### 2. Implement and Register the Driver
 
 PostgreSQL extensions and other strategies using an existing driver belong in
-`profiles/`; they do not need a new driver package. For a new database protocol,
+`backends/`; they do not need a new driver package. For a new database protocol,
 implement the `Driver` interface and register its factory with
-`backends.Register()`. See `backends/clickhouse/` and `backends/mongodb/` for
+`drivers.Register()`. See `drivers/clickhouse/` and `drivers/mongodb/` for
 examples. Elasticsearch and OpenSearch reuse a shared driver implementation.
+Add a corresponding backend manifest with `driver: <registered-name>`; registering
+the driver alone does not create a runnable backend.
 
 ### 3. Register the Side-Effect Import
 
@@ -162,7 +164,7 @@ Add a blank import in `backends.go` so the `init()` function runs:
 ```go
 import (
     // ...existing imports...
-    _ "github.com/paradedb/benchmarker/backends/mybackend"
+    _ "github.com/paradedb/benchmarker/drivers/mybackend"
 )
 ```
 
@@ -202,15 +204,16 @@ datasets/sample/mybackend/
 - Add a query example under "Backend Examples" in `README.md`
 - Add the Docker Compose service/port to the Docker table in `README.md`
 
-### BackendConfig Fields
+### DriverConfig Fields
 
-| Field         | Description                                                           |
-| ------------- | --------------------------------------------------------------------- |
-| `Factory`     | `func(connString string) (Driver, error)` — creates a driver instance |
-| `FileType`    | `"sql"` or `"json"` — determines pre/post script file extension       |
-| `EnvVar`      | Environment variable name for the connection string                   |
-| `DefaultConn` | Fallback connection string when env var is unset                      |
-| `Container`   | Docker container name for metrics collection                          |
+| Field                | Description |
+| -------------------- | ----------- |
+| `Factory`            | `func(connString string) (Driver, error)` creates a driver instance |
+| `FileType`           | `"sql"` or `"json"` determines the pre/post script extension |
+| `OptionalConnection` | Allows an empty connection when the driver resolves its endpoint from other settings, such as Turbopuffer's region |
+
+Connection defaults, environment variable names, containers, and colors are
+backend manifest fields; see [Backends](docs/datasets.md#backends).
 
 ## Datasets
 

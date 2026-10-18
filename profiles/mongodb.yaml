@@ -1,6 +1,0 @@
-backend: mongodb
-container: mongodb
-connection: mongodb://localhost:27017
-envVar: MONGODB_URL
-description: MongoDB Atlas Search
-color: "#00ED64"

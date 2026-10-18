@@ -52,55 +52,56 @@ Build the loader with:
 make loader
 ```
 
-## Profile Selection
+## Backend Selection
 
 ```bash
-# Use ParadeDB's profile on the PostgreSQL engine
+# Use ParadeDB's backend on the PostgreSQL engine
 ./bin/loader load --backend paradedb ./datasets/sample
 
-# The existing --backend flag selects a profile too
+# Override the selected backend connection
 ./bin/loader load --backend paradedb \
   --connection postgres://postgres:postgres@localhost:5432/benchmark ./datasets/sample
 
-# Drop the selected profile's tables/indexes
+# Drop the selected backend's tables/indexes
 ./bin/loader drop --backend paradedb ./datasets/sample
 
 # Load a custom strategy using an external manifest directory
-./bin/loader load --backend custom --profiles-dir ./my-profiles ./datasets/sample
+./bin/loader load --backend custom --backends-dir ./my-backends ./datasets/sample
 ```
 
-Connection precedence with profile selection is `--connection`, then the
-manifest's `envVar`, then its `connection`; a missing connection is an error.
+Connection precedence with backend selection is `--connection`, then the
+manifest's `envVar`, then its `connection`. Drivers that support another endpoint
+setting can accept an empty connection; Turbopuffer uses `TURBOPUFFER_REGION`.
 A connection without a selected `--backend` is rejected.
 
 `--pre-only`, `--post-only`, `--workers`, CSV, Parquet, and multi-table loading
-work with explicit profiles. The profile selects the dataset subdirectory;
-the backend selects data conversion and drop behavior. See
-[Profiles](datasets.md#profiles) for manifests and dataset overrides.
+work with explicit backends. The backend selects the dataset subdirectory;
+its driver selects data conversion and drop behavior. See
+[Backends](datasets.md#backends) for manifests and dataset overrides.
 
 Omitting `--backend` preserves the historical default target list, including
-ParadeDB; adding a profile does not silently add another load or drop target.
-The `--backend` value selects the profile, and its manifest selects the driver.
+ParadeDB; adding a backend does not silently add another load or drop target.
+The `--backend` value selects the backend, and its manifest selects the driver.
 
-## PostgreSQL Vector Profiles
+## PostgreSQL Vector Backends
 
-`paradedb`, `vectorsearch` (Timescale pg_vectorsearch / PRISM), and `vectorchord`
+`paradedb`, `pg_vectorsearch` (Timescale pg_vectorsearch / PRISM), and `vectorchord`
 all use the shared `postgres` driver. Their manifests supply extension-specific
 capture and telemetry; their dataset directories supply index DDL.
 
 ```bash
-docker compose --profile vectorsearch --profile vectorchord up -d --build
-./bin/loader load --backend vectorsearch --workers 4 ./datasets/cohere-1m
+docker compose --profile pg_vectorsearch --profile vectorchord up -d --build
+./bin/loader load --backend pg_vectorsearch --workers 4 ./datasets/cohere-1m
 ./bin/loader load --backend vectorchord --workers 4 ./datasets/cohere-1m
 ```
 
 The default ports are 5434 for pg_vectorsearch and 5435 for VectorChord.
-`VECTORSEARCH_URL` and `VECTORCHORD_URL` override manifest defaults. Select
-these profiles with `--backend`; both use PostgreSQL vector schema support.
+`PG_VECTORSEARCH_URL` and `VECTORCHORD_URL` override manifest defaults. Select
+these backends with `--backend`; both use PostgreSQL vector schema support.
 
-For the three-profile comparison, dataset-specific defaults, recall measurement
+For the three-backend comparison, dataset-specific defaults, recall measurement
 scripts, and setup instructions, see the
-[Cohere profile example](../datasets/cohere-1m/README.md#postgresql-profile-comparison).
+[Cohere backend example](../datasets/cohere-1m/README.md#postgresql-backend-comparison).
 
 ## Connection Strings
 
@@ -144,10 +145,10 @@ Vector COPY/query behavior can be checked against live databases with:
 
 ```bash
 BENCHMARKER_POSTGRES_VECTOR_URL="postgres://postgres:postgres@localhost:5433/benchmark" \
-go test -tags integration ./backends/shared/postgres
+go test -tags integration ./drivers/shared/postgres
 
 BENCHMARKER_PARADEDB_VECTOR_URL="postgres://postgres:postgres@localhost:5432/benchmark" \
-go test -tags integration ./profiles -run TestParadeDB
+go test -tags integration ./backends -run TestParadeDB
 ```
 
 With `TURBOPUFFER_API_KEY` and `TURBOPUFFER_REGION` exported, the cloud lifecycle
@@ -156,7 +157,7 @@ a temporary namespace that it deletes afterward:
 
 ```bash
 BENCHMARKER_TURBOPUFFER_LIVE=1 \
-go test -tags integration -run '^TestLiveTurbopufferLifecycle$' -count=1 -v ./backends/turbopuffer
+go test -tags integration -run '^TestLiveTurbopufferLifecycle$' -count=1 -v ./drivers/turbopuffer
 ```
 
 ## Dataset Structure

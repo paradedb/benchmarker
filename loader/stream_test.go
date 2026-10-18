@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/drivers"
 	"github.com/parquet-go/parquet-go"
 	"go.k6.io/k6/js/modulestest"
 	"go.k6.io/k6/lib"
@@ -182,7 +182,7 @@ func TestDocumentStreamErrorsAndClose(t *testing.T) {
 }
 
 type streamUpdateDriver struct {
-	backends.Driver
+	drivers.Driver
 	table string
 	keys  []string
 	docs  []map[string]interface{}
@@ -215,7 +215,7 @@ func TestDocumentStreamJavaScriptUpdate(t *testing.T) {
 		t.Fatal("init-context read accepted")
 	}
 	driver := &streamUpdateDriver{}
-	client := backends.NewK6Client(vu, driver, "postgres")
+	client := drivers.NewK6Client(vu, driver, "postgres")
 	if err := rt.Set("backend", client); err != nil {
 		t.Fatal(err)
 	}
