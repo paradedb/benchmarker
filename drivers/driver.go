@@ -1,0 +1,945 @@
+// Package drivers provides the driver interface and shared infrastructure for search backends.
+package drivers
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/paradedb/benchmarker/metrics"
+	"go.k6.io/k6/js/modules"
+)
+
+// Schema defines the dataset schema from schema.yaml. A dataset is either
+// single-table (top-level table and columns) or multi-table (a tables list
+// with one entry per table); the two forms cannot be mixed.
+type Schema struct {
+	Table   string            `yaml:"table"`
+	Columns map[string]string `yaml:"columns"`
+	Tables  []Schema          `yaml:"tables"`
+}
+
+// TableSchemas returns one single-table schema per table to load: the schema
+// itself for single-table datasets, or each tables entry for multi-table ones.
+func (s *Schema) TableSchemas() []*Schema {
+	if len(s.Tables) == 0 {
+		return []*Schema{s}
+	}
+	out := make([]*Schema, len(s.Tables))
+	for i := range s.Tables {
+		out[i] = &s.Tables[i]
+	}
+	return out
+}
+
+// Validate checks the structural rules for a schema: the single- and
+// multi-table forms cannot be mixed, and every tables entry needs a unique
+// name and its own columns.
+func (s *Schema) Validate() error {
+	if len(s.Tables) == 0 {
+		return nil
+	}
+	if s.Table != "" || len(s.Columns) > 0 {
+		return fmt.Errorf("cannot mix top-level table/columns with a tables list")
+	}
+	seen := make(map[string]bool, len(s.Tables))
+	for i, t := range s.Tables {
+		if t.Table == "" {
+			return fmt.Errorf("tables[%d] has no table name", i)
+		}
+		if len(t.Columns) == 0 {
+			return fmt.Errorf("table %q has no columns", t.Table)
+		}
+		if len(t.Tables) > 0 {
+			return fmt.Errorf("table %q: tables entries cannot be nested", t.Table)
+		}
+		if seen[t.Table] {
+			return fmt.Errorf("duplicate table %q", t.Table)
+		}
+		seen[t.Table] = true
+	}
+	return nil
+}
+
+// DriverConfig registers protocol capabilities. Backend defaults live in manifests.
+type DriverConfig struct {
+	Factory  DriverFactory
+	FileType string // "sql" or "json"
+	// OptionalConnection allows drivers to obtain an endpoint from other settings.
+	OptionalConnection bool
+}
+
+// Driver registry
+var (
+	driverConfigs   = make(map[string]DriverConfig)
+	driverConfigsMu sync.RWMutex
+)
+
+// Register registers a driver and its protocol capabilities.
+func Register(name string, config DriverConfig) {
+	driverConfigsMu.Lock()
+	defer driverConfigsMu.Unlock()
+	driverConfigs[name] = config
+}
+
+// GetConfig returns the configuration for a driver.
+func GetConfig(name string) (DriverConfig, bool) {
+	driverConfigsMu.RLock()
+	defer driverConfigsMu.RUnlock()
+	cfg, ok := driverConfigs[name]
+	return cfg, ok
+}
+
+// Driver is the minimal interface each backend must implement.
+type Driver interface {
+	Close() error
+	Exec(ctx context.Context, statements string) error
+	Query(ctx context.Context, query string, args ...any) (hitCount int, err error)
+	Insert(ctx context.Context, table string, cols []string, rows [][]any) (int, error)
+	Update(ctx context.Context, table string, keyCols []string, cols []string, rows [][]any) (int, error)
+	CaptureConfig(ctx context.Context, backendName string)
+}
+
+// TelemetryProvider is an optional backend capability consumed by the
+// dedicated metrics collector. Implementations own their database-specific
+// queries and return generic counter/gauge series.
+type TelemetryProvider interface {
+	TelemetryEnabled() bool
+	ReadTelemetry(ctx context.Context) ([]metrics.TelemetryPoint, error)
+}
+
+// DriverFactory creates a driver from a connection string.
+type DriverFactory func(connString string) (Driver, error)
+
+// K6Client wraps a Driver with k6 metrics emission.
+type K6Client struct {
+	driver      Driver
+	vu          modules.VU
+	backend     string
+	timeout     time.Duration
+	initialized bool   // Track if backend_init has been emitted
+	scenario    string // Last scenario_started signal emitted by this VU
+}
+
+// NewK6Client creates a k6 client that wraps a driver.
+func NewK6Client(vu modules.VU, driver Driver, backend string) *K6Client {
+	metrics.RegisterMetrics(vu)
+	return &K6Client{driver: driver, vu: vu, backend: backend, timeout: 0}
+}
+
+// SetTimeout sets the query timeout duration.
+// Use 0 to disable timeout (default).
+func (c *K6Client) SetTimeout(seconds int) {
+	c.timeout = time.Duration(seconds) * time.Second
+}
+
+// emitInitMetrics emits initialization metrics on first call to signal dashboard.
+func (c *K6Client) emitInitMetrics() {
+	if !c.initialized {
+		c.initialized = true
+		metrics.EmitBackendInit(c.vu, c.backend)
+	}
+
+	state := c.vu.State()
+	if state == nil || state.Tags == nil {
+		return
+	}
+	scenario, ok := state.Tags.GetCurrentValues().Tags.Get("scenario")
+	if !ok || scenario == "" || scenario == c.scenario {
+		return
+	}
+	c.scenario = scenario
+	metrics.CaptureScenarioInfo(c.vu)
+	metrics.EmitScenarioStarted(c.vu, c.backend)
+}
+
+// operationContext gives every operation that starts during warmup the same
+// absolute first-stage deadline. A client timeout can shorten that deadline,
+// but can never let work cross it.
+func (c *K6Client) operationContext(phase metrics.WarmupPhase, timeout time.Duration) (context.Context, context.CancelFunc) {
+	ctx := context.Background()
+	if c.vu != nil && c.vu.Context() != nil {
+		ctx = c.vu.Context()
+	}
+
+	var deadline time.Time
+	if phase.Active {
+		deadline = phase.Deadline
+	}
+	if timeout > 0 {
+		timeoutDeadline := time.Now().Add(timeout)
+		if deadline.IsZero() || timeoutDeadline.Before(deadline) {
+			deadline = timeoutDeadline
+		}
+	}
+	if !deadline.IsZero() {
+		return context.WithDeadline(ctx, deadline)
+	}
+	return context.WithCancel(ctx)
+}
+
+func (c *K6Client) finishWarmup(phase metrics.WarmupPhase) bool {
+	if !phase.Active {
+		return false
+	}
+	metrics.EmitWarmupProgress(c.vu, c.backend, phase)
+	return !time.Now().Before(phase.Deadline)
+}
+
+// Query executes a query and emits metrics.
+func (c *K6Client) Query(query string, args ...any) map[string]interface{} {
+	c.emitInitMetrics()
+
+	warmup := metrics.GetWarmupPhase(c.vu)
+	ctx, cancel := c.operationContext(warmup, c.timeout)
+	defer cancel()
+
+	// Capture query pattern - for ES/OS style queries (index, queryObj), serialize the query object
+	queryPattern := strings.TrimSpace(query)
+	if len(args) > 0 {
+		if queryMap, ok := args[0].(map[string]interface{}); ok {
+			if jsonBytes, err := json.Marshal(queryMap); err == nil {
+				queryPattern = string(jsonBytes)
+			}
+		}
+	}
+	metrics.CaptureQueryPattern(c.vu, c.backend, queryPattern)
+
+	start := time.Now()
+	hits, err := c.driver.Query(ctx, query, args...)
+	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
+	result := &metrics.QueryResult{LatencyMs: latencyMs}
+	if c.finishWarmup(warmup) {
+		return map[string]interface{}{
+			"hits":            int64(0),
+			"latencyMs":       latencyMs,
+			"deadlineReached": true,
+		}
+	}
+
+	if err != nil {
+		result.Error = err.Error()
+		if !warmup.Active {
+			result.Emit(ctx, c.vu, c.backend)
+		}
+		fmt.Printf("[%s] query error: %v\n", c.backend, err)
+		return result.ToMap()
+	}
+
+	result.Hits = int64(hits)
+	if !warmup.Active {
+		result.Emit(ctx, c.vu, c.backend)
+	}
+	return result.ToMap()
+}
+
+// documentRows preserves every field in a batch, including fields absent from
+// its first document. Missing attributes become null in the rectangular rows.
+func documentRows(docs []map[string]interface{}) ([]string, [][]any) {
+	fields := make(map[string]bool)
+	for _, doc := range docs {
+		for col := range doc {
+			fields[col] = true
+		}
+	}
+	cols := make([]string, 0, len(fields))
+	for col := range fields {
+		cols = append(cols, col)
+	}
+	sort.Strings(cols)
+	rows := make([][]any, len(docs))
+	for i, doc := range docs {
+		rows[i] = make([]any, len(cols))
+		for j, col := range cols {
+			rows[i][j] = doc[col]
+		}
+	}
+	return cols, rows
+}
+
+// InsertBatch inserts documents and emits metrics.
+func (c *K6Client) InsertBatch(table string, docs []map[string]interface{}) map[string]interface{} {
+	c.emitInitMetrics()
+	warmup := metrics.GetWarmupPhase(c.vu)
+
+	if len(docs) == 0 {
+		return map[string]interface{}{"rows": 0, "latencyMs": 0.0}
+	}
+
+	cols, rows := documentRows(docs)
+
+	ctx, cancel := c.operationContext(warmup, c.timeout)
+	defer cancel()
+	start := time.Now()
+	count, err := c.driver.Insert(ctx, table, cols, rows)
+	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
+	result := &metrics.IngestResult{LatencyMs: latencyMs}
+	if c.finishWarmup(warmup) {
+		return map[string]interface{}{
+			"rows":            0,
+			"latencyMs":       latencyMs,
+			"deadlineReached": true,
+		}
+	}
+
+	if err != nil {
+		result.Error = err.Error()
+		if !warmup.Active {
+			result.Emit(ctx, c.vu, c.backend)
+		}
+		fmt.Printf("[%s] insert error: %v\n", c.backend, err)
+		return result.ToMap()
+	}
+
+	result.Rows = count
+	if !warmup.Active {
+		result.Emit(ctx, c.vu, c.backend)
+	}
+	return result.ToMap()
+}
+
+// Insert inserts a single document and emits metrics.
+func (c *K6Client) Insert(table string, doc map[string]interface{}) map[string]interface{} {
+	return c.InsertBatch(table, []map[string]interface{}{doc})
+}
+
+// UpdateBatch updates documents and emits metrics.
+// The id or _id column is used as the key for matching existing rows.
+func (c *K6Client) UpdateBatch(table string, docs []map[string]interface{}) map[string]interface{} {
+	c.emitInitMetrics()
+	warmup := metrics.GetWarmupPhase(c.vu)
+
+	if len(docs) == 0 {
+		return map[string]interface{}{"rows": 0, "latencyMs": 0.0}
+	}
+
+	allCols, rows := documentRows(docs)
+	var keyCols []string
+	for _, col := range allCols {
+		if col == "id" || col == "_id" {
+			keyCols = append(keyCols, col)
+		}
+	}
+
+	ctx, cancel := c.operationContext(warmup, c.timeout)
+	defer cancel()
+	start := time.Now()
+	count, err := c.driver.Update(ctx, table, keyCols, allCols, rows)
+	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
+	result := &metrics.UpdateResult{Rows: count, LatencyMs: latencyMs}
+	if c.finishWarmup(warmup) {
+		return map[string]interface{}{
+			"rows":            0,
+			"latencyMs":       latencyMs,
+			"deadlineReached": true,
+		}
+	}
+
+	if err != nil {
+		result.Error = err.Error()
+		if !warmup.Active {
+			result.Emit(ctx, c.vu, c.backend)
+		}
+		fmt.Printf("[%s] update error: %v\n", c.backend, err)
+		return result.ToMap()
+	}
+
+	if !warmup.Active {
+		result.Emit(ctx, c.vu, c.backend)
+	}
+	return result.ToMap()
+}
+
+// Update updates a single document and emits metrics.
+func (c *K6Client) Update(table string, doc map[string]interface{}) map[string]interface{} {
+	return c.UpdateBatch(table, []map[string]interface{}{doc})
+}
+
+// Close closes the underlying driver.
+func (c *K6Client) Close() {
+	c.driver.Close()
+}
+
+// normalizeSchemaType lowercases a schema type and drops any type modifier,
+// so "vector(768)" and "VARCHAR(255)" match their base type names.
+func normalizeSchemaType(schemaType string) string {
+	normalized := strings.ToLower(strings.TrimSpace(schemaType))
+	if i := strings.IndexByte(normalized, '('); i >= 0 {
+		normalized = strings.TrimSpace(normalized[:i])
+	}
+	return normalized
+}
+
+func vectorDimension(schemaType string) (int, bool, error) {
+	if normalizeSchemaType(schemaType) != "vector" {
+		return 0, false, nil
+	}
+
+	start := strings.IndexByte(schemaType, '(')
+	if start < 0 {
+		return 0, false, nil
+	}
+	end := strings.IndexByte(schemaType[start+1:], ')')
+	if end < 0 {
+		return 0, false, fmt.Errorf("invalid vector type %q: missing closing parenthesis", schemaType)
+	}
+	end += start + 1
+	if trailing := strings.TrimSpace(schemaType[end+1:]); trailing != "" {
+		return 0, false, fmt.Errorf("invalid vector type %q: unexpected trailing text %q", schemaType, trailing)
+	}
+
+	rawDim := strings.TrimSpace(schemaType[start+1 : end])
+	dim, err := strconv.Atoi(rawDim)
+	if err != nil || dim < 1 {
+		return 0, false, fmt.Errorf("invalid vector dimension %q in %q", rawDim, schemaType)
+	}
+	return dim, true, nil
+}
+
+func validateVectorDimension(length int, schemaType string) error {
+	dim, ok, err := vectorDimension(schemaType)
+	if err != nil || !ok {
+		return err
+	}
+	if length != dim {
+		return fmt.Errorf("vector dimension mismatch: schema %s expects %d values, got %d", schemaType, dim, length)
+	}
+	return nil
+}
+
+func vectorColumns(schema *Schema) []string {
+	if schema == nil {
+		return nil
+	}
+	cols := make([]string, 0)
+	for col, schemaType := range schema.Columns {
+		if normalizeSchemaType(schemaType) == "vector" {
+			cols = append(cols, col)
+		}
+	}
+	sort.Strings(cols)
+	return cols
+}
+
+func backendSupportsVectorColumns(name string) bool {
+	switch name {
+	case "postgres":
+		return true
+	case "elasticsearch", "opensearch", "turbopuffer":
+		// HTTP backends accept typed vectors, with vector types configured
+		// in their backend-specific schema.
+		return true
+	default:
+		return false
+	}
+}
+
+// convertValue converts a raw CSV string value to the appropriate Go type based on schema type.
+func convertValue(rawValue, schemaType string) (any, error) {
+	// Strip null bytes (invalid in PostgreSQL text)
+	rawValue = strings.ReplaceAll(rawValue, "\x00", "")
+
+	normalizedType := normalizeSchemaType(schemaType)
+	if rawValue == "" {
+		switch normalizedType {
+		case "text", "varchar", "char", "character varying", "string":
+			return "", nil
+		default:
+			return nil, nil
+		}
+	}
+
+	switch normalizedType {
+	case "bigint", "int8":
+		v, err := strconv.ParseInt(rawValue, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid bigint %q: %w", rawValue, err)
+		}
+		return v, nil
+
+	case "integer", "int", "int4":
+		v, err := strconv.ParseInt(rawValue, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid integer %q: %w", rawValue, err)
+		}
+		return int32(v), nil
+
+	case "smallint", "int2":
+		v, err := strconv.ParseInt(rawValue, 10, 16)
+		if err != nil {
+			return nil, fmt.Errorf("invalid smallint %q: %w", rawValue, err)
+		}
+		return int16(v), nil
+
+	case "boolean", "bool":
+		switch strings.ToLower(rawValue) {
+		case "true", "t", "1":
+			return true, nil
+		case "false", "f", "0":
+			return false, nil
+		default:
+			return nil, fmt.Errorf("invalid boolean %q", rawValue)
+		}
+
+	case "bigint[]", "int8[]":
+		var arr []int64
+		if err := json.Unmarshal([]byte(rawValue), &arr); err != nil {
+			return nil, fmt.Errorf("invalid bigint array %q: %w", rawValue, err)
+		}
+		return arr, nil
+
+	case "integer[]", "int[]", "int4[]":
+		var arr []int32
+		if err := json.Unmarshal([]byte(rawValue), &arr); err != nil {
+			return nil, fmt.Errorf("invalid integer array %q: %w", rawValue, err)
+		}
+		return arr, nil
+
+	case "text[]", "varchar[]":
+		var arr []string
+		if err := json.Unmarshal([]byte(rawValue), &arr); err != nil {
+			return nil, fmt.Errorf("invalid text array %q: %w", rawValue, err)
+		}
+		return arr, nil
+
+	case "timestamp", "timestamptz":
+		formats := []string{
+			"2006-01-02 15:04:05",
+			"2006-01-02T15:04:05Z",
+			"2006-01-02T15:04:05-07:00",
+			"2006-01-02",
+		}
+		for _, format := range formats {
+			if t, err := time.Parse(format, rawValue); err == nil {
+				return t, nil
+			}
+		}
+		return nil, fmt.Errorf("invalid timestamp %q", rawValue)
+
+	case "jsonb", "json":
+		var obj interface{}
+		if err := json.Unmarshal([]byte(rawValue), &obj); err != nil {
+			return nil, fmt.Errorf("invalid json %q: %w", rawValue, err)
+		}
+		return obj, nil
+
+	case "vector":
+		var arr []float32
+		if err := json.Unmarshal([]byte(rawValue), &arr); err != nil {
+			return nil, fmt.Errorf("invalid vector %q: %w", rawValue, err)
+		}
+		if err := validateVectorDimension(len(arr), schemaType); err != nil {
+			return nil, err
+		}
+		return arr, nil
+
+	default:
+		// text, varchar, etc - return as-is
+		return rawValue, nil
+	}
+}
+
+func schemaColumnsInOrder(schema *Schema, headers []string) ([]string, error) {
+	if schema == nil || len(schema.Columns) == 0 {
+		return nil, fmt.Errorf("schema has no columns")
+	}
+
+	seen := make(map[string]struct{}, len(headers))
+	cols := make([]string, 0, len(headers))
+	for _, header := range headers {
+		if _, ok := schema.Columns[header]; ok {
+			cols = append(cols, header)
+			seen[header] = struct{}{}
+		}
+	}
+
+	var missing []string
+	for col := range schema.Columns {
+		if _, ok := seen[col]; !ok {
+			missing = append(missing, col)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return nil, fmt.Errorf("schema columns missing from data file: %s", strings.Join(missing, ", "))
+	}
+	if len(cols) == 0 {
+		return nil, fmt.Errorf("no schema columns matched data file headers")
+	}
+
+	return cols, nil
+}
+
+// CLILoader wraps a Driver for CLI bulk loading.
+type CLILoader struct {
+	driver     Driver
+	name       string
+	driverType string // protocol identity, separate from the backend name
+	fileType   string // "sql" or "json"
+	connString string
+	factory    DriverFactory
+}
+
+// NewCLILoader creates a CLI loader that wraps a driver.
+func NewCLILoader(name, fileType, connString string, factory DriverFactory) *CLILoader {
+	return &CLILoader{
+		name:       name,
+		driverType: name,
+		fileType:   fileType,
+		connString: connString,
+		factory:    factory,
+	}
+}
+
+// NewBackendCLILoader separates dataset directory/label from driver identity.
+func NewBackendCLILoader(name, driverType, fileType, connString string, factory DriverFactory) *CLILoader {
+	l := NewCLILoader(name, fileType, connString, factory)
+	l.driverType = driverType
+	return l
+}
+
+func (l *CLILoader) driverName() string {
+	if l.driverType != "" {
+		return l.driverType
+	}
+	return l.name
+}
+
+func (l *CLILoader) ensureDriver() error {
+	if l.driver != nil {
+		return nil
+	}
+	driver, err := l.factory(l.connString)
+	if err != nil {
+		return err
+	}
+	l.driver = driver
+	return nil
+}
+
+func (l *CLILoader) Name() string { return l.name }
+
+// ValidateSchema checks whether this backend can load every schema column type,
+// covering each table of a multi-table schema.
+func (l *CLILoader) ValidateSchema(schema *Schema) error {
+	if schema == nil {
+		return fmt.Errorf("schema has no columns")
+	}
+	if err := schema.Validate(); err != nil {
+		return err
+	}
+	for _, ts := range schema.TableSchemas() {
+		if err := l.validateTableSchema(ts); err != nil {
+			if len(schema.Tables) > 0 {
+				return fmt.Errorf("table %q: %w", ts.Table, err)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *CLILoader) validateTableSchema(schema *Schema) error {
+	if len(schema.Columns) == 0 {
+		return fmt.Errorf("schema has no columns")
+	}
+	if cols := vectorColumns(schema); len(cols) > 0 && !backendSupportsVectorColumns(l.driverName()) {
+		return fmt.Errorf("backend %q does not support vector columns: %s (supported backends: postgres, elasticsearch, opensearch, turbopuffer)",
+			l.name, strings.Join(cols, ", "))
+	}
+	for col, schemaType := range schema.Columns {
+		if _, _, err := vectorDimension(schemaType); err != nil {
+			return fmt.Errorf("column %q: %w", col, err)
+		}
+	}
+	return nil
+}
+
+// TypeReloader is implemented by drivers whose connections cache database type
+// information that can be invalidated by pre scripts (e.g. CREATE EXTENSION).
+type TypeReloader interface {
+	ReloadTypes(ctx context.Context) error
+}
+
+// LoadWorkerFactory preserves driver-local setup when creating loader workers.
+// Workers must not replay pre scripts, which can delete existing data.
+type LoadWorkerFactory interface {
+	NewLoadWorker() (Driver, error)
+}
+
+func (l *CLILoader) RunPre(ctx context.Context, dir string, schema *Schema) error {
+	if err := l.execFile(ctx, filepath.Join(dir, "pre."+l.fileType)); err != nil {
+		return err
+	}
+	if reloader, ok := l.driver.(TypeReloader); ok {
+		return reloader.ReloadTypes(ctx)
+	}
+	return nil
+}
+
+func (l *CLILoader) RunPost(ctx context.Context, dir string, schema *Schema) error {
+	return l.execFile(ctx, filepath.Join(dir, "post."+l.fileType))
+}
+
+func (l *CLILoader) execFile(ctx context.Context, path string) error {
+	if err := l.ensureDriver(); err != nil {
+		return err
+	}
+
+	// #nosec G304 -- Dataset CSV and setup script paths are selected by the local loader CLI.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // Optional file
+		}
+		return err
+	}
+
+	return l.driver.Exec(ctx, string(data))
+}
+
+func (l *CLILoader) Load(ctx context.Context, schema *Schema, dataPath string, batchSize int, workers int) (int, error) {
+	if err := l.ValidateSchema(schema); err != nil {
+		return 0, err
+	}
+	if err := l.ensureDriver(); err != nil {
+		return 0, err
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	if batchSize < 1 {
+		batchSize = 1
+	}
+
+	source, err := OpenRowSource(dataPath, schema)
+	if err != nil {
+		return 0, err
+	}
+	defer source.Close()
+
+	cols := source.Columns()
+
+	target := schema.Table
+	if target == "" {
+		target = "documents"
+	}
+
+	// Reuse loader driver for worker 0 and create additional drivers as needed.
+	drivers := make([]Driver, 0, workers)
+	drivers = append(drivers, l.driver)
+	for i := 1; i < workers; i++ {
+		factory := func() (Driver, error) { return l.factory(l.connString) }
+		if provider, ok := l.driver.(LoadWorkerFactory); ok {
+			factory = provider.NewLoadWorker
+		}
+		d, err := factory()
+		if err != nil {
+			for j := 1; j < len(drivers); j++ {
+				drivers[j].Close()
+			}
+			return 0, err
+		}
+		drivers = append(drivers, d)
+	}
+	defer func() {
+		for i := 1; i < len(drivers); i++ {
+			drivers[i].Close()
+		}
+	}()
+
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	batchCh := make(chan [][]any, workers*2)
+	var wg sync.WaitGroup
+	var totalMu sync.Mutex
+	total := 0
+	var firstErr error
+	var errOnce sync.Once
+	setErr := func(e error) {
+		if e == nil {
+			return
+		}
+		errOnce.Do(func() {
+			firstErr = e
+			cancel()
+		})
+	}
+
+	for _, d := range drivers {
+		driver := d
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for rows := range batchCh {
+				n, err := driver.Insert(workerCtx, target, cols, rows)
+				if err != nil {
+					setErr(err)
+					return
+				}
+				totalMu.Lock()
+				total += n
+				totalMu.Unlock()
+			}
+		}()
+	}
+
+	sendBatch := func(rows [][]any) bool {
+		if len(rows) == 0 {
+			return true
+		}
+		rowsCopy := make([][]any, len(rows))
+		copy(rowsCopy, rows)
+		select {
+		case <-workerCtx.Done():
+			return false
+		case batchCh <- rowsCopy:
+			return true
+		}
+	}
+
+	batch := make([][]any, 0, batchSize)
+	for {
+		row, err := source.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			setErr(err)
+			break
+		}
+		batch = append(batch, row)
+
+		if len(batch) >= batchSize {
+			if !sendBatch(batch) {
+				break
+			}
+			batch = make([][]any, 0, batchSize)
+		}
+	}
+
+	if workerCtx.Err() == nil && len(batch) > 0 {
+		sendBatch(batch)
+	}
+	close(batchCh)
+	wg.Wait()
+
+	if firstErr != nil {
+		return total, firstErr
+	}
+	if workerCtx.Err() != nil {
+		return total, workerCtx.Err()
+	}
+
+	return total, nil
+}
+
+func safeSQLIdentifier(name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("empty identifier")
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		isLower := c >= 'a' && c <= 'z'
+		isUpper := c >= 'A' && c <= 'Z'
+		isDigit := c >= '0' && c <= '9'
+		isUnderscore := c == '_'
+		if i == 0 {
+			if !(isLower || isUpper || isUnderscore) {
+				return "", fmt.Errorf("invalid identifier: %q", name)
+			}
+		} else if !(isLower || isUpper || isDigit || isUnderscore) {
+			return "", fmt.Errorf("invalid identifier: %q", name)
+		}
+	}
+	return name, nil
+}
+
+func (l *CLILoader) Drop(ctx context.Context, schema *Schema) error {
+	if err := l.ensureDriver(); err != nil {
+		return err
+	}
+
+	if schema == nil {
+		return l.dropTarget(ctx, "documents")
+	}
+	for _, ts := range schema.TableSchemas() {
+		target := ts.Table
+		if target == "" {
+			target = "documents"
+		}
+		if err := l.dropTarget(ctx, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *CLILoader) dropTarget(ctx context.Context, target string) error {
+	switch l.fileType {
+	case "sql":
+		table, err := safeSQLIdentifier(target)
+		if err != nil {
+			return err
+		}
+		return l.driver.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", table))
+	case "json":
+		switch l.driverName() {
+		case "turbopuffer":
+			data, err := json.Marshal([]map[string]any{{"method": "DELETE", "namespace": target}})
+			if err != nil {
+				return err
+			}
+			return l.driver.Exec(ctx, string(data))
+		case "elasticsearch", "opensearch":
+			ops := []map[string]interface{}{
+				{
+					"method": "DELETE",
+					"index":  target,
+				},
+			}
+			data, err := json.Marshal(ops)
+			if err != nil {
+				return err
+			}
+			return l.driver.Exec(ctx, string(data))
+		case "mongodb":
+			database := "benchmark"
+			if provider, ok := l.driver.(interface{ DatabaseName() string }); ok {
+				if name := provider.DatabaseName(); name != "" {
+					database = name
+				}
+			}
+			cfg := map[string]interface{}{
+				"database":   database,
+				"collection": target,
+				"drop":       true,
+			}
+			data, err := json.Marshal(cfg)
+			if err != nil {
+				return err
+			}
+			return l.driver.Exec(ctx, string(data))
+		default:
+			return fmt.Errorf("drop not supported for backend %s", l.name)
+		}
+	default:
+		return fmt.Errorf("unsupported backend file type %s", l.fileType)
+	}
+}
+
+func (l *CLILoader) Close() error {
+	if l.driver != nil {
+		return l.driver.Close()
+	}
+	return nil
+}

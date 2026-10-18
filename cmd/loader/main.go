@@ -23,16 +23,16 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	_ "github.com/paradedb/benchmarker" // triggers backend init() via backends.go imports
+	_ "github.com/paradedb/benchmarker" // triggers driver init() via backends.go imports
 	"github.com/paradedb/benchmarker/backends"
-	"github.com/paradedb/benchmarker/profiles"
+	"github.com/paradedb/benchmarker/drivers"
 	"gopkg.in/yaml.v3"
 )
 
 func main() {
 	loadCmd := flag.NewFlagSet("load", flag.ContinueOnError)
-	loadBackend := loadCmd.String("backend", "", "Specific backend ("+strings.Join(profiles.DefaultNames(), ", ")+")")
-	loadProfile := profileFlags(loadCmd)
+	loadBackend := loadCmd.String("backend", "", "Specific backend ("+strings.Join(backends.DefaultNames(), ", ")+")")
+	loadOptions := backendFlags(loadCmd)
 	loadBatchSize := loadCmd.Int("batch-size", 10000, "Batch size for bulk loading")
 	loadWorkers := loadCmd.Int("workers", 1, "Number of parallel workers")
 	loadPreOnly := loadCmd.Bool("pre-only", false, "Run pre and data load; skip post")
@@ -40,7 +40,7 @@ func main() {
 
 	dropCmd := flag.NewFlagSet("drop", flag.ContinueOnError)
 	dropBackend := dropCmd.String("backend", "", "Specific backend to drop")
-	dropProfile := profileFlags(dropCmd)
+	dropOptions := backendFlags(dropCmd)
 
 	pullCmd := flag.NewFlagSet("pull", flag.ContinueOnError)
 	pullDataset := pullCmd.String("dataset", "", "Dataset name (creates ./datasets/<name>/)")
@@ -82,7 +82,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		runLoad(loadCmd.Arg(0), *loadBackend, *loadBatchSize, *loadWorkers, loadMode, *loadProfile)
+		runLoad(loadCmd.Arg(0), *loadBackend, *loadBatchSize, *loadWorkers, loadMode, *loadOptions)
 
 	case "drop":
 		if err := dropCmd.Parse(os.Args[2:]); err != nil {
@@ -101,7 +101,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Usage: loader drop [--backend <name>] <dataset-dir>")
 			os.Exit(1)
 		}
-		runDrop(dropCmd.Arg(0), *dropBackend, *dropProfile)
+		runDrop(dropCmd.Arg(0), *dropBackend, *dropOptions)
 
 	case "pull":
 		if err := pullCmd.Parse(os.Args[2:]); err != nil {
@@ -148,13 +148,13 @@ Commands:
   pull    Download dataset from S3 to ./datasets/<name>/ (auto-extracts .tar.gz/.tgz and .csv.gz objects)
   help    Show this help message
 
-Default profiles:
-  ` + strings.Join(profiles.DefaultNames(), ", ") + `
+Default backends:
+  ` + strings.Join(backends.DefaultNames(), ", ") + `
 
 Options:
-  --backend <name>           Load/drop a profile (default: historical targets)
-  --connection <url>         Override the selected profile/backend connection
-  --profiles-dir <path>     Global manifests (default: ./profiles, then embedded)
+  --backend <name>           Load/drop a backend (default: historical targets)
+  --connection <url>         Override the selected backend connection
+  --backends-dir <path>      Global manifests (default: ./backends, then embedded)
   --batch-size <n>           Rows per batch (default: 10000)
   --workers <n>              Parallel workers (default: 1)
   --pre-only                 Run pre scripts and load data; skip post scripts
@@ -189,27 +189,27 @@ Examples:
   PARADEDB_URL=postgres://user:pass@host:5432/db loader load --backend paradedb ./datasets/sample`)
 }
 
-type profileOptions struct {
+type backendOptions struct {
 	connection string
 	dir        string
 }
 
-func profileFlags(fs *flag.FlagSet) *profileOptions {
-	opts := &profileOptions{}
-	fs.StringVar(&opts.connection, "connection", "", "Connection override for selected backend/profile")
-	fs.StringVar(&opts.dir, "profiles-dir", "", "Global profile manifest directory")
+func backendFlags(fs *flag.FlagSet) *backendOptions {
+	opts := &backendOptions{}
+	fs.StringVar(&opts.connection, "connection", "", "Connection override for selected backend")
+	fs.StringVar(&opts.dir, "backends-dir", "", "Global backend manifest directory")
 	return opts
 }
 
-func selectLoaders(dataset, name string, options profileOptions) ([]*backends.CLILoader, error) {
+func selectLoaders(dataset, name string, options backendOptions) ([]*drivers.CLILoader, error) {
 	if name == "" {
 		if options.connection != "" || options.dir != "" {
-			return nil, fmt.Errorf("--connection and --profiles-dir require --backend")
+			return nil, fmt.Errorf("--connection and --backends-dir require --backend")
 		}
 		// Retain the historical default targets, including ParadeDB, without
-		// registering extension profiles as separate database drivers.
-		var loaders []*backends.CLILoader
-		for _, name := range profiles.DefaultNames() {
+		// registering extension backends as separate database drivers.
+		var loaders []*drivers.CLILoader
+		for _, name := range backends.DefaultNames() {
 			selected, err := selectLoaders(dataset, name, options)
 			if err != nil {
 				return nil, err
@@ -218,21 +218,19 @@ func selectLoaders(dataset, name string, options profileOptions) ([]*backends.CL
 		}
 		return loaders, nil
 	}
-	profile, err := profiles.Resolve(name, dataset, options.dir)
+	backend, err := backends.Resolve(name, dataset, options.dir)
 	if err != nil {
 		return nil, err
 	}
-	connection, err := profile.ResolveConnection(options.connection)
-	// Existing drivers may resolve an empty connection themselves (for example,
-	// Turbopuffer uses TURBOPUFFER_REGION when no URL is supplied).
-	if err != nil && !profiles.LegacyType(name) {
-		return nil, err
-	}
-	loader, err := profile.CLILoader(connection)
+	connection, err := backend.ResolveConnection(options.connection)
 	if err != nil {
 		return nil, err
 	}
-	return []*backends.CLILoader{loader}, nil
+	loader, err := backend.CLILoader(connection)
+	if err != nil {
+		return nil, err
+	}
+	return []*drivers.CLILoader{loader}, nil
 }
 
 type loadMode int
@@ -256,7 +254,7 @@ func selectLoadMode(preOnly, postOnly bool) (loadMode, error) {
 	return loadAll, nil
 }
 
-func runLoad(datasetDir string, backendName string, batchSize int, workers int, mode loadMode, options profileOptions) {
+func runLoad(datasetDir string, backendName string, batchSize int, workers int, mode loadMode, options backendOptions) {
 	schema, err := loadSchema(datasetDir)
 	if err != nil {
 		fmt.Printf("Error loading schema: %v\n", err)
@@ -282,7 +280,7 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int, 
 	overallFailed := false
 
 	for _, b := range loaders {
-		func(loader *backends.CLILoader) {
+		func(loader *drivers.CLILoader) {
 			defer func() {
 				if err := loader.Close(); err != nil {
 					fmt.Printf("Warning: failed to close %s: %v\n", loader.Name(), err)
@@ -364,7 +362,7 @@ func runLoad(datasetDir string, backendName string, batchSize int, workers int, 
 	fmt.Println("\nDone!")
 }
 
-func runDrop(datasetDir string, backendName string, options profileOptions) {
+func runDrop(datasetDir string, backendName string, options backendOptions) {
 	schema, err := loadSchema(datasetDir)
 	if err != nil {
 		fmt.Printf("Error loading schema: %v\n", err)
@@ -439,12 +437,12 @@ func locateTableDataFile(datasetDir, table string) (string, error) {
 
 // tableData pairs one table's schema with the data file it loads from.
 type tableData struct {
-	schema *backends.Schema
+	schema *drivers.Schema
 	path   string
 	label  string
 }
 
-func resolveTableData(datasetDir string, schema *backends.Schema) ([]tableData, error) {
+func resolveTableData(datasetDir string, schema *drivers.Schema) ([]tableData, error) {
 	if len(schema.Tables) == 0 {
 		path, err := locateDataFile(datasetDir)
 		if err != nil {
@@ -463,7 +461,7 @@ func resolveTableData(datasetDir string, schema *backends.Schema) ([]tableData, 
 	return out, nil
 }
 
-func loadSchema(datasetDir string) (*backends.Schema, error) {
+func loadSchema(datasetDir string) (*drivers.Schema, error) {
 	schemaPath := filepath.Join(datasetDir, "schema.yaml")
 	// #nosec G304 -- Schema path is selected by the local loader CLI.
 	data, err := os.ReadFile(schemaPath)
@@ -471,7 +469,7 @@ func loadSchema(datasetDir string) (*backends.Schema, error) {
 		return nil, fmt.Errorf("reading schema.yaml: %w", err)
 	}
 
-	var schema backends.Schema
+	var schema drivers.Schema
 	if err := yaml.Unmarshal(data, &schema); err != nil {
 		return nil, fmt.Errorf("parsing schema.yaml: %w", err)
 	}

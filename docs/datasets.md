@@ -35,33 +35,34 @@ Each backend subdirectory contains pre/post scripts that the loader runs before 
 
 The `k6/` directory holds your benchmark scripts and any supporting data like search terms.
 
-## Profiles
+## Backends
 
-A backend supplies the database driver. A profile supplies an index/query
-strategy, its connection and container defaults, and its dataset scripts. For
-example, both the `postgres` and `paradedb` profiles use the `postgres` driver.
-Existing dataset directory names remain valid.
+A backend is a named benchmark target with a driver, connection and container
+defaults, and dataset scripts. A driver implements database communication. For
+example, `postgres`, `paradedb`, `pg_vectorsearch`, and `vectorchord` are separate
+backends that all use the `postgres` driver.
 
-Select a profile with `loader load --backend paradedb ./datasets/sample` or
-`{ type: "paradedb" }` in a k6 backend block. The profile
-name selects `datasets/<dataset>/<profile>/pre.sql` and `post.sql` (or `.json`
+Select a backend with `loader load --backend paradedb ./datasets/sample` or
+`{ type: "paradedb" }` in a k6 backend block. The backend
+name selects `datasets/<dataset>/<backend>/pre.sql` and `post.sql` (or `.json`
 for JSON-based drivers). Query SQL remains in your k6 script.
 
-Global manifests live in `profiles/<name>.yaml`. Built-in manifests are also
+Global manifests live in `backends/<name>.yaml`. Built-in manifests are also
 embedded in the binaries, so a checkout is not required at runtime. An external
 manifest replaces the embedded manifest of the same name. Lookup uses
-`./profiles` relative to the process working directory, or `--profiles-dir`
-(CLI) / `profilesDir` (k6) when specified. A missing explicitly selected
-directory is an error. Registered third-party backends without a manifest can
-still be selected as profiles using their registered defaults.
+`./backends` relative to the process working directory, or `--backends-dir`
+(CLI) / `backendsDir` (k6) when specified. A missing explicitly selected
+directory is an error. Every backend requires an external or embedded manifest;
+registering a driver alone does not make it runnable. Dataset overrides also
+require a global or embedded base manifest.
 
-An optional `datasets/<dataset>/<profile>/profile.yaml` replaces individual
+An optional `datasets/<dataset>/<backend>/backend.yaml` replaces individual
 top-level fields from the global manifest. Nested fields are **not** deep-merged:
 an override containing `extras` replaces the entire `extras` block. Empty
 strings and empty lists are honored; `container: ""` disables Docker metrics.
 
 ```yaml
-backend: postgres
+driver: postgres
 container: paradedb
 connection: postgres://postgres:postgres@localhost:5432/benchmark
 envVar: PARADEDB_URL
@@ -77,17 +78,17 @@ extras:
 
 | Field         | Default                                                                | Meaning                                                               |
 | ------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `backend`     | Required                                                               | Registered driver name                                                |
-| `container`   | Profile name                                                           | Docker container, or `""` to disable Docker metrics                   |
+| `driver`      | Required                                                               | Registered driver name                                                |
+| `container`   | Backend name                                                           | Docker container, or `""` to disable Docker metrics                   |
 | `connection`  | None                                                                   | Connection used when no explicit value or environment override is set |
-| `envVar`      | Uppercase profile name, hyphens replaced with underscores, plus `_URL` | Connection environment variable; `""` disables it                     |
+| `envVar`      | Uppercase backend name, hyphens replaced with underscores, plus `_URL` | Connection environment variable; `""` disables it                     |
 | `description` | Empty                                                                  | Human-readable description                                            |
 | `color`       | Dashboard palette                                                      | Chart color; explicit k6 colors take precedence                       |
 | `extras`      | Empty                                                                  | Optional PostgreSQL configuration capture and telemetry settings      |
 
-Profile manifests are the source of default dashboard colors. Legacy backend
-configurations use the selected manifest; saved results without colors use
-the embedded manifest's color; explicit script colors take precedence. Profiles without a color use
+Backend manifests are the source of default dashboard colors. Runs use the
+selected manifest; saved results without colors use
+the embedded manifest's color; explicit script colors take precedence. Backends without a color use
 the dashboard's generic palette.
 
 PostgreSQL extras support:
@@ -105,25 +106,30 @@ PostgreSQL extras support:
 
 The embedded ParadeDB manifest also captures segment counts and all `paradedb.*`
 settings, preserving the existing result keys and telemetry series. The
-`vectorsearch` manifest captures the pg_vectorsearch version and `prism.*`
+`pg_vectorsearch` manifest captures the pg_vectorsearch version and `prism.*`
 settings, and `vectorchord` captures extension versions and `vchord*` settings.
-All three select `backend: postgres` and declare their index access methods for
-telemetry. The [Cohere example](../datasets/cohere-1m/README.md#postgresql-profile-comparison)
+All three select `driver: postgres` and declare their index access methods for
+telemetry. The [Cohere example](../datasets/cohere-1m/README.md#postgresql-backend-comparison)
 shows them together.
 
 The existing sample dataset uses the `postgres` directory for native FTS.
 `postgresfts` is also available as a manifest for datasets using that directory
 name; it retains `POSTGRES_URL` and the `postgres` container default.
 
-### Compatibility
+### Configuration and migration
 
-Existing type names, shorthand strings, `--backend` selections, result keys,
-and dataset script paths remain supported. Every selection now resolves a
-profile; no ParadeDB driver registration is needed. Built-in defaults work
-without a checkout. For the original k6 types, environment connections still
-need an explicit `__ENV` value and custom aliases still default their container
-to the alias. New profile types use their manifest's environment and container
-defaults. External and dataset manifests can explicitly override the defaults.
+All backends use the same connection precedence: explicit connection, then the
+manifest's environment variable, then its default connection. A custom alias
+changes the result label; the container still comes from the backend manifest
+unless explicitly overridden. Turbopuffer can resolve its endpoint from
+`TURBOPUFFER_REGION` when no connection URL is supplied.
+
+Manifests use `driver:` and live under `backends/`. Dataset overrides are named
+`backend.yaml`; external directories use `--backends-dir` (CLI) or `backendsDir`
+(k6). The Timescale backend is named `pg_vectorsearch`, including its dataset
+subdirectory, Compose service, and `PG_VECTORSEARCH_URL` /
+`PG_VECTORSEARCH_CONTAINER` variables. Rebuild binaries after migrating; embedded
+manifests work without a checkout. Driver registration cannot replace a manifest.
 
 ## schema.yaml
 
@@ -195,7 +201,7 @@ becomes the document id rather than a source field.
 Consistency caveat for cross-backend comparisons: the Postgres-family backends
 are transactional and read-your-writes, while Elasticsearch and OpenSearch are
 near-real-time — documents only become searchable after a refresh, and there
-are no multi-document transactions. That makes them a fit when the profile is
+are no multi-document transactions. That makes them a fit when the workload is
 append-only and absolute correctness of reads isn't required; benchmark
 numbers implicitly compare against that weaker consistency model, so loads
 always refresh (see each dataset's `post.json`) before queries run.
@@ -215,10 +221,10 @@ the matching width — e.g. a `smallint` schema column should be `SMALLINT` in
 Postgres-family `pre.sql` and `Int16` in ClickHouse.
 
 The k6 `db.loader().openDocuments()` helper is separate from the CLI loader: it
-is still a CSV-only reader for ingest and update profiles and does not apply
+is still a CSV-only reader for ingest and update workloads and does not apply
 `schema.yaml` type conversion. For typed streaming reads from CSV, Parquet, or
 Parquet shard directories, use `db.loader().openDocumentStream(path, {schema})`.
-See [streaming profiles](scripting.md#streaming-csv-and-parquet-profiles).
+See [streaming workloads](scripting.md#streaming-csv-and-parquet-workloads).
 
 ## Pre/Post Scripts
 

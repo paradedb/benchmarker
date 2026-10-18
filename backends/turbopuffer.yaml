@@ -1,0 +1,5 @@
+driver: turbopuffer
+container: ""
+envVar: TURBOPUFFER_URL
+description: turbopuffer
+color: "#FDBA74"

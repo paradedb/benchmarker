@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/paradedb/benchmarker/backends"
-	"github.com/paradedb/benchmarker/profiles"
+	"github.com/paradedb/benchmarker/drivers"
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 )
@@ -375,7 +375,7 @@ func docsToRows(docs []map[string]interface{}, columns []string) [][]any {
 }
 
 // loadWithDriver is the generic loading function that works with any Driver.
-func loadWithDriver(driver backends.Driver, tableName, filePath, dataset, backendDir string, columns []string, batchSize int) map[string]interface{} {
+func loadWithDriver(driver drivers.Driver, tableName, filePath, dataset, backendDir string, columns []string, batchSize int) map[string]interface{} {
 	ctx := context.Background()
 	start := time.Now()
 
@@ -434,8 +434,8 @@ func loadWithDriver(driver backends.Driver, tableName, filePath, dataset, backen
 	}
 }
 
-// loadWithDriverJSON is the generic loading function for JSON-config backends.
-func loadWithDriverJSON(driver backends.Driver, tableName, filePath, dataset, backendDir string, columns []string, batchSize int) map[string]interface{} {
+// loadWithDriverJSON is the generic loading function for JSON-config drivers.
+func loadWithDriverJSON(driver drivers.Driver, tableName, filePath, dataset, backendDir string, columns []string, batchSize int) map[string]interface{} {
 	ctx := context.Background()
 	start := time.Now()
 
@@ -512,24 +512,22 @@ func (l *Loader) Load(backendName, connectionString string, config map[string]in
 
 	filePath = l.resolvePath(filePath)
 	dataset = l.resolvePath(dataset)
-	dir, _ := config["profilesDir"].(string)
-	profile, err := profiles.Resolve(backendName, dataset, dir)
+	dir, _ := config["backendsDir"].(string)
+	backend, err := backends.Resolve(backendName, dataset, dir)
 	if err != nil {
 		return map[string]interface{}{"error": err.Error()}
 	}
-	cfg, err := profile.BackendConfig()
+	cfg, err := backend.DriverConfig()
 	if err != nil {
 		return map[string]interface{}{"error": err.Error()}
 	}
-	if !profiles.LegacyType(backendName) {
-		connectionString, err = profile.ResolveConnection(connectionString)
-		if err != nil {
-			return map[string]interface{}{"error": err.Error()}
-		}
+	connectionString, err = backend.ResolveConnection(connectionString)
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}
 	}
 
 	if _, typed := config["schema"]; typed {
-		cli, err := profile.CLILoader(connectionString)
+		cli, err := backend.CLILoader(connectionString)
 		if err != nil {
 			return map[string]interface{}{"error": err.Error()}
 		}
@@ -541,16 +539,16 @@ func (l *Loader) Load(backendName, connectionString string, config map[string]in
 		return map[string]interface{}{"error": fmt.Sprintf("failed to determine columns: %v", err)}
 	}
 
-	driver, err := profile.NewDriver(connectionString)
+	driver, err := backend.NewDriver(connectionString)
 	if err != nil {
 		return map[string]interface{}{"error": fmt.Sprintf("connect failed: %v", err)}
 	}
 	defer driver.Close()
 
 	if cfg.FileType == "json" {
-		return loadWithDriverJSON(driver, tableName, filePath, dataset, profile.Name, columns, batchSize)
+		return loadWithDriverJSON(driver, tableName, filePath, dataset, backend.Name, columns, batchSize)
 	}
-	return loadWithDriver(driver, tableName, filePath, dataset, profile.Name, columns, batchSize)
+	return loadWithDriver(driver, tableName, filePath, dataset, backend.Name, columns, batchSize)
 }
 
 // LoadParadeDB loads CSV data into ParadeDB.
@@ -566,10 +564,6 @@ func (l *Loader) LoadPostgres(connectionString string, config map[string]interfa
 // LoadElasticsearch loads CSV data into Elasticsearch.
 func (l *Loader) LoadElasticsearch(config map[string]interface{}) map[string]interface{} {
 	address, _ := config["address"].(string)
-	if address == "" {
-		cfg, _ := backends.GetConfig("elasticsearch")
-		address = cfg.DefaultConn
-	}
 	return l.Load("elasticsearch", address, config)
 }
 

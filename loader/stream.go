@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/drivers"
 	"go.k6.io/k6/js/modules"
 	"gopkg.in/yaml.v3"
 )
@@ -18,8 +18,8 @@ import (
 type DocumentStream struct {
 	vu     modules.VU
 	path   string
-	schema *backends.Schema
-	source backends.RowSource
+	schema *drivers.Schema
+	source drivers.RowSource
 	eof    bool
 	closed bool
 }
@@ -51,7 +51,7 @@ func (l *Loader) OpenDocumentStream(path string, options map[string]interface{})
 	if err != nil {
 		return nil, fmt.Errorf("openDocumentStream: schema %q: %w", schemaPath, err)
 	}
-	var schema backends.Schema
+	var schema drivers.Schema
 	if err := yaml.Unmarshal(data, &schema); err != nil {
 		return nil, fmt.Errorf("openDocumentStream: schema %q: %w", schemaPath, err)
 	}
@@ -90,7 +90,7 @@ func (s *DocumentStream) NextBatch(n int) ([]map[string]interface{}, error) {
 		return nil, err
 	}
 	if s.source == nil {
-		source, err := backends.OpenRowSource(s.path, s.schema)
+		source, err := drivers.OpenRowSource(s.path, s.schema)
 		if err != nil {
 			s.closed = true
 			return nil, fmt.Errorf("nextBatch: %q: %w", s.path, err)

@@ -67,7 +67,7 @@ const backends = db.backends({
   backends: [
     "paradedb",  // String shorthand - uses defaults
     {
-      type: "paradedb",           // Required: profile name
+      type: "paradedb",           // Required: backend name
       alias: "paradedb-v2",       // Display name (defaults to type)
       connection: "postgres://localhost:5433/benchmark",
       container: "paradedb-v2",   // Docker container for metrics
@@ -83,9 +83,9 @@ backends.get("paradedb-v2").query(...);
 backends.get("elasticsearch").query(...);
 ```
 
-### Profile Configuration
+### Backend Manifests and Overrides
 
-Use `type` to select a profile. Its manifest chooses the database driver:
+Use `type` to select a backend. Its manifest chooses the database driver:
 
 ```javascript
 import db from "k6/x/database";
@@ -93,7 +93,7 @@ import db from "k6/x/database";
 const backends = db.backends({
   datasetPath: "../",
   // Optional directory relative to the process working directory:
-  // profilesDir: "/path/to/my-profiles",
+  // backendsDir: "/path/to/my-backends",
   backends: [
     { type: "postgres", alias: "pg-fts" },
     { type: "paradedb", connection: __ENV.PARADEDB_URL },
@@ -105,22 +105,20 @@ backends.get("pg-fts").query("SELECT id FROM documents LIMIT 10");
 backends.get("paradedb").query("SELECT id FROM documents LIMIT 10");
 ```
 
-All three profiles use the `postgres` driver. `alias` defaults to the profile
-name. Explicit `connection`, `container`, and `color` values override profile
+All three backends use the `postgres` driver. `alias` defaults to the backend
+name. Explicit `connection`, `container`, and `color` values override backend
 defaults; `container: ""` disables Docker metrics. SELECT statements remain in
 your script, while dataset directories supply schema/index scripts.
 
-New profile types resolve connections as explicit `connection`, then the
-manifest's environment variable, then its default connection. For compatibility,
-the original types (`paradedb`, `postgres`, `clickhouse`, `mongodb`,
-`elasticsearch`, and `opensearch`) still require explicit `__ENV` values and
-still default a custom alias's container to that alias. Their omitted connection
-uses the resolved profile's default. Metric tags and results remain keyed by
-alias. See [Profiles](datasets.md#profiles) for manifest lookup and overrides.
+All backends resolve connections as explicit `connection`, then the manifest's
+environment variable, then its default connection. Aliases change metric tags
+and result labels; they do not change the manifest's container default. Every
+selected backend must have a manifest, even if its name matches a driver.
+See [Backends](datasets.md#backends) for manifest lookup and overrides.
 
-Use `profilesDir` to select an external manifest directory.
+Use `backendsDir` to select an external manifest directory.
 
-The generic k6 loading helper also accepts a profile name:
+The generic k6 loading helper also accepts a backend name:
 
 ```javascript
 loader.load("vectorchord", "", {
@@ -129,9 +127,9 @@ loader.load("vectorchord", "", {
 });
 ```
 
-For new profile names, an empty connection uses the environment/manifest.
-Existing `loadParadeDB` and other named helpers retain their connection argument
-semantics and now construct their drivers through profiles.
+An empty connection uses the environment/manifest for every backend. The named
+helpers, such as `loadParadeDB`, use the same backend resolution and connection
+precedence as `loader.load`.
 
 ## Available Backend Types
 
@@ -144,10 +142,10 @@ The framework is database-agnostic - the current backends and datasets are focus
 | `paradedb` | ParadeDB with pg_search (BM25) |
 | `postgres` | PostgreSQL                     |
 
-`vectorsearch` and `vectorchord` are PostgreSQL profiles. Select `{ type: "vectorsearch" }` or
+`pg_vectorsearch` and `vectorchord` are PostgreSQL backends. Select `{ type: "pg_vectorsearch" }` or
 `{ type: "vectorchord" }`; aliases still default to the
-profile names. See the
-[three-profile example](../datasets/cohere-1m/k6/postgres-profiles.js).
+backend names. See the
+[three-backend example](../datasets/cohere-1m/k6/postgres-backends.js).
 
 **Elasticsearch-based** (shared driver):
 
@@ -289,7 +287,7 @@ precedence, then a Unix-socket `DOCKER_HOST`, then the active context in
 
 ParadeDB and PostgreSQL register repeating telemetry queries alongside their
 ordinary backend configuration. Add a `backend` scenario tag to associate a
-native k6 profile window with the configured backend alias:
+native k6 scenario window with the configured backend alias:
 
 ```javascript
 const scenarios = {
@@ -312,7 +310,7 @@ series. They are shown in generic dashboard charts and written under
 
 For sequential timer windows, keep a non-zero `gap`. The collector uses that
 gap to finalize the previous backend and capture the next backend's baseline
-before its measured profile starts.
+before its measured scenario starts.
 
 ### Pattern 3: Parallel Query + Ingest
 
@@ -510,9 +508,9 @@ export const options = { scenarios };
 
 ## Ingest Benchmarks
 
-The primary purpose of ingest scenarios is to put write pressure on the database while queries are running, simulating realistic mixed profiles where the index is being updated concurrently with queries. This is more useful for measuring how query latency degrades under write load than for comparing raw ingest throughput across backends, since each database handles write consistency, indexing, and flush semantics differently.
+The primary purpose of ingest scenarios is to put write pressure on the database while queries are running, simulating realistic mixed workloads where the index is being updated concurrently with queries. This is more useful for measuring how query latency degrades under write load than for comparing raw ingest throughput across backends, since each database handles write consistency, indexing, and flush semantics differently.
 
-To run an ingest profile, use the loader to open a CSV document file and insert
+To run an ingest workload, use the loader to open a CSV document file and insert
 batches. The data file used for ingest must contain documents that are not
 already in the database. If you pre-loaded a dataset with the loader CLI or a
 setup function, you will need a separate CSV file (e.g. `ingest_data.csv`) with
@@ -609,7 +607,7 @@ export function ingest() {
 For updates, keep the existing ID and mutate the fields in the returned batch
 before calling `backend.updateBatch()`. PostgreSQL/ParadeDB implements this as
 an upsert, so the ID needs a unique index and missing IDs will insert rows.
-Keep adjacent-value swapping in the profile script; the reader does not modify
+Keep adjacent-value swapping in the benchmark script; the reader does not modify
 source files. With an odd batch size, a script that swaps pairs must explicitly
 handle or leave unchanged its final unpaired row.
 
@@ -660,7 +658,7 @@ because `updateBatch()` uses an upsert. Both scripts accept CSV, a Parquet file,
 or a shard directory through `DATA_FILE`.
 
 Each inserted document gets a fresh UUID; title and content are preserved.
-Existing rows are left intact, and repeating the profile adds another copy of
+Existing rows are left intact, and repeating the workload adds another copy of
 the source data with new IDs. Each script consumes the source once, in batches
 of 100, then closes its stream. Searches continue for `DURATION` (default 30s).
 The bundled sample has only five rows, so its write phase is brief; choose a

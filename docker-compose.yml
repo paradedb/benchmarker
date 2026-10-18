@@ -171,11 +171,11 @@ services:
       - "-c"
       - "jit=off"
 
-  vectorsearch:
-    profiles: [vectorsearch, all]
-    build: ./docker/vectorsearch
-    image: benchmarker/vectorsearch:local
-    container_name: vectorsearch
+  pg_vectorsearch:
+    profiles: [pg_vectorsearch, all]
+    build: ./docker/pg_vectorsearch
+    image: benchmarker/pg_vectorsearch:local
+    container_name: pg_vectorsearch
     shm_size: 4g
     environment:
       POSTGRES_USER: postgres
@@ -184,6 +184,7 @@ services:
     ports:
       - "5434:5432"
     volumes:
+      # Retain the existing volume when renaming the service to pg_vectorsearch.
       - vectorsearch_data:/var/lib/postgresql/18/docker
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/drivers"
 )
 
 func TestTelemetryWindowsFollowTaggedNativeScenarios(t *testing.T) {
@@ -35,7 +35,7 @@ func TestTelemetryWindowsFollowTaggedNativeScenarios(t *testing.T) {
 			"tags":     map[string]interface{}{"backend": "elasticsearch"},
 		},
 	}
-	providers := map[string]backends.TelemetryProvider{
+	providers := map[string]drivers.TelemetryProvider{
 		"backend-a": nil,
 		"backend-b": nil,
 	}
@@ -89,7 +89,7 @@ func TestTelemetryWindowStartsAfterTaggedFirstRampStage(t *testing.T) {
 			},
 		},
 	}
-	providers := map[string]backends.TelemetryProvider{"paradedb": nil}
+	providers := map[string]drivers.TelemetryProvider{"paradedb": nil}
 
 	windows, err := telemetryWindowsFromScenarios(scenarios, providers)
 	if err != nil {
@@ -119,7 +119,7 @@ func TestExplicitWarmupDoesNotEnableFallbackTelemetryWindow(t *testing.T) {
 			},
 		},
 	}
-	providers := map[string]backends.TelemetryProvider{"paradedb": nil}
+	providers := map[string]drivers.TelemetryProvider{"paradedb": nil}
 
 	collector, err := newBackendTelemetryCollector(scenarios, providers, 1, 30*time.Second)
 	if err != nil {
@@ -140,7 +140,7 @@ func TestWarmupTagRequiresRampingStages(t *testing.T) {
 			},
 		},
 	}
-	providers := map[string]backends.TelemetryProvider{"paradedb": nil}
+	providers := map[string]drivers.TelemetryProvider{"paradedb": nil}
 
 	_, err := telemetryWindowsFromScenarios(scenarios, providers)
 	if err == nil {

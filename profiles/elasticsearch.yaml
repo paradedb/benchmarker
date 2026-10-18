@@ -1,6 +1,0 @@
-backend: elasticsearch
-container: elasticsearch
-connection: http://localhost:9200
-envVar: ELASTICSEARCH_URL
-description: Elasticsearch
-color: "#10B981"

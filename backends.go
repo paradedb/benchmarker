@@ -9,31 +9,31 @@ import (
 
 	"github.com/grafana/sobek"
 	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/drivers"
 	"github.com/paradedb/benchmarker/metrics"
-	"github.com/paradedb/benchmarker/profiles"
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 
-	// Import backends to register them via init()
-	_ "github.com/paradedb/benchmarker/backends/clickhouse"
-	_ "github.com/paradedb/benchmarker/backends/elasticsearch"
-	_ "github.com/paradedb/benchmarker/backends/mongodb"
-	_ "github.com/paradedb/benchmarker/backends/opensearch"
-	_ "github.com/paradedb/benchmarker/backends/postgres"
-	_ "github.com/paradedb/benchmarker/backends/turbopuffer"
+	// Import drivers to register them via init()
+	_ "github.com/paradedb/benchmarker/drivers/clickhouse"
+	_ "github.com/paradedb/benchmarker/drivers/elasticsearch"
+	_ "github.com/paradedb/benchmarker/drivers/mongodb"
+	_ "github.com/paradedb/benchmarker/drivers/opensearch"
+	_ "github.com/paradedb/benchmarker/drivers/postgres"
+	_ "github.com/paradedb/benchmarker/drivers/turbopuffer"
 )
 
 // Backends holds all configured backend clients.
 type Backends struct {
 	vu                 modules.VU
-	clients            map[string]*backends.K6Client
-	telemetryProviders map[string]backends.TelemetryProvider
+	clients            map[string]*drivers.K6Client
+	telemetryProviders map[string]drivers.TelemetryProvider
 	telemetryCollector *backendTelemetryCollector
 	Metrics            *metrics.Collector `js:"metrics"`
 }
 
 // Get returns a backend client by its alias/name.
-func (b *Backends) Get(alias string) *backends.K6Client {
+func (b *Backends) Get(alias string) *drivers.K6Client {
 	return b.clients[alias]
 }
 
@@ -61,8 +61,8 @@ func (m *ModuleInstance) configErrorf(format string, args ...interface{}) {
 func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 	b := &Backends{
 		vu:                 m.vu,
-		clients:            make(map[string]*backends.K6Client),
-		telemetryProviders: make(map[string]backends.TelemetryProvider),
+		clients:            make(map[string]*drivers.K6Client),
+		telemetryProviders: make(map[string]drivers.TelemetryProvider),
 	}
 	var enabledContainers []string
 	ctx := context.Background()
@@ -135,42 +135,31 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 			return nil
 		}
 
-		// A type names a profile; the manifest selects the registered driver.
-		dir, _ := config["profilesDir"].(string)
-		profile, err := profiles.Resolve(backendType, datasetPath, dir)
+		// A type names a backend; the manifest selects the registered driver.
+		dir, _ := config["backendsDir"].(string)
+		backend, err := backends.Resolve(backendType, datasetPath, dir)
 		if err != nil {
 			m.configErrorf("backends: %v", err)
 			return nil
 		}
-		legacy := profiles.LegacyType(backendType)
-		backendCfg, err := profile.BackendConfig()
+		backendCfg, err := backend.DriverConfig()
 		if err != nil {
 			m.configErrorf("backends: %v", err)
 			return nil
 		}
 		if !aliasExplicit {
-			alias = profile.Name
+			alias = backend.Name
 		}
 		if !containerExplicit {
-			container = profile.ContainerName()
-			if legacy && alias != profile.Name && container != "" {
-				container = alias
-			}
+			container = backend.ContainerName()
 		}
 		if !colorExplicit {
-			color = profile.Color
+			color = backend.Color
 		}
-		if legacy {
-			// Existing k6 types historically require explicit __ENV values.
-			if conn == "" {
-				conn = profile.Connection
-			}
-		} else {
-			conn, err = profile.ResolveConnection(conn)
-			if err != nil {
-				m.configErrorf("backends: %v", err)
-				return nil
-			}
+		conn, err = backend.ResolveConnection(conn)
+		if err != nil {
+			m.configErrorf("backends: %v", err)
+			return nil
 		}
 
 		// Check for duplicate alias
@@ -179,7 +168,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 			return nil
 		}
 
-		driver, err := profile.NewDriver(conn)
+		driver, err := backend.NewDriver(conn)
 		if err != nil {
 			m.configErrorf("backends: failed to create '%s': %v", alias, err)
 			return nil
@@ -192,9 +181,9 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 			Color:     color,
 		})
 
-		client := backends.NewK6Client(m.vu, driver, alias)
+		client := drivers.NewK6Client(m.vu, driver, alias)
 		b.clients[alias] = client
-		if provider, ok := driver.(backends.TelemetryProvider); ok && provider.TelemetryEnabled() {
+		if provider, ok := driver.(drivers.TelemetryProvider); ok && provider.TelemetryEnabled() {
 			b.telemetryProviders[alias] = provider
 		}
 		if container != "" {
@@ -202,7 +191,7 @@ func (m *ModuleInstance) newBackends(config map[string]interface{}) *Backends {
 		}
 
 		driver.CaptureConfig(ctx, alias)
-		metrics.CapturePrePostScripts(alias, profile.Name, datasetPath, backendCfg.FileType)
+		metrics.CapturePrePostScripts(alias, backend.Name, datasetPath, backendCfg.FileType)
 	}
 
 	// Auto-create metrics collector for enabled containers

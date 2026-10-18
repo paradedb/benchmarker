@@ -1,0 +1,6 @@
+driver: opensearch
+container: opensearch
+connection: http://localhost:9201
+envVar: OPENSEARCH_URL
+description: OpenSearch
+color: "#EF4444"

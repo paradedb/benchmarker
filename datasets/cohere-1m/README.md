@@ -75,7 +75,7 @@ the HNSW graph and costs more than the load itself.
 
 ## VectorChord
 
-The `vectorchord` profile on the `postgres` driver uses the same Parquet data with a cosine `vchordrq`
+The `vectorchord` backend on the `postgres` driver uses the same Parquet data with a cosine `vchordrq`
 index. The root Compose profile exposes it on port 5435, with its own database
 and volume:
 
@@ -112,28 +112,26 @@ query vectors and checks that every query succeeds and returns ten neighbors.
 Set `DURATION` and `VUS` to adjust the run; use `VECTORCHORD_CONTAINER` to select
 the container for resource metrics, or an empty string for a remote database.
 
-## PostgreSQL profile comparison
+## PostgreSQL backend comparison
 
 ParadeDB, Timescale pg_vectorsearch, and VectorChord all use the `postgres`
-driver. Their manifests in `profiles/` define connection/container defaults,
+driver. Their manifests in `backends/` define connection/container defaults,
 extension settings capture, metadata queries, and index telemetry. Select them
-with the existing `--backend` flag; both resolve the manifest.
+with `--backend`; each name resolves its manifest.
 
-The dataset's `paradedb/profile.yaml` selects `benchmark_1m` and
-`vectorchord/profile.yaml` preserves the 42-probe connection default. The
-`PARADEDB_URL`, `VECTORSEARCH_URL`, and `VECTORCHORD_URL` environment variables
-override those defaults for loading. In k6, the legacy ParadeDB type passes
-`__ENV.PARADEDB_URL` explicitly; new vector profile types resolve their environment
-variables automatically.
+The dataset's `paradedb/backend.yaml` selects `benchmark_1m` and
+`vectorchord/backend.yaml` preserves the 42-probe connection default. The
+`PARADEDB_URL`, `PG_VECTORSEARCH_URL`, and `VECTORCHORD_URL` environment variables
+override those defaults for both loading and k6 runs.
 Create `benchmark_1m` on ParadeDB before loading, as in the setup above.
 
 ```bash
 # From the repository root; all three services have independent data volumes.
-docker compose --profile paradedb --profile vectorsearch --profile vectorchord up -d --build
+docker compose --profile paradedb --profile pg_vectorsearch --profile vectorchord up -d --build
 ./bin/loader load --backend paradedb ./datasets/cohere-1m
-./bin/loader load --backend vectorsearch --workers 4 --batch-size 2000 ./datasets/cohere-1m
+./bin/loader load --backend pg_vectorsearch --workers 4 --batch-size 2000 ./datasets/cohere-1m
 ./bin/loader load --backend vectorchord --workers 4 --batch-size 2000 ./datasets/cohere-1m
-./k6 run --out dashboard datasets/cohere-1m/k6/postgres-profiles.js
+./k6 run --out dashboard datasets/cohere-1m/k6/postgres-backends.js
 ```
 
 The comparison runs the three strategies sequentially with separate aliases,
@@ -142,10 +140,10 @@ query metrics, and extension telemetry. Each backend block uses
 the run. Set the corresponding `*_CONTAINER` variable to an empty string to
 disable Docker metrics for a remote service.
 
-`vectorsearch` is Timescale's **pg_vectorsearch / PRISM**, not pgvectorscale /
+`pg_vectorsearch` is Timescale's **pg_vectorsearch / PRISM**, not pgvectorscale /
 DiskANN. The Dockerfile builds the pinned revision from the source checkout.
-Use `k6/vectorsearch.js` for a standalone run and
-`k6/measure_recall_vectorsearch.py` to measure its recall. Its `VECTORSEARCH_URL`
+Use `k6/pg_vectorsearch.js` for a standalone run and
+`k6/measure_recall_pg_vectorsearch.py` to measure its recall. Its `PG_VECTORSEARCH_URL`
 can include session options such as `options=-c%20prism.nprobe%3D40`.
 Remeasure recall for all strategies after rebuilding or changing index settings;
 the comparison script checks query success and result counts, not recall parity.

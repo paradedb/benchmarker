@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/paradedb/benchmarker/backends"
+	"github.com/paradedb/benchmarker/drivers"
 )
 
 func TestSelectLoadMode(t *testing.T) {
@@ -329,7 +329,7 @@ func TestResolveTableDataMultiTable(t *testing.T) {
 	}
 
 	cols := map[string]string{"id": "bigint"}
-	schema := &backends.Schema{Tables: []backends.Schema{
+	schema := &drivers.Schema{Tables: []drivers.Schema{
 		{Table: "posts", Columns: cols},
 		{Table: "comments", Columns: cols},
 	}}
@@ -352,7 +352,7 @@ func TestResolveTableDataMultiTable(t *testing.T) {
 	}
 
 	// A table without data fails fast.
-	schema.Tables = append(schema.Tables, backends.Schema{Table: "users", Columns: cols})
+	schema.Tables = append(schema.Tables, drivers.Schema{Table: "users", Columns: cols})
 	if _, err := resolveTableData(dir, schema); err == nil {
 		t.Fatal("expected error for table without data")
 	}
