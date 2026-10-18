@@ -206,10 +206,10 @@ datasets/sample/mybackend/
 
 ### DriverConfig Fields
 
-| Field                | Description |
-| -------------------- | ----------- |
-| `Factory`            | `func(connString string) (Driver, error)` creates a driver instance |
-| `FileType`           | `"sql"` or `"json"` determines the pre/post script extension |
+| Field                | Description                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `Factory`            | `func(connString string) (Driver, error)` creates a driver instance                                                |
+| `FileType`           | `"sql"` or `"json"` determines the pre/post script extension                                                       |
 | `OptionalConnection` | Allows an empty connection when the driver resolves its endpoint from other settings, such as Turbopuffer's region |
 
 Connection defaults, environment variable names, containers, and colors are
