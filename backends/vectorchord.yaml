@@ -3,6 +3,7 @@ container: vectorchord
 connection: postgres://postgres:postgres@localhost:5435/benchmark
 envVar: VECTORCHORD_URL
 description: VectorChord vector indexes
+color: "#FF3621"
 extras:
   gucPrefixes: [vchord, vchordrq, vchordg]
   indexAccessMethods: [vchordrq, vchordg]

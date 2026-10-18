@@ -83,7 +83,7 @@ backends.get("paradedb-v2").query(...);
 backends.get("elasticsearch").query(...);
 ```
 
-### Backend Configuration
+### Backend Manifests and Overrides
 
 Use `type` to select a backend. Its manifest chooses the database driver:
 

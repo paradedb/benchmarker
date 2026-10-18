@@ -17,7 +17,7 @@ func TestManifestColorsSurviveLiveExportAndReplay(t *testing.T) {
 		{"paradedb", ""}, {"postgres", ""}, {"clickhouse", ""},
 		{"mongodb", ""}, {"elasticsearch", ""}, {"opensearch", ""},
 		{"turbopuffer", ""}, {"turbopuffer", "#123456"},
-		{"pg_vectorsearch", ""},
+		{"pg_vectorsearch", ""}, {"vectorchord", ""},
 		{"paradedb", "orange"}, {"my-backend", "#123456"}, {"unknown", ""},
 	} {
 		t.Run(tc.backend+tc.color, func(t *testing.T) {
