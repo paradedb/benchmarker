@@ -228,7 +228,7 @@ Datasets follow this structure:
 ```text
 datasets/<name>/
 ├── schema.yaml           # Column definitions
-├── download.yaml         # Optional declarative S3 data/query references
+├── download.yaml         # Optional declarative S3 corpus references
 ├── data/
 │   └── data.csv          # Corpus (or data.parquet / Parquet shards)
 ├── paradedb/
@@ -245,8 +245,8 @@ SQL backends use `.sql` files, HTTP backends (Elasticsearch, OpenSearch, MongoDB
 
 Keep all corpus files under `data/`; root-level `data.csv` and `data.parquet`
 are migration errors. Use `download.yaml` to reference shared versioned S3 data,
-or embed corpus under `data/`. Keep query assets under `queries/` and generated
-benchmark fixtures under `k6/`. Do not commit downloaded corpus or generated
+or embed corpus under `data/`. The manifest supports only `data`; manage query
+inputs separately and keep generated benchmark fixtures under `k6/`. Do not commit downloaded corpus or generated
 `dataset.yaml` provenance. The bundled sample CSV is the small checked-in exception.
 See [download manifests](docs/loader.md#commands) and
 [config package preparation](dataset-packages/README.md).

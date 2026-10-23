@@ -20,15 +20,25 @@ AWS_PROFILE=ci ./bin/loader pull --dataset sift-10m
 
 The manifest points to
 `s3://paradedb-benchmark/datasets/sift/v1/sampled/10m/parquet/sift/`
-and exact shared query assets under `sift/v1/queries/`. Corpus shards are
-placed directly under `data/`; query Parquet files go under `queries/`.
-Existing nonempty asset directories are never overwritten.
+with corpus shards placed directly under `data/`. Query assets are not downloaded
+by the manifest. Existing nonempty corpus directories are never overwritten.
 
 To fetch configuration too, use an absent or empty destination:
 
 ```bash
 AWS_PROFILE=ci ./bin/loader pull --dataset sift-10m-copy \
   --source s3://paradedb-benchmark/benchmarker/sift-10m/
+```
+
+Query inputs are only needed when regenerating JSON fixtures. Fetch them
+separately if they are not already available:
+
+```bash
+mkdir -p datasets/sift-10m/queries
+AWS_PROFILE=ci aws s3 cp s3://paradedb-benchmark/datasets/sift/v1/queries/sift_queries.parquet \
+  datasets/sift-10m/queries/sift_queries.parquet
+AWS_PROFILE=ci aws s3 cp s3://paradedb-benchmark/datasets/sift/v1/queries/ground_truth_knn_top10_unfiltered_10m.parquet \
+  datasets/sift-10m/queries/ground_truth_knn_top10_unfiltered_10m.parquet
 ```
 
 Generate `k6/query_vectors.json` and `k6/ground_truth_top10.json` explicitly
@@ -40,7 +50,7 @@ python3 make_query_vectors.py
 ```
 
 Query IDs are 0-based, vectors have 128 dimensions, and ground truth is specific
-to the 10M corpus. The manifest downloads only these two query assets.
+to the 10M corpus. Fetch these inputs separately; the manifest downloads only the corpus.
 
 ## Load
 

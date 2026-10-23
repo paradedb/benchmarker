@@ -22,7 +22,6 @@ import (
 type downloadManifest struct {
 	Version int                 `yaml:"version"`
 	Data    []downloadReference `yaml:"data,omitempty"`
-	Queries []downloadReference `yaml:"queries,omitempty"`
 }
 type downloadReference struct {
 	Source      string `yaml:"source"`
@@ -67,10 +66,10 @@ func decodeDownloadManifest(data []byte) (*downloadManifest, error) {
 	if manifest.Version != 1 {
 		return nil, fmt.Errorf("unsupported download.yaml version %d (expected 1)", manifest.Version)
 	}
-	if len(manifest.Data)+len(manifest.Queries) == 0 {
-		return nil, fmt.Errorf("download.yaml declares no assets")
+	if len(manifest.Data) == 0 {
+		return nil, fmt.Errorf("download.yaml declares no data")
 	}
-	for _, ref := range append(append([]downloadReference{}, manifest.Data...), manifest.Queries...) {
+	for _, ref := range manifest.Data {
 		_, key, err := parseS3URL(ref.Source)
 		if err != nil {
 			return nil, err
@@ -400,33 +399,17 @@ func pullReferencedAssets(ctx context.Context, client s3Downloads, dataset *os.R
 		return err
 	}
 	var objects []downloadObject
-	var directories []string
 	if manifest != nil {
-		groups := []struct {
-			name string
-			refs []downloadReference
-		}{{"data", manifest.Data}, {"queries", manifest.Queries}}
-		// Validate local destinations before issuing any referenced S3 requests.
-		for _, group := range groups {
-			if len(group.refs) == 0 {
-				continue
-			}
-			if err := prepareDestDir(dataset, group.name); err != nil {
-				if group.name == "data" {
-					return fmt.Errorf("embedded corpus and remote data declarations are ambiguous: %w", err)
-				}
+		// Validate the corpus destination before issuing referenced S3 requests.
+		if err := prepareDestDir(dataset, "data"); err != nil {
+			return fmt.Errorf("embedded corpus and remote data declarations are ambiguous: %w", err)
+		}
+		for _, ref := range manifest.Data {
+			expanded, err := expandReference(ctx, client, ref, "data", nil)
+			if err != nil {
 				return err
 			}
-			directories = append(directories, group.name)
-		}
-		for _, group := range groups {
-			for _, ref := range group.refs {
-				expanded, err := expandReference(ctx, client, ref, group.name, nil)
-				if err != nil {
-					return err
-				}
-				objects = append(objects, expanded...)
-			}
+			objects = append(objects, expanded...)
 		}
 	}
 	if err := validateOutputs(objects); err != nil {
@@ -444,27 +427,20 @@ func pullReferencedAssets(ctx context.Context, client s3Downloads, dataset *os.R
 	if err := downloadObjects(ctx, client, stage, objects, maxBytes); err != nil {
 		return err
 	}
-	// All transfers and validation have succeeded. Publish complete directories.
-	// Roll back published directories if a later publication fails.
-	var published []string
-	rollback := func() {
-		for _, dir := range published {
-			_ = dataset.Rename(dir, filepath.Join(stageName, dir))
-		}
-	}
-	for _, dir := range directories {
-		if err := prepareDestDir(dataset, dir); err != nil {
-			rollback()
+	// Publish the completed corpus, then provenance. Roll back the corpus if
+	// provenance publication fails, preserving existing user files.
+	if manifest != nil {
+		if err := prepareDestDir(dataset, "data"); err != nil {
 			return err
 		}
-		if err := dataset.Rename(filepath.Join(stageName, dir), dir); err != nil {
-			rollback()
+		if err := dataset.Rename(filepath.Join(stageName, "data"), "data"); err != nil {
 			return err
 		}
-		published = append(published, dir)
 	}
 	if err := dataset.Rename(filepath.Join(stageName, "dataset.yaml"), "dataset.yaml"); err != nil {
-		rollback()
+		if manifest != nil {
+			_ = dataset.Rename("data", filepath.Join(stageName, "data"))
+		}
 		return err
 	}
 	return nil
@@ -497,9 +473,6 @@ func stageProvenance(dataset, stage *os.Root, source string, manifest *downloadM
 	if manifest != nil {
 		if len(manifest.Data) > 0 {
 			provenance["data"] = manifest.Data
-		}
-		if len(manifest.Queries) > 0 {
-			provenance["queries"] = manifest.Queries
 		}
 		provenance["assets_pulled_at"] = now
 	}

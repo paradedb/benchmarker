@@ -42,7 +42,8 @@ Without `--source`, the dataset directory and `download.yaml` must already exist
 With `--source`, the destination must be absent or empty, and the config package
 may be an S3 prefix or a `.tar.gz`/`.tgz` archive. A self-contained package with
 corpus under `data/` needs no manifest. Embedded corpus plus remote `data`
-declarations is an error; embedded corpus with a queries-only manifest is valid.
+declarations is an error. The manifest supports only corpus data; a `queries`
+field is rejected.
 
 `download.yaml` uses strict versioned YAML:
 
@@ -52,31 +53,27 @@ data:
   - source: s3://paradedb-benchmark/datasets/cohere/v1/sampled/1m/parquet/cohere_wiki/
     kind: prefix
     destination: .
-queries:
-  - source: s3://paradedb-benchmark/datasets/cohere/v1/queries/cohere_queries.parquet
-    kind: object
-    destination: cohere_queries.parquet
 ```
 
-Data destinations are relative to `data/`; query destinations are relative to
-`queries/`. Prefixes preserve relative object names. Objects require an explicit
-filename. A `.csv.gz` object is streamed into its decompressed destination, e.g.
+Destinations are relative to `data/`. Prefixes preserve relative object names.
+Objects require an explicit filename. A `.csv.gz` object is streamed into its
+decompressed destination, e.g.
 `destination: data.csv`; a prefix entry `data/posts.csv.gz` becomes
 `data/posts.csv`. `--max-extracted-bytes` limits each decompressed CSV or the
 whole decompressed archive (100 GiB by default). Raise it explicitly for larger
 corpora, such as Stack Exchange.
 
 Downloads reject absolute paths, traversal, symlinked destinations/ancestors,
-duplicate outputs, and collisions after decompression. Referenced asset
-directories must be absent or empty: existing corpus and query directories are
-never merged or replaced. Downloads finish in staging directories before
-publication; a failed transfer removes its staging files and leaves existing
+duplicate outputs, and collisions after decompression. The `data/` directory
+must be absent or empty; existing corpus files are never merged or replaced.
+Existing query fixtures are left alone by manifest-driven downloads. Downloads
+finish in staging directories before publication; a failed transfer removes its staging files and leaves existing
 configuration, assets, and provenance intact. A repeat pull fails instead of
 refreshing files. Move existing asset directories aside explicitly to download
 another version.
 
 `dataset.yaml` records successful download provenance: the existing `s3` and
-`pulled_at` fields plus resolved `data`/`queries` references and
+`pulled_at` fields plus resolved `data` references and
 `assets_pulled_at`. An assets-only pull preserves earlier config provenance.
 `download.yaml` is never rewritten. Pulling does not execute SQL, JavaScript,
 Compose files, or fixture generators; loading and running remain separate steps.

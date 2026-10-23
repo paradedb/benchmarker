@@ -15,7 +15,7 @@ import (
 	"github.com/paradedb/benchmarker/drivers"
 )
 
-// Opt-in authenticated smoke test, limited to ~0.55 MB of real CSV/Parquet.
+// Opt-in authenticated smoke test, limited to ~0.16 MB of real CSV/Parquet.
 // AWS_PROFILE=ci BENCHMARKER_S3_SMOKE=1 go test ./cmd/loader -run TestS3Smoke -v
 func TestS3Smoke(t *testing.T) {
 	if os.Getenv("BENCHMARKER_S3_SMOKE") != "1" {
@@ -32,17 +32,17 @@ data:
   - source: s3://paradedb-benchmark/datasets/stackoverflow/v1/sampled/10m/csv/users/data_1.csv
     kind: object
     destination: users.csv
-  - source: s3://paradedb-benchmark/datasets/cohere/v1/queries/cohere_queries.parquet
+  - source: s3://paradedb-benchmark/datasets/stackoverflow/v1/source/parquet/posts_wiki_placeholder/posts_wiki_placeholder-000000000000.parquet
     kind: object
-    destination: vectors.parquet
+    destination: posts.parquet
 `
 	putTestFile(t, dir, "smoke/download.yaml", []byte(manifest))
 	if err := pullDataset(ctx, s3.NewFromConfig(cfg), dir, "smoke", "", 1<<20, nil); err != nil {
 		t.Fatal(err)
 	}
 	for filename, schema := range map[string]*drivers.Schema{
-		"users.csv":       {Columns: map[string]string{"id": "bigint", "display_name": "text"}},
-		"vectors.parquet": {Columns: map[string]string{"emb": "vector(1024)"}},
+		"users.csv":     {Columns: map[string]string{"id": "bigint", "display_name": "text"}},
+		"posts.parquet": {Columns: map[string]string{"id": "bigint"}},
 	} {
 		source, err := drivers.OpenRowSource(filepath.Join(dir, "smoke/data", filename), schema)
 		if err != nil {
@@ -56,7 +56,7 @@ data:
 	}
 }
 
-// packageSmokeClient exercises authenticated config/query downloads and real S3
+// packageSmokeClient exercises authenticated config downloads and real S3
 // listings, substituting tiny corpus payloads so a package smoke test cannot
 // download hundreds of GB. This adapter is used only by this opt-in test.
 type packageSmokeClient struct {

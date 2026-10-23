@@ -55,10 +55,11 @@ services/settings. Legacy `vectorsearch` and `pgvector` backend directory names
 become `pg_vectorsearch` and `postgres`; SQL extension names stay unchanged.
 The manifest selects the shared CI corpus instead of either old corpus copy.
 
-Shared query Parquet stays under `queries/`. Existing benchmark-specific JSON
-may remain in the config package; the Cohere/SIFT dataset READMEs explain how
-to regenerate it explicitly from matching canonical query and ground truth.
-Pulling a manifest never executes generation scripts.
+Manifests download only corpus into `data/`; `queries` is not a supported field.
+Existing benchmark-specific JSON may remain in the config package. Query inputs
+and ground truth are managed separately. The Cohere/SIFT READMEs explain how to
+fetch those inputs manually and regenerate fixtures when needed. Pulling a
+manifest never fetches query assets or executes generation scripts.
 
 ## Publish and pull
 
@@ -90,8 +91,8 @@ go test ./...
 AWS_PROFILE=ci BENCHMARKER_S3_SMOKE=1 go test ./cmd/loader -run TestS3Smoke -v
 ```
 
-The opt-in smoke test downloads about 0.55 MB: one real Stack Overflow CSV
-object and the Cohere query Parquet, then reads both through the schema-driven
+The opt-in smoke test downloads about 0.16 MB: one real Stack Overflow CSV
+object and a small Stack Overflow corpus Parquet, then reads both through the schema-driven
 reader. Normal tests use fake S3 responses. After preparing packages, validate both
 pull flows and every schema/table mapping with:
 
@@ -101,7 +102,7 @@ BENCHMARKER_PREPARED_PACKAGES=/tmp/benchmarker-packages \
 ```
 
 After staging the packages in S3, verify fresh pulls using authenticated config
-and query downloads, real corpus listings, and tiny synthetic corpus payloads:
+downloads, real corpus listings, and tiny synthetic corpus payloads:
 
 ```bash
 AWS_PROFILE=ci BENCHMARKER_S3_PACKAGES=s3://paradedb-benchmark/benchmarker/ \

@@ -3,13 +3,3 @@ data:
   - source: s3://paradedb-benchmark/datasets/cohere/v1/sampled/1m/parquet/cohere_wiki/
     kind: prefix
     destination: .
-queries:
-  - source: s3://paradedb-benchmark/datasets/cohere/v1/queries/cohere_queries.parquet
-    kind: object
-    destination: cohere_queries.parquet
-  - source: s3://paradedb-benchmark/datasets/cohere/v1/queries/ground_truth_knn_top10_unfiltered_1m.parquet
-    kind: object
-    destination: ground_truth_knn_top10_unfiltered_1m.parquet
-  - source: s3://paradedb-benchmark/datasets/cohere/v1/queries/ground_truth_knn_top10_1pct_1m.parquet
-    kind: object
-    destination: ground_truth_knn_top10_1pct_1m.parquet

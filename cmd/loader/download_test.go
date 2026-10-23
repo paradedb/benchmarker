@@ -94,29 +94,31 @@ func assertNoStages(t *testing.T, base string) {
 }
 
 const dataManifest = "version: 1\ndata:\n  - source: s3://bucket/corpus/\n    kind: prefix\n    destination: .\n"
-const queryManifest = "version: 1\nqueries:\n  - source: s3://bucket/query.parquet\n    kind: object\n    destination: query.parquet\n"
+const objectManifest = "version: 1\ndata:\n  - source: s3://bucket/extra.parquet\n    kind: object\n    destination: extra.parquet\n"
 
 func TestDownloadManifestValidation(t *testing.T) {
-	for _, input := range []string{dataManifest, queryManifest, strings.Replace(dataManifest, "destination: .", "destination: posts", 1)} {
+	for _, input := range []string{dataManifest, objectManifest, strings.Replace(dataManifest, "destination: .", "destination: posts", 1)} {
 		if _, err := decodeDownloadManifest([]byte(input)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for name, input := range map[string]string{
-		"version":            strings.Replace(dataManifest, "version: 1", "version: 2", 1),
-		"unknown field":      dataManifest + "command: echo unsafe\n",
-		"unknown nested":     strings.Replace(dataManifest, "kind: prefix", "kind: prefix\n    shell: bad", 1),
-		"HTTP":               strings.Replace(dataManifest, "s3://bucket", "https://bucket", 1),
-		"kind":               strings.Replace(dataManifest, "kind: prefix", "kind: archive", 1),
-		"traversal":          strings.Replace(dataManifest, "destination: .", "destination: ../k6", 1),
-		"internal traversal": strings.Replace(dataManifest, "destination: .", "destination: foo/../bar", 1),
-		"absolute":           strings.Replace(dataManifest, "destination: .", "destination: /tmp/foo", 1),
-		"windows":            strings.Replace(dataManifest, "destination: .", "destination: C:\\foo", 1),
-		"empty":              "version: 1\n",
-		"multiple documents": dataManifest + "---\nversion: 1\n",
-		"object directory":   strings.Replace(dataManifest, "kind: prefix", "kind: object", 1),
-		"compressed output":  strings.ReplaceAll(strings.Replace(queryManifest, "query.parquet", "query.csv.gz", 1), "destination: query.parquet", "destination: query.csv.gz"),
-		"duplicate YAML":     dataManifest + "version: 1\n",
+		"version":                       strings.Replace(dataManifest, "version: 1", "version: 2", 1),
+		"queries unsupported":           strings.Replace(objectManifest, "data:", "queries:", 1),
+		"queries with data unsupported": dataManifest + "queries: []\n",
+		"unknown field":                 dataManifest + "command: echo unsafe\n",
+		"unknown nested":                strings.Replace(dataManifest, "kind: prefix", "kind: prefix\n    shell: bad", 1),
+		"HTTP":                          strings.Replace(dataManifest, "s3://bucket", "https://bucket", 1),
+		"kind":                          strings.Replace(dataManifest, "kind: prefix", "kind: archive", 1),
+		"traversal":                     strings.Replace(dataManifest, "destination: .", "destination: ../k6", 1),
+		"internal traversal":            strings.Replace(dataManifest, "destination: .", "destination: foo/../bar", 1),
+		"absolute":                      strings.Replace(dataManifest, "destination: .", "destination: /tmp/foo", 1),
+		"windows":                       strings.Replace(dataManifest, "destination: .", "destination: C:\\foo", 1),
+		"empty":                         "version: 1\n",
+		"multiple documents":            dataManifest + "---\nversion: 1\n",
+		"object directory":              strings.Replace(dataManifest, "kind: prefix", "kind: object", 1),
+		"compressed output":             strings.ReplaceAll(strings.Replace(objectManifest, "extra.parquet", "extra.csv.gz", 1), "destination: extra.parquet", "destination: extra.csv.gz"),
+		"duplicate YAML":                dataManifest + "version: 1\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := decodeDownloadManifest([]byte(input)); err == nil {
@@ -128,16 +130,16 @@ func TestDownloadManifestValidation(t *testing.T) {
 
 func TestPullCheckoutAndRepeatedPull(t *testing.T) {
 	dir := pullTestDir(t)
-	manifest := dataManifest + strings.TrimPrefix(queryManifest, "version: 1\n")
+	manifest := dataManifest + strings.TrimPrefix(objectManifest, "version: 1\ndata:\n")
 	putTestFile(t, dir, "demo/download.yaml", []byte(manifest))
 	putTestFile(t, dir, "demo/schema.yaml", []byte("original"))
 	putTestFile(t, dir, "demo/dataset.yaml", []byte("s3: s3://old/config/\npulled_at: old-time\ncustom: retained\n"))
-	fake := &fakeDownloads{files: map[string][]byte{"corpus/data.csv.gz": testGzip(t, []byte("id\n1\n")), "query.parquet": []byte("PAR1")}}
+	fake := &fakeDownloads{files: map[string][]byte{"corpus/data.csv.gz": testGzip(t, []byte("id\n1\n")), "extra.parquet": []byte("PAR1")}}
 	if err := pullDataset(context.Background(), fake, dir, "demo", "", 1<<20, nil); err != nil {
 		t.Fatal(err)
 	}
 	assertFile(t, dir, "demo/data/data.csv", "id\n1\n")
-	assertFile(t, dir, "demo/queries/query.parquet", "PAR1")
+	assertFile(t, dir, "demo/data/extra.parquet", "PAR1")
 	assertFile(t, dir, "demo/schema.yaml", "original")
 	assertFile(t, dir, "demo/download.yaml", manifest)
 	raw, err := os.ReadFile(filepath.Join(dir, "demo/dataset.yaml"))
@@ -148,7 +150,7 @@ func TestPullCheckoutAndRepeatedPull(t *testing.T) {
 	if err := yaml.Unmarshal(raw, &provenance); err != nil {
 		t.Fatal(err)
 	}
-	if provenance["s3"] != "s3://old/config/" || provenance["pulled_at"] != "old-time" || provenance["custom"] != "retained" || provenance["data"] == nil || provenance["queries"] == nil {
+	if provenance["s3"] != "s3://old/config/" || provenance["pulled_at"] != "old-time" || provenance["custom"] != "retained" || provenance["data"] == nil || provenance["queries"] != nil {
 		t.Fatalf("provenance: %s", raw)
 	}
 	gets := len(fake.gets)
@@ -163,23 +165,21 @@ func TestPullCheckoutAndRepeatedPull(t *testing.T) {
 }
 
 func TestPullFailureLeavesCheckoutIntact(t *testing.T) {
-	for _, failure := range []string{"transfer", "decompression", "provenance", "existing queries"} {
+	for _, failure := range []string{"transfer", "decompression", "provenance"} {
 		t.Run(failure, func(t *testing.T) {
 			dir := pullTestDir(t)
-			manifest := dataManifest + strings.TrimPrefix(queryManifest, "version: 1\n")
+			manifest := dataManifest + strings.TrimPrefix(objectManifest, "version: 1\ndata:\n")
 			putTestFile(t, dir, "demo/download.yaml", []byte(manifest))
 			putTestFile(t, dir, "demo/schema.yaml", []byte("keep"))
-			fake := &fakeDownloads{files: map[string][]byte{"corpus/data.csv.gz": testGzip(t, []byte("id\n1\n")), "query.parquet": []byte("PAR1")}}
+			fake := &fakeDownloads{files: map[string][]byte{"corpus/data.csv.gz": testGzip(t, []byte("id\n1\n")), "extra.parquet": []byte("PAR1")}}
 			limit := int64(1 << 20)
 			switch failure {
 			case "transfer":
-				fake.fail = "query.parquet"
+				fake.fail = "extra.parquet"
 			case "decompression":
 				limit = 1
 			case "provenance":
 				putTestFile(t, dir, "demo/dataset.yaml", []byte("[broken"))
-			case "existing queries":
-				putTestFile(t, dir, "demo/queries/user.txt", []byte("keep"))
 			}
 			if err := pullDataset(context.Background(), fake, dir, "demo", "", limit, nil); err == nil {
 				t.Fatal("expected failure")
@@ -189,9 +189,6 @@ func TestPullFailureLeavesCheckoutIntact(t *testing.T) {
 			}
 			assertFile(t, dir, "demo/schema.yaml", "keep")
 			assertFile(t, dir, "demo/download.yaml", manifest)
-			if failure == "existing queries" {
-				assertFile(t, dir, "demo/queries/user.txt", "keep")
-			}
 			assertNoStages(t, dir)
 		})
 	}
@@ -220,7 +217,7 @@ func archiveFiles(t *testing.T, files map[string][]byte) []byte {
 }
 func TestPullConfigPackages(t *testing.T) {
 	for _, archive := range []bool{false, true} {
-		for _, layout := range []string{"embedded", "remote", "legacy", "nested legacy", "mixed", "queries only", "transfer failure"} {
+		for _, layout := range []string{"embedded", "remote", "legacy", "nested legacy", "mixed", "unsupported queries", "transfer failure"} {
 			t.Run(fmt.Sprintf("archive=%t/%s", archive, layout), func(t *testing.T) {
 				dir := pullTestDir(t)
 				files := map[string][]byte{"schema.yaml": []byte("table: documents\ncolumns: {id: bigint}\n")}
@@ -236,11 +233,11 @@ func TestPullConfigPackages(t *testing.T) {
 				case "mixed":
 					files["data/embedded.parquet"] = []byte("PAR1")
 					files["download.yaml"] = []byte(dataManifest)
-				case "queries only":
+				case "unsupported queries":
 					files["data/data.csv"] = []byte("id\n1\n")
-					files["download.yaml"] = []byte(queryManifest)
+					files["download.yaml"] = []byte(strings.Replace(objectManifest, "data:", "queries:", 1))
 				}
-				fake := &fakeDownloads{files: map[string][]byte{"corpus/data.csv": []byte("id\n1\n"), "query.parquet": []byte("PAR1")}}
+				fake := &fakeDownloads{files: map[string][]byte{"corpus/data.csv": []byte("id\n1\n"), "extra.parquet": []byte("PAR1")}}
 				source := "s3://bucket/config/"
 				if archive {
 					source = "s3://bucket/config.tgz"
@@ -254,7 +251,7 @@ func TestPullConfigPackages(t *testing.T) {
 					fake.fail = "corpus/data.csv"
 				}
 				err := pullDataset(context.Background(), fake, dir, "demo", source, 1<<20, nil)
-				failure := layout == "legacy" || layout == "nested legacy" || layout == "mixed" || layout == "transfer failure"
+				failure := layout == "unsupported queries" || layout == "legacy" || layout == "nested legacy" || layout == "mixed" || layout == "transfer failure"
 				if failure {
 					if err == nil {
 						t.Fatal("expected error")
@@ -268,7 +265,7 @@ func TestPullConfigPackages(t *testing.T) {
 					}
 					assertFile(t, dir, "demo/data/data.csv", "id\n1\n")
 				}
-				if layout == "embedded" || layout == "queries only" || layout == "mixed" {
+				if layout == "embedded" || layout == "unsupported queries" || layout == "mixed" {
 					for _, key := range fake.gets {
 						if strings.HasPrefix(key, "corpus/") {
 							t.Fatal("requested second corpus")
@@ -300,7 +297,7 @@ func TestExpandedOutputCollisionsAndTraversal(t *testing.T) {
 		})
 	}
 	// Different sources with the same explicit output collide too.
-	manifest := queryManifest + "  - source: s3://other/another.parquet\n    kind: object\n    destination: query.parquet\n"
+	manifest := objectManifest + "  - source: s3://other/another.parquet\n    kind: object\n    destination: extra.parquet\n"
 	dir := pullTestDir(t)
 	putTestFile(t, dir, "demo/download.yaml", []byte(manifest))
 	fake := &fakeDownloads{}
@@ -436,7 +433,7 @@ func TestManifestCatalog(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
-		for _, ref := range append(manifest.Data, manifest.Queries...) {
+		for _, ref := range manifest.Data {
 			if !strings.HasPrefix(ref.Source, "s3://paradedb-benchmark/datasets/") {
 				t.Fatalf("noncanonical source in %s: %s", path, ref.Source)
 			}
@@ -487,7 +484,7 @@ func TestPreparedPackages(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, ref := range append(append([]downloadReference{}, manifest.Data...), manifest.Queries...) {
+			for _, ref := range manifest.Data {
 				_, key, err := parseS3URL(ref.Source)
 				if err != nil {
 					t.Fatal(err)
@@ -565,25 +562,22 @@ func TestArchivePackageRejectsUnsafeEntries(t *testing.T) {
 
 func TestObjectCompressionFollowsSource(t *testing.T) {
 	dir := pullTestDir(t)
-	manifest := "version: 1\nqueries:\n  - source: s3://bucket/raw\n    kind: object\n    destination: original.csv.gz\n"
+	manifest := "version: 1\ndata:\n  - source: s3://bucket/raw\n    kind: object\n    destination: original.csv.gz\n"
 	putTestFile(t, dir, "demo/download.yaml", []byte(manifest))
 	fake := &fakeDownloads{files: map[string][]byte{"raw": []byte("unchanged")}}
 	if err := pullDataset(context.Background(), fake, dir, "demo", "", 1<<20, nil); err != nil {
 		t.Fatal(err)
 	}
-	assertFile(t, dir, "demo/queries/original.csv.gz", "unchanged")
+	assertFile(t, dir, "demo/data/original.csv.gz", "unchanged")
 }
 
-func TestPublicationFailureRollsBackCompletedDirectories(t *testing.T) {
+func TestPublicationFailureRollsBackCompletedCorpus(t *testing.T) {
 	dir := pullTestDir(t)
-	manifest := dataManifest + strings.TrimPrefix(queryManifest, "version: 1\n")
-	putTestFile(t, dir, "demo/download.yaml", []byte(manifest))
-	putTestFile(t, dir, "demo/dataset.yaml", []byte("s3: s3://original/config/\n"))
-	fake := &fakeDownloads{files: map[string][]byte{"corpus/data.csv": []byte("id\n1\n"), "query.parquet": []byte("PAR1")}}
-	fake.onGet = func(key string) {
-		if key == "query.parquet" {
-			putTestFile(t, dir, "demo/queries/user.txt", []byte("keep"))
-		}
+	putTestFile(t, dir, "demo/download.yaml", []byte(dataManifest))
+	fake := &fakeDownloads{files: map[string][]byte{"corpus/data.csv": []byte("id\n1\n")}}
+	fake.onGet = func(string) {
+		// A user creates a directory at the provenance path during the transfer.
+		putTestFile(t, dir, "demo/dataset.yaml/user.txt", []byte("keep"))
 	}
 	if err := pullDataset(context.Background(), fake, dir, "demo", "", 1<<20, nil); err == nil {
 		t.Fatal("overwrote destination created during transfer")
@@ -591,7 +585,20 @@ func TestPublicationFailureRollsBackCompletedDirectories(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "demo/data")); !os.IsNotExist(err) {
 		t.Fatal("left partially published data directory")
 	}
-	assertFile(t, dir, "demo/queries/user.txt", "keep")
-	assertFile(t, dir, "demo/dataset.yaml", "s3: s3://original/config/\n")
+	assertFile(t, dir, "demo/dataset.yaml/user.txt", "keep")
 	assertNoStages(t, dir)
+}
+
+func TestDataPullPreservesExistingQueryFixtures(t *testing.T) {
+	dir := pullTestDir(t)
+	putTestFile(t, dir, "demo/download.yaml", []byte(dataManifest))
+	putTestFile(t, dir, "demo/queries/queries.parquet", []byte("existing fixture"))
+	fake := &fakeDownloads{files: map[string][]byte{"corpus/data.csv": []byte("id\n1\n")}}
+	if err := pullDataset(context.Background(), fake, dir, "demo", "", 1<<20, nil); err != nil {
+		t.Fatal(err)
+	}
+	assertFile(t, dir, "demo/queries/queries.parquet", "existing fixture")
+	if len(fake.gets) != 1 || fake.gets[0] != "corpus/data.csv" {
+		t.Fatalf("unexpected downloads: %v", fake.gets)
+	}
 }

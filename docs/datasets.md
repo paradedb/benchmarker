@@ -7,7 +7,7 @@ A dataset is a self-contained directory with everything needed to load data and 
 ```text
 datasets/sample/
 ├── schema.yaml              # Column names and types
-├── download.yaml            # Optional S3 data/query references
+├── download.yaml            # Optional S3 corpus references
 ├── data/
 │   └── data.csv             # Source data (or data.parquet / Parquet shards)
 ├── paradedb/
@@ -181,13 +181,13 @@ in `tables` order, into the target named by each entry's `table`.
 Backend `pre` and `post` scripts may create or index additional tables beyond
 those the CLI bulk-import path loads.
 
-A dataset may embed its corpus under `data/` or declare remote corpus and query
-assets in `download.yaml`. The shared source is
+A dataset may embed its corpus under `data/` or declare remote corpus
+in `download.yaml`. The shared source is
 `s3://paradedb-benchmark/datasets/<corpus>/v1/`. Generated `dataset.yaml` records
-download provenance and must not be used as source configuration. Keep shared
-query Parquet under `queries/` and benchmark-specific generated JSON in `k6/`.
-Generate fixtures explicitly from the matching query and ground-truth version;
-manifest downloads never run generators. See [pulling data](loader.md#commands).
+download provenance and must not be used as source configuration. Keep
+benchmark-specific JSON fixtures in `k6/`. Query inputs and ground truth are
+managed separately; `download.yaml` only downloads corpus into `data/`. See
+[pulling data](loader.md#commands).
 
 ## Loader Support Matrix
 

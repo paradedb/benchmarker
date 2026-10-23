@@ -19,15 +19,25 @@ AWS_PROFILE=ci ./bin/loader pull --dataset cohere-10m
 
 The manifest points to
 `s3://paradedb-benchmark/datasets/cohere/v1/sampled/10m/parquet/cohere_wiki/`
-and exact shared query assets under `cohere/v1/queries/`. Corpus shards are
-placed directly under `data/`; query Parquet files go under `queries/`.
-Existing nonempty asset directories are never overwritten.
+with corpus shards placed directly under `data/`. Query assets are not downloaded
+by the manifest. Existing nonempty corpus directories are never overwritten.
 
 To fetch configuration too, use an absent or empty destination:
 
 ```bash
 AWS_PROFILE=ci ./bin/loader pull --dataset cohere-10m-copy \
   --source s3://paradedb-benchmark/benchmarker/cohere-10m/
+```
+
+Query inputs are only needed when regenerating JSON fixtures. Fetch them
+separately if they are not already available:
+
+```bash
+mkdir -p datasets/cohere-10m/queries
+AWS_PROFILE=ci aws s3 cp s3://paradedb-benchmark/datasets/cohere/v1/queries/cohere_queries.parquet \
+  datasets/cohere-10m/queries/cohere_queries.parquet
+AWS_PROFILE=ci aws s3 cp s3://paradedb-benchmark/datasets/cohere/v1/queries/ground_truth_knn_top10_unfiltered_10m.parquet \
+  datasets/cohere-10m/queries/ground_truth_knn_top10_unfiltered_10m.parquet
 ```
 
 Generate matching k6 vectors and recall JSON explicitly (requires `pyarrow`):
