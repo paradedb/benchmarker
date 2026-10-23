@@ -167,4 +167,4 @@ The [Scripting Guide](docs/scripting.md) covers the full module API, backend con
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License. See [LICENSE](LICENSE) for details.
