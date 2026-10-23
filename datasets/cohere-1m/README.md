@@ -11,11 +11,37 @@ survive on the same containers. `post.sql` recall knobs are set via
 
 ## Getting the data
 
+With configuration already in the checkout:
+
 ```bash
-./bin/loader pull --dataset cohere-1m --source s3://paradedb-benchmarker/datasets/cohere-1m/
+AWS_PROFILE=ci ./bin/loader pull --dataset cohere-1m
 ```
 
-Upstream source: `s3://paradedb-benchmarks/datasets/cohere/sampled/1m/parquet/`.
+The manifest points to
+`s3://paradedb-benchmark/datasets/cohere/v1/sampled/1m/parquet/cohere_wiki/`
+and exact shared query assets under `cohere/v1/queries/`. Corpus shards are
+placed directly under `data/`; query Parquet files go under `queries/`.
+Existing nonempty asset directories are never overwritten.
+
+To fetch configuration too, use an absent or empty destination:
+
+```bash
+AWS_PROFILE=ci ./bin/loader pull --dataset cohere-1m-copy \
+  --source s3://paradedb-benchmark/benchmarker/cohere-1m/
+```
+
+Generate matching k6 vectors and recall JSON explicitly (requires `pyarrow`):
+
+```bash
+cd datasets/cohere-1m/k6
+python3 make_query_vectors.py
+```
+
+The generator checks 1-based query IDs and 1024-dimensional vectors. The checked-in
+`ground_truth_top10_1m.json` matches the canonical unfiltered ground truth.
+Regenerate the filtered fixture with the same generator and
+`--ground-truth ../queries/ground_truth_knn_top10_1pct_1m.parquet
+--ground-truth-out ground_truth_top10_1pct_1m.json`.
 
 ## Load
 

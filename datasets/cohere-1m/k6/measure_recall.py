@@ -3,12 +3,12 @@
 
 Runs every held-out query vector through the same kNN request shape that
 k6/vector.js benchmarks, at each --candidates value, and intersects the
-returned document ids with the exact top-10 in ground_truth_top10_10m.json.
+returned document ids with the exact top-10 in ground_truth_top10_1m.json.
 Matched-recall operating points across backends are a precondition for
 comparing ANN latency at all; this reports the ES side of that tuning.
 
 Stdlib only (no pyarrow): ground truth ships as JSON in this directory,
-generated from queries/ground_truth_knn_top10_unfiltered_10m.parquet with
+generated from queries/ground_truth_knn_top10_unfiltered_1m.parquet with
 query_id 1..N matching the row order of query_vectors.json.
 
 Usage:
@@ -47,7 +47,7 @@ def main():
     parser.add_argument("--url", default="http://localhost:9200")
     parser.add_argument("--index", default="cohere_wiki")
     parser.add_argument("--vectors", default="query_vectors.json")
-    parser.add_argument("--ground-truth", default="ground_truth_top10_10m.json")
+    parser.add_argument("--ground-truth", default="ground_truth_top10_1m.json")
     parser.add_argument("--candidates", default="10,20,40,80,150,300,600,1000")
     parser.add_argument("--filter-term", help="full-text filter gating the kNN (1pct shape)")
     args = parser.parse_args()

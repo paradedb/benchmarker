@@ -12,35 +12,35 @@ ParadeDB table / Elasticsearch index `sift` with `_id` and `emb` (128d).
 
 ## Getting the data
 
-Source: `s3://paradedb-benchmarks/datasets/sift/`.
-
-- `sampled/10m/parquet/sift/000{0..9}.parquet`: 10 shards of 1M rows
-  (`_id`, `emb`).
-- `queries/sift_queries.parquet`: 10k held-out query vectors (`id`, `emb`).
-- `queries/ground_truth_knn_top10_unfiltered_10m.parquet`: exact L2 top-10
-  per query (`query_id`, `gt_ids`).
-
-The loader expects the corpus shards directly under `data/` and the queries
-under `queries/`:
+With configuration already in the checkout:
 
 ```bash
-aws s3 sync s3://paradedb-benchmarks/datasets/sift/sampled/10m/parquet/sift/ datasets/sift-10m/data/
-aws s3 sync s3://paradedb-benchmarks/datasets/sift/queries/ datasets/sift-10m/queries/
+AWS_PROFILE=ci ./bin/loader pull --dataset sift-10m
 ```
 
-With a local copy already on disk, symlink instead of copying:
+The manifest points to
+`s3://paradedb-benchmark/datasets/sift/v1/sampled/10m/parquet/sift/`
+and exact shared query assets under `sift/v1/queries/`. Corpus shards are
+placed directly under `data/`; query Parquet files go under `queries/`.
+Existing nonempty asset directories are never overwritten.
+
+To fetch configuration too, use an absent or empty destination:
 
 ```bash
-ln -s /path/to/sift10m-parquet/sampled/10m/parquet/sift datasets/sift-10m/data
-ln -s /path/to/sift10m-parquet/queries datasets/sift-10m/queries
+AWS_PROFILE=ci ./bin/loader pull --dataset sift-10m-copy \
+  --source s3://paradedb-benchmark/benchmarker/sift-10m/
 ```
 
-Then generate `k6/query_vectors.json` and `k6/ground_truth_top10.json`
-(requires `pyarrow`; `measure_recall.py` is stdlib-only):
+Generate `k6/query_vectors.json` and `k6/ground_truth_top10.json` explicitly
+from the matching shared query/ground-truth Parquet files (requires `pyarrow`):
 
 ```bash
-cd datasets/sift-10m/k6 && uvx --with pyarrow python make_query_vectors.py
+cd datasets/sift-10m/k6
+python3 make_query_vectors.py
 ```
+
+Query IDs are 0-based, vectors have 128 dimensions, and ground truth is specific
+to the 10M corpus. The manifest downloads only these two query assets.
 
 ## Load
 

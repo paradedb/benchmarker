@@ -170,3 +170,20 @@ func TestBackendCLIFlagsAndSelection(t *testing.T) {
 		}
 	}
 }
+
+func TestPostOnlyWithoutLocalCorpus(t *testing.T) {
+	dir := t.TempDir()
+	putTestFile(t, dir, "schema.yaml", []byte("table: documents\ncolumns: {id: bigint}\n"))
+	putTestFile(t, dir, "postgres/pre.sql", []byte("SELECT 'pre';"))
+	putTestFile(t, dir, "postgres/post.sql", []byte("SELECT 'post';"))
+	cfg, _ := drivers.GetConfig("postgres")
+	original := cfg
+	var driver *selectionDriver
+	cfg.Factory = func(string) (drivers.Driver, error) { driver = &selectionDriver{}; return driver, nil }
+	drivers.Register("postgres", cfg)
+	t.Cleanup(func() { drivers.Register("postgres", original) })
+	runLoad(dir, "postgres", 100, 1, loadPostOnly, backendOptions{})
+	if driver == nil || len(driver.commands) != 1 || driver.commands[0] != "SELECT 'post';" {
+		t.Fatalf("post-only commands: %+v", driver)
+	}
+}

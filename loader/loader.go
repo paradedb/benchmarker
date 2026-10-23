@@ -60,12 +60,12 @@ type DocumentReader struct {
 }
 
 // OpenDocuments loads documents from a CSV file.
-// Defaults to "../data.csv" if no path provided.
+// Defaults to "../data/data.csv" if no path provided.
 // Paths are resolved relative to the k6 script location.
 // The file is loaded once and cached - subsequent calls return the cached reader.
 func (l *Loader) OpenDocuments(filePath string) *DocumentReader {
 	if filePath == "" {
-		filePath = "../data.csv"
+		filePath = "../data/data.csv"
 	}
 
 	// Resolve path relative to script location

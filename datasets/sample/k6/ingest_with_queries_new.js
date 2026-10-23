@@ -7,7 +7,7 @@ const backends = db.backends({
 
 const terms = db.terms(JSON.parse(open("./search_terms.json")));
 const loader = db.loader();
-const docs = loader.openDocuments(__ENV.DATA_FILE || "../data.csv");
+const docs = loader.openDocuments(__ENV.DATA_FILE || "../data/data.csv");
 const INGEST_BATCH_SIZE = 1000;
 
 const timer = db.timer({ duration: "30s", gap: "5s" });

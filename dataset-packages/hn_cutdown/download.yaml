@@ -1,0 +1,5 @@
+version: 1
+data:
+  - source: s3://paradedb-benchmark/datasets/hackernews/text/v1/sampled/1m/csv/data.csv
+    kind: object
+    destination: data.csv

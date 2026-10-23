@@ -1,0 +1,12 @@
+version: 1
+data:
+  - source: s3://paradedb-benchmark/datasets/sift/v1/sampled/10m/parquet/sift/
+    kind: prefix
+    destination: .
+queries:
+  - source: s3://paradedb-benchmark/datasets/sift/v1/queries/sift_queries.parquet
+    kind: object
+    destination: sift_queries.parquet
+  - source: s3://paradedb-benchmark/datasets/sift/v1/queries/ground_truth_knn_top10_unfiltered_10m.parquet
+    kind: object
+    destination: ground_truth_knn_top10_unfiltered_10m.parquet

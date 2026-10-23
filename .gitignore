@@ -47,3 +47,9 @@ bin/
 
 #Conf
 .env
+
+# Download staging and generated provenance (sample corpus remains checked in)
+datasets/.pull-*/
+datasets/*/.pull-*/
+datasets/*/dataset.yaml
+datasets/sample/queries/

@@ -5,7 +5,7 @@ Sweeps paradedb.vector_cluster_max_probe, running the same query shape as
 k6/vector.js once per held-out vector (one statement per query, vector
 inlined — a lateral/aggregate rewrite can change the plan and measure a
 query the benchmark never runs). Returned ids are intersected with the
-exact top-10 in ground_truth_top10_10m.json.
+exact top-10 in ground_truth_top10_1m.json.
 
 Stdlib only; talks to postgres through `docker exec psql` (or psql via
 --psql), so it runs on the benchmark host with no driver installed.
@@ -61,7 +61,7 @@ def main():
     parser.add_argument("--user", default="postgres")
     parser.add_argument("--psql", help="run this psql command instead of docker exec")
     parser.add_argument("--vectors", default="query_vectors.json")
-    parser.add_argument("--ground-truth", default="ground_truth_top10_10m.json")
+    parser.add_argument("--ground-truth", default="ground_truth_top10_1m.json")
     parser.add_argument("--probes", default="0.01,0.02,0.05,0.1,0.2,0.5")
     parser.add_argument("--filter-term", help="full-text filter gating the kNN (1pct shape)")
     args = parser.parse_args()
