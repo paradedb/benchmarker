@@ -1,7 +1,7 @@
 # Data Loader
 
 The loader CLI handles bulk data loading with lifecycle scripts. It reads your
-dataset's `schema.yaml` and its data sources (`data.parquet`, `data.csv`, or a
+dataset's `schema.yaml` and its data sources (`data/data.parquet`, `data/data.csv`, or a
 sharded Parquet `data/` directory; one source per table for multi-table
 datasets), validates the schema for each backend, runs backend-specific `pre`
 scripts, bulk inserts the data, then runs `post` scripts.
@@ -27,24 +27,69 @@ scripts, bulk inserts the data, then runs `post` scripts.
 # Drop all data
 ./bin/loader drop ./datasets/sample
 
-# Pull dataset from S3
-./bin/loader pull --dataset large --source s3://fts-bench/datasets/large/
+# Download assets declared by checked-in configuration
+AWS_PROFILE=ci ./bin/loader pull --dataset cohere-1m
 
-# Pull from a public S3 bucket (no credentials needed)
-./bin/loader pull --dataset test --source s3://fts-bench/datasets/test/ --anonymous
+# Fetch a config package and its declared assets into an absent or empty directory
+AWS_PROFILE=ci ./bin/loader pull --dataset cohere-copy \
+  --source s3://paradedb-benchmark/benchmarker/cohere-1m/
 
-# Pull only configuration from a prefix, leaving its large compressed CSV in S3
-./bin/loader pull --dataset test --source s3://fts-bench/datasets/test/ --exclude data.csv.gz
+# Custom public config packages can still use anonymous access
+./bin/loader pull --dataset custom --source s3://my-public-bucket/config/ --anonymous
 ```
 
-For prefix-based pulls, CSV objects ending in `.csv.gz` are decompressed while
-they download and written without the `.gz` suffix. For example,
-`data.csv.gz` becomes `data.csv`, while `data/posts.csv.gz` becomes
-`data/posts.csv`. The compressed copy is not stored locally.
+Without `--source`, the dataset directory and `download.yaml` must already exist.
+With `--source`, the destination must be absent or empty, and the config package
+may be an S3 prefix or a `.tar.gz`/`.tgz` archive. A self-contained package with
+corpus under `data/` needs no manifest. Embedded corpus plus remote `data`
+declarations is an error. The manifest supports only corpus data; a `queries`
+field is rejected.
 
-Use repeatable `--exclude <relative-path>` flags to omit objects from an S3
-prefix pull. Exclusions are exact relative paths and are not supported when the
-source itself is a `.tar.gz` or `.tgz` archive.
+`download.yaml` uses strict versioned YAML:
+
+```yaml
+version: 1
+data:
+  - source: s3://paradedb-benchmark/datasets/cohere/v1/sampled/1m/parquet/cohere_wiki/
+    kind: prefix
+    destination: .
+```
+
+Destinations are relative to `data/`. Prefixes preserve relative object names.
+Objects require an explicit filename. A `.csv.gz` object is streamed into its
+decompressed destination, e.g.
+`destination: data.csv`; a prefix entry `data/posts.csv.gz` becomes
+`data/posts.csv`. `--max-extracted-bytes` limits each decompressed CSV or the
+whole decompressed archive (100 GiB by default). Raise it explicitly for larger
+corpora, such as Stack Exchange.
+
+Downloads reject absolute paths, traversal, symlinked destinations/ancestors,
+duplicate outputs, and collisions after decompression. The `data/` directory
+must be absent or empty; existing corpus files are never merged or replaced.
+Existing query fixtures are left alone by manifest-driven downloads. Downloads
+finish in staging directories before publication; a failed transfer removes its staging files and leaves existing
+configuration, assets, and provenance intact. A repeat pull fails instead of
+refreshing files. Move existing asset directories aside explicitly to download
+another version.
+
+`dataset.yaml` records successful download provenance: the existing `s3` and
+`pulled_at` fields plus resolved `data` references and
+`assets_pulled_at`. An assets-only pull preserves earlier config provenance.
+`download.yaml` is never rewritten. Pulling does not execute SQL, JavaScript,
+Compose files, or fixture generators; loading and running remain separate steps.
+
+Repeatable `--exclude <relative-path>` flags omit exact config-prefix objects
+only. They never filter referenced assets and require a prefix `--source`.
+They are not supported for archive or assets-only pulls.
+
+Root-level corpus files such as `data.csv` and `data.parquet` are migration
+errors during both pull and load, even if valid data also exists under `data/`.
+Move them under `data/` yourself, or fix the upstream package. Query fixtures
+remain in `k6/` or `queries/`; explicit-path reader APIs remain general-purpose.
+`--post-only` needs schema/backend configuration but no local corpus.
+
+See [config package preparation](../dataset-packages/README.md) for the canonical
+S3 package names and the migration procedure.
 
 Build the loader with:
 
@@ -125,7 +170,8 @@ For S3 pulls, the AWS SDK uses its standard credential chain (environment variab
 The CLI imports one table/index/collection per `tables` entry (or the single
 top-level `table`). It supports scalar CSV and Parquet columns for every
 backend, including sharded Parquet directories. Single-table data lives at the
-dataset root (`data.parquet`, `data.csv`, or `data/`); multi-table data lives
+dataset’s `data/` directory (`data/data.parquet`, `data/data.csv`, or Parquet
+shards directly under `data/`); multi-table data lives
 under `data/` as `<table>.parquet`, `<table>.csv`, or a `<table>/` shard
 directory per table. `vector(n)` schema columns are supported for ParadeDB,
 PostgreSQL, Elasticsearch, OpenSearch, and Turbopuffer; the CLI checks support
@@ -198,7 +244,7 @@ make loader k6
 ./k6 run --out dashboard datasets/sample/k6/turbopuffer.js
 ```
 
-The sample requires its usual `data.csv` (see [Datasets](datasets.md)). Its
+The sample requires its usual `data/data.csv` (see [Datasets](datasets.md)). Its
 `pre.json` resets the cloud namespace `documents`, deleting any previous contents.
 Change the dataset's table name, namespace in pre/post scripts, and query target
 if you want to use a different namespace. All commands use your cloud account.

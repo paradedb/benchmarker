@@ -32,4 +32,4 @@ jobs:
         uses: paradedb/actions/check-typo@v14
         with:
           ignore-words-file: .codespellignore
-          skip: ./go.sum,./datasets/sample/data.csv
+          skip: ./go.sum,./datasets/sample/data/data.csv

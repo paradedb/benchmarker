@@ -11,30 +11,48 @@ Uses the same dataset as the paradedb/paradedb CI vector benchmarks
 
 ## Getting the data
 
-The assembled artifact (this config plus `data/` parquet shards, `queries/`,
-and a pre-generated `k6/query_vectors.json`) lives at
-`s3://paradedb-benchmarker/datasets/cohere-10m/`. On a fresh machine, one
-clean pull gives a ready-to-load dataset:
+With configuration already in the checkout:
 
 ```bash
-./bin/loader pull --dataset cohere-10m --source s3://paradedb-benchmarker/datasets/cohere-10m/
+AWS_PROFILE=ci ./bin/loader pull --dataset cohere-10m
 ```
 
-Into an existing checkout (config already present), sync just the data:
+The manifest points to
+`s3://paradedb-benchmark/datasets/cohere/v1/sampled/10m/parquet/cohere_wiki/`
+with corpus shards placed directly under `data/`. Query assets are not downloaded
+by the manifest. Existing nonempty corpus directories are never overwritten.
+
+To fetch configuration too, use an absent or empty destination:
 
 ```bash
-aws s3 sync s3://paradedb-benchmarker/datasets/cohere-10m/data/ datasets/cohere-10m/data/
-aws s3 sync s3://paradedb-benchmarker/datasets/cohere-10m/queries/ datasets/cohere-10m/queries/
-aws s3 cp s3://paradedb-benchmarker/datasets/cohere-10m/k6/query_vectors.json datasets/cohere-10m/k6/
+AWS_PROFILE=ci ./bin/loader pull --dataset cohere-10m-copy \
+  --source s3://paradedb-benchmark/benchmarker/cohere-10m/
 ```
 
-The upstream source is `s3://paradedb-benchmarks/datasets/cohere/` (100
-parquet shards of ~100k rows plus the held-out query set).
+Query inputs are only needed when regenerating JSON fixtures. Fetch them
+separately if they are not already available:
+
+```bash
+mkdir -p datasets/cohere-10m/queries
+AWS_PROFILE=ci aws s3 cp s3://paradedb-benchmark/datasets/cohere/v1/queries/cohere_queries.parquet \
+  datasets/cohere-10m/queries/cohere_queries.parquet
+AWS_PROFILE=ci aws s3 cp s3://paradedb-benchmark/datasets/cohere/v1/queries/ground_truth_knn_top10_unfiltered_10m.parquet \
+  datasets/cohere-10m/queries/ground_truth_knn_top10_unfiltered_10m.parquet
+```
+
+Generate matching k6 vectors and recall JSON explicitly (requires `pyarrow`):
+
+```bash
+cd datasets/cohere-10m/k6
+python3 make_query_vectors.py
+```
+
+The generator checks 1-based query IDs and 1024-dimensional vectors. The checked-in
+`ground_truth_top10_10m.json` matches the canonical unfiltered ground truth.
 
 ## Running
 
-1. Query vector pool: `k6/query_vectors.json` ships in the S3 artifact. To
-   regenerate it from the queries parquet (requires `pyarrow`):
+1. Generate the query vector pool and ground truth (requires `pyarrow`):
 
    ```bash
    cd datasets/cohere-10m/k6 && python3 make_query_vectors.py
@@ -73,7 +91,7 @@ parquet shards of ~100k rows plus the held-out query set).
 
 - **Recall parity**: ANN latency is only comparable at matched recall. Ground
   truth for the query set lives alongside the data
-  (`queries/ground_truth_10m.parquet` and friends). Tune `hnsw.ef_search`
+  (`queries/ground_truth_knn_top10_unfiltered_10m.parquet`). Tune `hnsw.ef_search`
   (postgres), `paradedb.vector_cluster_max_probe` (paradedb) — set via
   `ALTER DATABASE` in each backend's `post.sql` — and `num_candidates`
   (elasticsearch, per query) until all reach the same measured recall@10

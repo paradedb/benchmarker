@@ -11,11 +11,49 @@ survive on the same containers. `post.sql` recall knobs are set via
 
 ## Getting the data
 
+With configuration already in the checkout:
+
 ```bash
-./bin/loader pull --dataset cohere-1m --source s3://paradedb-benchmarker/datasets/cohere-1m/
+AWS_PROFILE=ci ./bin/loader pull --dataset cohere-1m
 ```
 
-Upstream source: `s3://paradedb-benchmarks/datasets/cohere/sampled/1m/parquet/`.
+The manifest points to
+`s3://paradedb-benchmark/datasets/cohere/v1/sampled/1m/parquet/cohere_wiki/`
+with corpus shards placed directly under `data/`. Query assets are not downloaded
+by the manifest. Existing nonempty corpus directories are never overwritten.
+
+To fetch configuration too, use an absent or empty destination:
+
+```bash
+AWS_PROFILE=ci ./bin/loader pull --dataset cohere-1m-copy \
+  --source s3://paradedb-benchmark/benchmarker/cohere-1m/
+```
+
+Query inputs are only needed when regenerating JSON fixtures. Fetch them
+separately if they are not already available:
+
+```bash
+mkdir -p datasets/cohere-1m/queries
+AWS_PROFILE=ci aws s3 cp s3://paradedb-benchmark/datasets/cohere/v1/queries/cohere_queries.parquet \
+  datasets/cohere-1m/queries/cohere_queries.parquet
+AWS_PROFILE=ci aws s3 cp s3://paradedb-benchmark/datasets/cohere/v1/queries/ground_truth_knn_top10_unfiltered_1m.parquet \
+  datasets/cohere-1m/queries/ground_truth_knn_top10_unfiltered_1m.parquet
+AWS_PROFILE=ci aws s3 cp s3://paradedb-benchmark/datasets/cohere/v1/queries/ground_truth_knn_top10_1pct_1m.parquet \
+  datasets/cohere-1m/queries/ground_truth_knn_top10_1pct_1m.parquet
+```
+
+Generate matching k6 vectors and recall JSON explicitly (requires `pyarrow`):
+
+```bash
+cd datasets/cohere-1m/k6
+python3 make_query_vectors.py
+```
+
+The generator checks 1-based query IDs and 1024-dimensional vectors. The checked-in
+`ground_truth_top10_1m.json` matches the canonical unfiltered ground truth.
+Regenerate the filtered fixture with the same generator and
+`--ground-truth ../queries/ground_truth_knn_top10_1pct_1m.parquet
+--ground-truth-out ground_truth_top10_1pct_1m.json`.
 
 ## Load
 

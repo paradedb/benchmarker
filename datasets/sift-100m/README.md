@@ -20,36 +20,45 @@ ParadeDB table / Elasticsearch index `sift` with `_id` and `emb` (128d).
 
 ## Getting the data
 
-Source: `s3://paradedb-benchmarks/datasets/sift/`.
-
-- `sampled/100m/parquet/sift/00{00..99}.parquet`: 100 shards of 1M rows
-  (`_id`, `emb`), ~12GiB.
-- `queries/sift_queries.parquet`: 10k held-out query vectors (`id`, `emb`),
-  shared with `sift-10m`.
-- `queries/ground_truth_knn_top10_unfiltered_100m.parquet`: exact L2 top-10
-  per query over the 100M corpus (`query_id`, `gt_ids`).
-
-The loader expects the corpus shards directly under `data/` and the queries
-under `queries/`:
+With configuration already in the checkout:
 
 ```bash
-aws s3 sync s3://paradedb-benchmarks/datasets/sift/sampled/100m/parquet/sift/ datasets/sift-100m/data/
-aws s3 sync s3://paradedb-benchmarks/datasets/sift/queries/ datasets/sift-100m/queries/
+AWS_PROFILE=ci ./bin/loader pull --dataset sift-100m
 ```
 
-With a local copy already on disk, symlink instead of copying:
+The manifest points to
+`s3://paradedb-benchmark/datasets/sift/v1/sampled/100m/parquet/sift/`
+with corpus shards placed directly under `data/`. Query assets are not downloaded
+by the manifest. Existing nonempty corpus directories are never overwritten.
+
+To fetch configuration too, use an absent or empty destination:
 
 ```bash
-ln -s /path/to/sift100m-parquet/sampled/100m/parquet/sift datasets/sift-100m/data
-ln -s /path/to/sift100m-parquet/queries datasets/sift-100m/queries
+AWS_PROFILE=ci ./bin/loader pull --dataset sift-100m-copy \
+  --source s3://paradedb-benchmark/benchmarker/sift-100m/
 ```
 
-Then generate `k6/query_vectors.json` and `k6/ground_truth_top10.json`
-(requires `pyarrow`; `measure_recall.py` is stdlib-only):
+Query inputs are only needed when regenerating JSON fixtures. Fetch them
+separately if they are not already available:
 
 ```bash
-cd datasets/sift-100m/k6 && uvx --with pyarrow python make_query_vectors.py
+mkdir -p datasets/sift-100m/queries
+AWS_PROFILE=ci aws s3 cp s3://paradedb-benchmark/datasets/sift/v1/queries/sift_queries.parquet \
+  datasets/sift-100m/queries/sift_queries.parquet
+AWS_PROFILE=ci aws s3 cp s3://paradedb-benchmark/datasets/sift/v1/queries/ground_truth_knn_top10_unfiltered_100m.parquet \
+  datasets/sift-100m/queries/ground_truth_knn_top10_unfiltered_100m.parquet
 ```
+
+Generate `k6/query_vectors.json` and `k6/ground_truth_top10.json` explicitly
+from the matching shared query/ground-truth Parquet files (requires `pyarrow`):
+
+```bash
+cd datasets/sift-100m/k6
+python3 make_query_vectors.py
+```
+
+Query IDs are 0-based, vectors have 128 dimensions, and ground truth is specific
+to the 100M corpus. Fetch these inputs separately; the manifest downloads only the corpus.
 
 ## Load
 

@@ -338,3 +338,20 @@ func TestLegacyOpenDocumentsStillCachesStringsAndCycles(t *testing.T) {
 		t.Fatalf("legacy CSV unexpectedly converted embeddings: %#v", batch)
 	}
 }
+
+func TestOpenDocumentsDefaultUsesDataDirectory(t *testing.T) {
+	dir, _ := streamFixture(t)
+	if err := os.Mkdir(filepath.Join(dir, "data"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, "data.csv"), filepath.Join(dir, "data", "data.csv")); err != nil {
+		t.Fatal(err)
+	}
+	runtime := modulestest.NewRuntime(t)
+	runtime.VU.InitEnvField.CWD = &url.URL{Scheme: "file", Path: filepath.Join(dir, "k6")}
+	docs := NewLoader(runtime.VU).OpenDocuments("")
+	rows := docs.NextBatch(1)
+	if len(rows) != 1 || rows[0]["id"] != "1" {
+		t.Fatalf("default data path: %#v", rows)
+	}
+}

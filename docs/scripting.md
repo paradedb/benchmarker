@@ -122,7 +122,7 @@ The generic k6 loading helper also accepts a backend name:
 
 ```javascript
 loader.load("vectorchord", "", {
-  file: "../data.csv",
+  file: "../data/data.csv",
   dataset: "../",
 });
 ```
@@ -322,7 +322,7 @@ import db from "k6/x/database";
 const backends = db.backends({ backends: ["paradedb", "elasticsearch"] });
 const terms = db.terms(open("./search_terms.json"));
 const loader = db.loader();
-const docs = loader.openDocuments("../ingest_data.csv");
+const docs = loader.openDocuments("../data/ingest_data.csv");
 const BATCH_SIZE = 1000;
 
 const timer = db.timer({ duration: "30s", gap: "5s" });
@@ -513,7 +513,7 @@ The primary purpose of ingest scenarios is to put write pressure on the database
 To run an ingest workload, use the loader to open a CSV document file and insert
 batches. The data file used for ingest must contain documents that are not
 already in the database. If you pre-loaded a dataset with the loader CLI or a
-setup function, you will need a separate CSV file (e.g. `ingest_data.csv`) with
+setup function, you will need a separate CSV file (e.g. `data/ingest_data.csv`) with
 different document IDs for insert scenarios, otherwise you will get duplicate
 key errors. Note that you can only run an ingest benchmark once per file, since
 subsequent runs will fail with duplicates after the documents have been
@@ -628,21 +628,21 @@ make loader k6
 ./k6 run datasets/sample/k6/update_while_reading.js
 ```
 
-Both scripts read `data.csv` and `schema.yaml` relative to themselves and use
+Both scripts read `../data/data.csv` and `../schema.yaml` relative to themselves and use
 the sample search terms. Override `DATA_FILE` to read a Parquet file or shard
 directory with the same columns. `SCHEMA_FILE`, `TABLE`, `PARADEDB_URL`, and
 `DURATION` are also configurable. Custom tables must have a UUID `id` primary
 key and a ParadeDB search index on `content` (see the sample post-load SQL).
 
 The bundled `datasets/sample/fixtures/data.parquet` contains the same five rows
-as `data.csv`. To read it during the benchmark, run from the repository root:
+as `data/data.csv`. To read it during the benchmark, run from the repository root:
 
 ```bash
 DATA_FILE="$PWD/datasets/sample/fixtures/data.parquet" \
 ./k6 run datasets/sample/k6/insert_while_reading.js
 ```
 
-The fixture directory keeps the CLI's default sample load on `data.csv`.
+The fixture directory keeps the CLI's default sample load on `data/data.csv`.
 
 To update the existing rows from the same Parquet source:
 
@@ -695,7 +695,7 @@ loader.load(
   "paradedb",
   "postgres://postgres:postgres@localhost:5432/benchmark",
   {
-    file: "../data.csv",
+    file: "../data/data.csv",
     table: "documents",
     dataset: "../",
     batchSize: 10000,
@@ -703,14 +703,23 @@ loader.load(
 );
 
 // Backend-specific helpers
-loader.loadParadeDB("postgres://...", { file: "../data.csv", dataset: "../" });
-loader.loadPostgres("postgres://...", { file: "../data.csv", dataset: "../" });
-loader.loadElasticsearch({ file: "../data.csv", dataset: "../" });
-loader.loadClickHouse("clickhouse://...", {
-  file: "../data.csv",
+loader.loadParadeDB("postgres://...", {
+  file: "../data/data.csv",
   dataset: "../",
 });
-loader.loadMongoDB("mongodb://...", { file: "../data.csv", dataset: "../" });
+loader.loadPostgres("postgres://...", {
+  file: "../data/data.csv",
+  dataset: "../",
+});
+loader.loadElasticsearch({ file: "../data/data.csv", dataset: "../" });
+loader.loadClickHouse("clickhouse://...", {
+  file: "../data/data.csv",
+  dataset: "../",
+});
+loader.loadMongoDB("mongodb://...", {
+  file: "../data/data.csv",
+  dataset: "../",
+});
 ```
 
 Returns `{ loaded, loadTimeMs, indexTimeMs, totalTimeMs, error }`. The `dataset`

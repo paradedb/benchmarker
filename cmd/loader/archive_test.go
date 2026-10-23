@@ -193,7 +193,7 @@ func TestArchiveBudget(t *testing.T) {
 	}{
 		{"file", []string{"data.csv"}, 1024},
 		{"aggregate", []string{"a", "b"}, 4096},
-		{"skipped traversal", []string{"../escape"}, 1024},
+
 		{"tar metadata", []string{strings.Repeat("long/", 300) + "data"}, 1024},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

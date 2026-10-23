@@ -1,0 +1,14 @@
+version: 1
+data:
+  - source: s3://paradedb-benchmark/datasets/stackoverflow/v1/sampled/1m/parquet/stackoverflow_posts/
+    kind: prefix
+    destination: stackoverflow_posts
+  - source: s3://paradedb-benchmark/datasets/stackoverflow/v1/sampled/1m/parquet/comments/
+    kind: prefix
+    destination: comments
+  - source: s3://paradedb-benchmark/datasets/stackoverflow/v1/sampled/1m/parquet/users/
+    kind: prefix
+    destination: users
+  - source: s3://paradedb-benchmark/datasets/stackoverflow/v1/sampled/1m/parquet/badges/
+    kind: prefix
+    destination: badges

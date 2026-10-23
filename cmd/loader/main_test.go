@@ -219,11 +219,11 @@ func TestLocateDataFilePreference(t *testing.T) {
 	if err := os.Mkdir(dataDir, 0755); err != nil {
 		t.Fatalf("create data dir: %v", err)
 	}
-	csvPath := filepath.Join(dir, "data.csv")
+	csvPath := filepath.Join(dataDir, "data.csv")
 	if err := os.WriteFile(csvPath, []byte("id\n1\n"), 0644); err != nil {
 		t.Fatalf("write csv: %v", err)
 	}
-	parquetPath := filepath.Join(dir, "data.parquet")
+	parquetPath := filepath.Join(dataDir, "data.parquet")
 	if err := os.WriteFile(parquetPath, []byte("PAR1"), 0644); err != nil {
 		t.Fatalf("write parquet placeholder: %v", err)
 	}
@@ -244,6 +244,9 @@ func TestLocateDataFileFallsBackToShardDirectory(t *testing.T) {
 		t.Fatalf("create data dir: %v", err)
 	}
 
+	if err := os.WriteFile(filepath.Join(dataDir, "0000.parquet"), []byte("PAR1"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	got, err := locateDataFile(dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -294,6 +297,9 @@ func TestLocateTableDataFilePreference(t *testing.T) {
 		t.Fatalf("locateTableDataFile() = %q, want %q", got, csvPath)
 	}
 
+	if err := os.WriteFile(filepath.Join(shardDir, "0000.parquet"), []byte("PAR1"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Remove(csvPath); err != nil {
 		t.Fatalf("remove csv: %v", err)
 	}

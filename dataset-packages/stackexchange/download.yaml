@@ -1,0 +1,5 @@
+version: 1
+data:
+  - source: s3://paradedb-benchmark/datasets/stackexchange/v1/sampled/150m/csv/documents/data.csv.gz
+    kind: object
+    destination: data.csv

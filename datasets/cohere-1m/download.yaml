@@ -1,0 +1,5 @@
+version: 1
+data:
+  - source: s3://paradedb-benchmark/datasets/cohere/v1/sampled/1m/parquet/cohere_wiki/
+    kind: prefix
+    destination: .

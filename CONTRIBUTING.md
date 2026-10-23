@@ -228,7 +228,9 @@ Datasets follow this structure:
 ```text
 datasets/<name>/
 ├── schema.yaml           # Column definitions
-├── data.csv              # Source data (or data.parquet, or sharded data/)
+├── download.yaml         # Optional declarative S3 corpus references
+├── data/
+│   └── data.csv          # Corpus (or data.parquet / Parquet shards)
 ├── paradedb/
 │   ├── pre.sql           # Create tables
 │   └── post.sql          # Create indexes, VACUUM
@@ -241,7 +243,15 @@ datasets/<name>/
 
 SQL backends use `.sql` files, HTTP backends (Elasticsearch, OpenSearch, MongoDB) use `.json`. You only need to add directories for the backends you want to test — the loader skips backends with no scripts.
 
-The CLI loader imports one source into one `schema.yaml` table per dataset.
+Keep all corpus files under `data/`; root-level `data.csv` and `data.parquet`
+are migration errors. Use `download.yaml` to reference shared versioned S3 data,
+or embed corpus under `data/`. The manifest supports only `data`; manage query
+inputs separately and keep generated benchmark fixtures under `k6/`. Do not commit downloaded corpus or generated
+`dataset.yaml` provenance. The bundled sample CSV is the small checked-in exception.
+See [download manifests](docs/loader.md#commands) and
+[config package preparation](dataset-packages/README.md).
+
+The CLI loader imports one source per `schema.yaml` table, including multi-table datasets.
 Scalar CSV and Parquet columns work across backends; `vector(n)` columns are
 supported by ParadeDB, PostgreSQL, Elasticsearch,
 OpenSearch, and Turbopuffer. For k6 ingest/update workloads,

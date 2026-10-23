@@ -44,7 +44,7 @@ func main() {
 
 	pullCmd := flag.NewFlagSet("pull", flag.ContinueOnError)
 	pullDataset := pullCmd.String("dataset", "", "Dataset name (creates ./datasets/<name>/)")
-	pullSource := pullCmd.String("source", "", "S3 source URL (s3://bucket/prefix/)")
+	pullSource := pullCmd.String("source", "", "Optional S3 config package URL; otherwise use local download.yaml")
 	pullMaxBytes := pullCmd.Int64("max-extracted-bytes", 100<<30, "Maximum decompressed archive or CSV size in bytes (default 100 GiB)")
 	pullAnonymous := pullCmd.Bool("anonymous", false, "Use anonymous access for public buckets")
 	var pullExcludes relativePathList
@@ -112,12 +112,12 @@ func main() {
 		}
 		if pullCmd.NArg() > 0 {
 			fmt.Fprintf(os.Stderr, "Error: unexpected argument: %s\n", pullCmd.Arg(0))
-			fmt.Fprintln(os.Stderr, "Usage: loader pull --dataset <name> --source s3://bucket/prefix/")
+			fmt.Fprintln(os.Stderr, "Usage: loader pull --dataset <name> [--source s3://bucket/prefix/]")
 			os.Exit(1)
 		}
-		if *pullDataset == "" || *pullSource == "" {
-			fmt.Fprintln(os.Stderr, "Error: --dataset and --source are required")
-			fmt.Fprintln(os.Stderr, "Usage: loader pull --dataset <name> --source s3://bucket/prefix/")
+		if *pullDataset == "" {
+			fmt.Fprintln(os.Stderr, "Error: --dataset is required")
+			fmt.Fprintln(os.Stderr, "Usage: loader pull --dataset <name> [--source s3://bucket/prefix/]")
 			os.Exit(1)
 		}
 		if *pullMaxBytes <= 0 {
@@ -139,13 +139,13 @@ func printUsage() {
 Usage:
   loader load [--backend <name>] [--batch-size <n>] [--workers <n>] [--pre-only | --post-only] <dataset-dir>
   loader drop [--backend <name>] <dataset-dir>
-  loader pull --dataset <name> --source <s3-url> [--anonymous] [--exclude <relative-path>]
+  loader pull --dataset <name> [--source <s3-url>] [--anonymous] [--exclude <relative-path>]
   loader help
 
 Commands:
   load    Run pre.sql/json, bulk load parquet or CSV data (one file or one per table), run post.sql/json
   drop    Drop tables/indexes for the dataset
-  pull    Download dataset from S3 to ./datasets/<name>/ (auto-extracts .tar.gz/.tgz and .csv.gz objects)
+  pull    Fetch config and declared S3 assets, or use an existing download.yaml
   help    Show this help message
 
 Default backends:
@@ -161,7 +161,7 @@ Options:
   --post-only                Skip pre and data load; only run post against existing data
   --max-extracted-bytes <n>  Maximum decompressed archive or CSV bytes (default 107374182400)
   --dataset <name>           Dataset name for pull command
-  --source <url>             S3 source URL (s3://bucket/prefix/)
+  --source <url>             Optional S3 config package URL (prefix or archive)
   --anonymous                Use anonymous access for public S3 buckets
   --exclude <relative-path>  Skip an object during a prefix pull (repeatable)
 
@@ -185,7 +185,7 @@ Examples:
   loader pull --dataset large --source s3://mybucket/datasets/large/
   loader pull --dataset large --source s3://mybucket/datasets/large/ --exclude data.csv.gz
   loader pull --dataset test --source s3://fts-bench/datasets/test/ --anonymous
-  loader pull --dataset hn --source s3://fts-bench/datasets/hn.tar.gz --anonymous
+  loader pull --dataset cohere-1m  # uses datasets/cohere-1m/download.yaml
   PARADEDB_URL=postgres://user:pass@host:5432/db loader load --backend paradedb ./datasets/sample`)
 }
 
@@ -408,6 +408,21 @@ func locateData(candidates []dataCandidate, missing string) (string, error) {
 		if !candidate.dir && info.IsDir() {
 			return "", fmt.Errorf("%s exists but is a directory", candidate.path)
 		}
+		if candidate.dir {
+			entries, err := os.ReadDir(candidate.path)
+			if err != nil {
+				return "", err
+			}
+			found := false
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".parquet") {
+					found = true
+				}
+			}
+			if !found {
+				return "", fmt.Errorf("no parquet shards in %s", candidate.path)
+			}
+		}
 		return candidate.path, nil
 	}
 	return "", fmt.Errorf("%s", missing)
@@ -416,11 +431,14 @@ func locateData(candidates []dataCandidate, missing string) (string, error) {
 // locateDataFile finds a single-table dataset's data, preferring a single
 // parquet file, then CSV, then a data/ directory of parquet shards.
 func locateDataFile(datasetDir string) (string, error) {
+	if err := rejectLegacyCorpus(datasetDir); err != nil {
+		return "", err
+	}
 	return locateData([]dataCandidate{
-		{path: filepath.Join(datasetDir, "data.parquet")},
-		{path: filepath.Join(datasetDir, "data.csv")},
+		{path: filepath.Join(datasetDir, "data", "data.parquet")},
+		{path: filepath.Join(datasetDir, "data", "data.csv")},
 		{path: filepath.Join(datasetDir, "data"), dir: true},
-	}, fmt.Sprintf("no data.parquet, data.csv, or data/ directory found in %s", datasetDir))
+	}, fmt.Sprintf("no data/data.parquet, data/data.csv, or data/ parquet shards found in %s", datasetDir))
 }
 
 // locateTableDataFile finds one table's data in a multi-table dataset, with
@@ -443,6 +461,9 @@ type tableData struct {
 }
 
 func resolveTableData(datasetDir string, schema *drivers.Schema) ([]tableData, error) {
+	if err := rejectLegacyCorpus(datasetDir); err != nil {
+		return nil, err
+	}
 	if len(schema.Tables) == 0 {
 		path, err := locateDataFile(datasetDir)
 		if err != nil {
@@ -521,30 +542,10 @@ func s3ListPrefix(prefix string) string {
 }
 
 func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes int64, excludes []string) {
-	bucket, prefix, err := parseS3URL(sourceURL)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	if isTarGzKey(prefix) && len(excludes) > 0 {
-		fmt.Println("Error: --exclude is only supported for S3 prefix pulls")
-		os.Exit(1)
-	}
-
-	destDir := filepath.Join("datasets", datasetName)
-	if err := prepareDestDir(destDir); err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("Pulling from s3://%s/%s to %s\n", bucket, prefix, destDir)
-	if anonymous {
-		fmt.Println("Using anonymous access (public bucket)")
-	}
-
 	ctx := context.Background()
 
 	var cfg aws.Config
+	var err error
 	if anonymous {
 		cfg, err = config.LoadDefaultConfig(ctx,
 			config.WithCredentialsProvider(aws.AnonymousCredentials{}),
@@ -558,103 +559,11 @@ func runPull(datasetName, sourceURL string, anonymous bool, maxExtractedBytes in
 		os.Exit(1)
 	}
 
-	client := s3.NewFromConfig(cfg)
-
-	if isTarGzKey(prefix) {
-		if err := pullTarGz(ctx, client, bucket, prefix, destDir, maxExtractedBytes); err != nil {
-			fmt.Printf("Error: %v\n", err)
-			os.Exit(1)
-		}
-		writeDatasetManifest(destDir, sourceURL)
-		return
-	}
-
-	root, err := os.OpenRoot(destDir)
-	if err != nil {
-		fmt.Printf("Error opening destination: %v\n", err)
+	if err := pullDataset(ctx, s3.NewFromConfig(cfg), "datasets", datasetName, sourceURL, maxExtractedBytes, excludes); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	defer root.Close()
-
-	var objects []string
-	paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
-		Bucket: aws.String(bucket),
-		Prefix: aws.String(s3ListPrefix(prefix)),
-	})
-
-	for paginator.HasMorePages() {
-		page, err := paginator.NextPage(ctx)
-		if err != nil {
-			fmt.Printf("Error listing objects: %v\n", err)
-			os.Exit(1)
-		}
-		for _, obj := range page.Contents {
-			key := aws.ToString(obj.Key)
-			if strings.HasSuffix(key, "/") {
-				continue
-			}
-			objects = append(objects, key)
-		}
-	}
-
-	if len(objects) == 0 {
-		fmt.Printf("No objects found at s3://%s/%s\n", bucket, prefix)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Found %d files to download\n", len(objects))
-
-	var downloaded, failed int
-	var totalBytes int64
-
-	for _, key := range objects {
-		relPath, _, err := resolveDownloadPath(destDir, prefix, key)
-		if err != nil {
-			fmt.Printf("  Skipping %s: %v\n", key, err)
-			failed++
-			continue
-		}
-		if isExcludedPath(relPath, excludes) {
-			fmt.Printf("  Skipping %s (excluded)\n", relPath)
-			continue
-		}
-
-		resp, err := client.GetObject(ctx, &s3.GetObjectInput{
-			Bucket: aws.String(bucket),
-			Key:    aws.String(key),
-		})
-		if err != nil {
-			fmt.Printf("  Error downloading %s: %v\n", relPath, err)
-			failed++
-			continue
-		}
-
-		outputPath, n, err := writePulledObject(root, destDir, relPath, resp.Body, maxExtractedBytes)
-		resp.Body.Close()
-		if err != nil {
-			fmt.Printf("  Error writing %s: %v\n", relPath, err)
-			failed++
-			continue
-		}
-
-		totalBytes += n
-		downloaded++
-		if outputPath != relPath {
-			fmt.Printf("  %s -> %s (%s)\n", relPath, outputPath, formatBytes(n))
-		} else {
-			fmt.Printf("  %s (%s)\n", outputPath, formatBytes(n))
-		}
-	}
-
-	fmt.Printf("\nComplete: %d files downloaded (%.2f MB)", downloaded, float64(totalBytes)/1024/1024)
-	if failed > 0 {
-		fmt.Printf(", %d failed", failed)
-	}
-	fmt.Println()
-	if failed > 0 {
-		os.Exit(1)
-	}
-	writeDatasetManifest(destDir, sourceURL)
+	fmt.Printf("Pulled datasets/%s successfully\n", datasetName)
 }
 
 func isCsvGzPath(path string) bool {
@@ -666,12 +575,20 @@ func isCsvGzPath(path string) bool {
 // loader can consume them directly without storing a second compressed copy.
 func writePulledObject(root *os.Root, destDir, relPath string, src io.Reader, maxBytes int64) (string, int64, error) {
 	outputPath := relPath
+	compressed := isCsvGzPath(relPath)
+	if compressed {
+		outputPath = strings.TrimSuffix(relPath, ".gz")
+	}
+	return writeDownloadFile(root, destDir, outputPath, src, maxBytes, compressed)
+}
+
+// Compression follows the source key, not an object's explicit destination.
+func writeDownloadFile(root *os.Root, destDir, outputPath string, src io.Reader, maxBytes int64, compressed bool) (string, int64, error) {
 	reader := src
-	if isCsvGzPath(relPath) {
+	if compressed {
 		if maxBytes <= 0 {
 			return "", 0, fmt.Errorf("decompression limit must be positive")
 		}
-		outputPath = relPath[:len(relPath)-len(".gz")]
 		gz, err := gzip.NewReader(src)
 		if err != nil {
 			return "", 0, fmt.Errorf("opening gzip stream: %w", err)
@@ -703,55 +620,12 @@ func writePulledObject(root *os.Root, destDir, relPath string, src io.Reader, ma
 	return outputPath, n, nil
 }
 
-// writeDatasetManifest records where the dataset was pulled from. The k6
-// extension reads this file at run time and embeds it in the dashboard JSON
-// so the run record carries the canonical S3 location.
-func writeDatasetManifest(destDir, sourceURL string) {
-	manifest := fmt.Sprintf("s3: %s\npulled_at: %s\n",
-		sourceURL,
-		time.Now().UTC().Format(time.RFC3339),
-	)
-	path := filepath.Join(destDir, "dataset.yaml")
-	if err := os.WriteFile(path, []byte(manifest), 0600); err != nil {
-		fmt.Printf("Warning: failed to write %s: %v\n", path, err)
-		return
-	}
-	fmt.Printf("Wrote %s\n", path)
-}
-
-// prepareDestDir ensures destDir is a real, empty directory we can safely
-// write into. It rejects symlinks and non-empty directories so that tar/S3
-// entries can't be written through a pre-existing symlinked subpath.
-func prepareDestDir(destDir string) error {
-	info, err := os.Lstat(destDir)
-	if os.IsNotExist(err) {
-		return os.MkdirAll(destDir, 0750)
-	}
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("destination %q is a symlink; refusing to extract into it", destDir)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("destination %q exists and is not a directory", destDir)
-	}
-	entries, err := os.ReadDir(destDir)
-	if err != nil {
-		return err
-	}
-	if len(entries) > 0 {
-		return fmt.Errorf("destination %q is not empty; remove it before pulling", destDir)
-	}
-	return nil
-}
-
 func isTarGzKey(key string) bool {
 	lower := strings.ToLower(key)
 	return strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz")
 }
 
-func pullTarGz(ctx context.Context, client *s3.Client, bucket, key, destDir string, maxBytes int64) error {
+func pullTarGz(ctx context.Context, client s3Downloads, bucket, key string, root *os.Root, maxBytes int64) error {
 	resp, err := client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -761,7 +635,7 @@ func pullTarGz(ctx context.Context, client *s3.Client, bucket, key, destDir stri
 	}
 	defer resp.Body.Close()
 
-	return extractTarGz(resp.Body, destDir, maxBytes)
+	return extractTarGzRoot(resp.Body, root, maxBytes)
 }
 
 func extractTarGz(src io.Reader, destDir string, maxBytes int64) error {
@@ -773,6 +647,11 @@ func extractTarGz(src io.Reader, destDir string, maxBytes int64) error {
 		return err
 	}
 	defer root.Close()
+	return extractTarGzRoot(src, root, maxBytes)
+}
+
+func extractTarGzRoot(src io.Reader, root *os.Root, maxBytes int64) error {
+	destDir := root.Name()
 	gz, err := gzip.NewReader(src)
 	if err != nil {
 		return fmt.Errorf("opening gzip stream: %w", err)
@@ -782,7 +661,7 @@ func extractTarGz(src io.Reader, destDir string, maxBytes int64) error {
 	// Limit the entire decompressed stream, including skipped entries and tar metadata.
 	limited := &decompressionBudgetReader{reader: gz, remaining: maxBytes}
 	tr := tar.NewReader(limited)
-	var extracted, skipped int
+	var extracted int
 	var totalBytes int64
 
 	for {
@@ -797,16 +676,16 @@ func extractTarGz(src io.Reader, destDir string, maxBytes int64) error {
 		switch hdr.Typeflag {
 		case tar.TypeReg, tar.TypeDir:
 		default:
-			fmt.Printf("  Skipping %s (unsupported tar entry type %c)\n", hdr.Name, hdr.Typeflag)
-			skipped++
-			continue
+			return fmt.Errorf("unsupported tar entry type %c: %s", hdr.Typeflag, hdr.Name)
 		}
 
-		relPath, localPath, err := resolveDownloadPath(destDir, "", hdr.Name)
-		if err != nil {
-			fmt.Printf("  Skipping %s: %v\n", hdr.Name, err)
-			skipped++
+		name := strings.TrimPrefix(strings.TrimSuffix(hdr.Name, "/"), "./")
+		if hdr.Typeflag == tar.TypeDir && (name == "." || name == "") {
 			continue
+		}
+		relPath, localPath, err := resolveDownloadPath(destDir, "", name)
+		if err != nil {
+			return err
 		}
 
 		if hdr.Typeflag == tar.TypeDir {
@@ -843,11 +722,7 @@ func extractTarGz(src io.Reader, destDir string, maxBytes int64) error {
 		return fmt.Errorf("finishing archive: %w", err)
 	}
 
-	fmt.Printf("\nComplete: %d files extracted (%.2f MB)", extracted, float64(totalBytes)/1024/1024)
-	if skipped > 0 {
-		fmt.Printf(", %d skipped", skipped)
-	}
-	fmt.Println()
+	fmt.Printf("\nStaged: %d files extracted (%.2f MB)\n", extracted, float64(totalBytes)/1024/1024)
 	return nil
 }
 
@@ -861,6 +736,9 @@ func resolveDownloadPath(destDir, prefix, key string) (string, string, error) {
 		return "", "", fmt.Errorf("absolute path %q is not allowed", relPath)
 	}
 	relPath = strings.TrimPrefix(relPath, "/")
+	if err := validateRelativePath(relPath, false); err != nil {
+		return "", "", err
+	}
 	cleanRelPath := filepath.Clean(relPath)
 
 	if cleanRelPath == "." || cleanRelPath == "" {

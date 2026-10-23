@@ -7,7 +7,9 @@ A dataset is a self-contained directory with everything needed to load data and 
 ```text
 datasets/sample/
 ├── schema.yaml              # Column names and types
-├── data.csv                 # Source data (or data.parquet)
+├── download.yaml            # Optional S3 corpus references
+├── data/
+│   └── data.csv             # Source data (or data.parquet / Parquet shards)
 ├── paradedb/
 │   ├── pre.sql              # Create tables, set up schema
 │   └── post.sql             # Create indexes, VACUUM ANALYZE
@@ -164,9 +166,10 @@ tables:
 
 ## Data Files
 
-For single-table datasets, source data lives in `data.csv` or `data.parquet`
-at the dataset root, or in a `data/` directory holding sharded parquet files;
-the loader prefers a single parquet file, then CSV, then the shard directory.
+For single-table datasets, all corpus data lives under `data/`. The loader
+resolves `data/data.parquet`, then `data/data.csv`, then Parquet shards directly
+under `data/`. Empty shard directories are errors. Root-level `data.csv` or
+`data.parquet` causes a migration error even when a valid candidate also exists.
 CSV cells hold array and vector values as JSON (e.g. `"[0.1,0.2]"`). Parquet
 columns map directly: scalars to their Go types, `list<float>` to `vector(n)`.
 
@@ -177,6 +180,14 @@ in `tables` order, into the target named by each entry's `table`.
 
 Backend `pre` and `post` scripts may create or index additional tables beyond
 those the CLI bulk-import path loads.
+
+A dataset may embed its corpus under `data/` or declare remote corpus
+in `download.yaml`. The shared source is
+`s3://paradedb-benchmark/datasets/<corpus>/v1/`. Generated `dataset.yaml` records
+download provenance and must not be used as source configuration. Keep
+benchmark-specific JSON fixtures in `k6/`. Query inputs and ground truth are
+managed separately; `download.yaml` only downloads corpus into `data/`. See
+[pulling data](loader.md#commands).
 
 ## Loader Support Matrix
 

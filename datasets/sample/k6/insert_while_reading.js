@@ -20,7 +20,7 @@ const backends = db.backends({
   ],
 });
 const terms = db.terms(JSON.parse(open("./search_terms.json")));
-const stream = db.loader().openDocumentStream(__ENV.DATA_FILE || "../data.csv", {
+const stream = db.loader().openDocumentStream(__ENV.DATA_FILE || "../data/data.csv", {
   schema: __ENV.SCHEMA_FILE || "../schema.yaml",
 });
 
