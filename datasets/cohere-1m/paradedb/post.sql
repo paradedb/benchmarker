@@ -1,9 +1,8 @@
 DROP INDEX IF EXISTS cohere_wiki_vector_idx;
 
 -- ParadeDB post-load: build the pg_search vector index.
--- `bm25` is the permanent alias for the `paradedb` access method.
 CREATE INDEX cohere_wiki_vector_idx ON cohere_wiki
-USING bm25 (
+USING paradedb (
     _id,
     (text::pdb.unicode_words('stemmer=english', 'stopwords_language=english')),
     emb vector_cosine_ops
