@@ -66,7 +66,7 @@ func TestParadeDBVectorLoadIndexAndQuerySmoke(t *testing.T) {
 
 	if err := driver.Exec(ctx, fmt.Sprintf(`
 		CREATE INDEX %s ON %s
-		USING bm25 (_id, emb vector_cosine_ops)
+		USING paradedb (_id, emb vector_cosine_ops)
 		WITH (key_field = '_id');
 		VACUUM ANALYZE %s;
 	`, index, table, table)); err != nil {
