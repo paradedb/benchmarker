@@ -81,12 +81,34 @@ extras:
 | Field         | Default                                                                | Meaning                                                               |
 | ------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | `driver`      | Required                                                               | Registered driver name                                                |
-| `container`   | Backend name                                                           | Docker container, or `""` to disable Docker metrics                   |
+| `container`   | None                                                                   | Docker container, or `""` to disable Docker metrics                   |
 | `connection`  | None                                                                   | Connection used when no explicit value or environment override is set |
 | `envVar`      | Uppercase backend name, hyphens replaced with underscores, plus `_URL` | Connection environment variable; `""` disables it                     |
 | `description` | Empty                                                                  | Human-readable description                                            |
 | `color`       | Dashboard palette                                                      | Chart color; explicit k6 colors take precedence                       |
 | `extras`      | Empty                                                                  | Optional PostgreSQL configuration capture and telemetry settings      |
+
+Omitting `container` from a global manifest disables Docker CPU/memory stats,
+as does `container: ""`. In a dataset override, omission inherits the global
+value; use `container: ""` to clear it. Custom manifests that previously relied
+on an implicit container name must now set `container` explicitly.
+
+For a remote backend such as TIN, omit both `container` and `connection`:
+
+```yaml
+driver: postgres
+envVar: TIN_URL
+description: PostgreSQL TIN (PlanetScale, only available via DBaaS)
+color: "#1a1a1a"
+```
+
+Set `TIN_URL` or provide an explicit connection (`--connection` in the loader,
+`connection` in k6). Without either, TIN fails with an error naming `TIN_URL`.
+Drivers supporting another endpoint setting remain an exception: Turbopuffer
+can use `TURBOPUFFER_REGION`. Docker stats require a configured container;
+query latency, throughput, and supported database telemetry remain available
+without one. Remote database telemetry depends on service capabilities and
+permissions.
 
 Backend manifests are the source of default dashboard colors. Runs use the
 selected manifest; saved results without colors use

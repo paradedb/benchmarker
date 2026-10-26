@@ -1,0 +1,33 @@
+driver: postgres
+# No local container or default connection. Set TIN_URL or an explicit connection.
+# Docker stats are unavailable; database telemetry depends on service permissions.
+envVar: TIN_URL
+description: PostgreSQL TIN (PlanetScale, only available via DBaaS)
+color: "#1a1a1a"
+extras:
+  # https://planetscale.com/docs/postgres/search/reference/settings
+  gucPrefixes: [tin]
+  indexAccessMethods: [tin]
+  queries:
+    - key: tin.version
+      query: SELECT extversion FROM pg_extension WHERE extname = 'tin'
+    # BM25, tokenizer, stemming, and segment settings are per-index options.
+    # Capture explicit overrides; omitted options use extension-version defaults.
+    # https://planetscale.com/docs/postgres/search/reference/indexes
+    - key: tin.indexes
+      query: |
+        SELECT 'tin.index.' || format('%I.%I', n.nspname, c.relname),
+               jsonb_build_object(
+                 'definition', pg_get_indexdef(c.oid),
+                 'options', COALESCE(c.reloptions, ARRAY[]::text[]),
+                 'size_bytes', pg_relation_size(c.oid),
+                 'valid', i.indisvalid,
+                 'table_options', COALESCE(t.reloptions, ARRAY[]::text[])
+               )::text
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_am am ON am.oid = c.relam
+        JOIN pg_index i ON i.indexrelid = c.oid
+        JOIN pg_class t ON t.oid = i.indrelid
+        WHERE am.amname = 'tin'
+        ORDER BY n.nspname, c.relname

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/paradedb/benchmarker/backends"
@@ -110,7 +111,7 @@ func TestConnectionPrecedenceAndCustomDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w.ContainerName() != "custom-search" || w.EnvironmentVariable() != "CUSTOM_SEARCH_URL" {
+	if w.ContainerName() != "" || w.EnvironmentVariable() != "CUSTOM_SEARCH_URL" {
 		t.Fatalf("defaults: %+v", w)
 	}
 	t.Setenv("CUSTOM_SEARCH_URL", "")
@@ -128,6 +129,28 @@ func TestConnectionPrecedenceAndCustomDefaults(t *testing.T) {
 	w.Connection = ""
 	if _, err := w.ResolveConnection(""); err == nil {
 		t.Fatal("missing connection accepted")
+	}
+}
+
+func TestTINRequiresRemoteConnection(t *testing.T) {
+	t.Chdir(t.TempDir())
+	w, err := backends.Resolve("tin", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.DriverName != "postgres" || w.ContainerName() != "" || w.Connection != "" || w.EnvironmentVariable() != "TIN_URL" {
+		t.Fatalf("unexpected TIN defaults: %+v", w)
+	}
+	t.Setenv("TIN_URL", "")
+	if _, err := w.ResolveConnection(""); err == nil || !strings.Contains(err.Error(), "set connection or TIN_URL") {
+		t.Fatalf("expected actionable missing connection error, got %v", err)
+	}
+	t.Setenv("TIN_URL", "postgres://remote/benchmark")
+	if got, err := w.ResolveConnection(""); err != nil || got != "postgres://remote/benchmark" {
+		t.Fatalf("environment connection = %q, %v", got, err)
+	}
+	if got, err := w.ResolveConnection("postgres://explicit/benchmark"); err != nil || got != "postgres://explicit/benchmark" {
+		t.Fatalf("explicit connection = %q, %v", got, err)
 	}
 }
 
