@@ -68,11 +68,13 @@ type Backend struct {
 	Name string
 }
 
+// ContainerName returns the configured Docker metrics target. An omitted or
+// empty container disables Docker metrics; database telemetry is independent.
 func (w Backend) ContainerName() string {
 	if w.Container != nil {
 		return *w.Container
 	}
-	return w.Name
+	return ""
 }
 
 func (w Backend) EnvironmentVariable() string {
