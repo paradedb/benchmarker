@@ -21,7 +21,7 @@ import (
 	"go.k6.io/k6/js/modulestest"
 	"go.k6.io/k6/lib"
 	k6metrics "go.k6.io/k6/metrics"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 var liveEnvFile = flag.String("turbopuffer-env-file", "", "Read TURBOPUFFER_API_KEY from a local .env for explicit live tests")
