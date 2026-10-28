@@ -10,7 +10,7 @@ import (
 
 	"github.com/paradedb/benchmarker/drivers"
 	"go.k6.io/k6/js/modules"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // DocumentStream is an independent, forward-only reader. It never caches the

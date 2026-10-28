@@ -26,7 +26,7 @@ import (
 	_ "github.com/paradedb/benchmarker" // triggers driver init() via backends.go imports
 	"github.com/paradedb/benchmarker/backends"
 	"github.com/paradedb/benchmarker/drivers"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func main() {
