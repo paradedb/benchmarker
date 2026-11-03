@@ -24,3 +24,16 @@ updates:
       go-dependencies:
         patterns:
           - "*"
+
+  - package-ecosystem: "docker"
+    directories:
+      - "/docker/*"
+    schedule:
+      interval: "monthly"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-patch"]
+    groups:
+      docker-dependencies:
+        patterns:
+          - "*"
