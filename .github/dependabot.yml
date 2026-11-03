@@ -24,3 +24,15 @@ updates:
       go-dependencies:
         patterns:
           - "*"
+
+  - package-ecosystem: "docker"
+    directory: "/docker/pg_vectorsearch"
+    schedule:
+      interval: "monthly"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-patch"]
+    groups:
+      docker-dependencies:
+        patterns:
+          - "*"
