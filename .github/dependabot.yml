@@ -26,7 +26,8 @@ updates:
           - "*"
 
   - package-ecosystem: "docker"
-    directory: "/docker/pg_vectorsearch"
+    directories:
+      - "/docker/*"
     schedule:
       interval: "monthly"
     ignore:
