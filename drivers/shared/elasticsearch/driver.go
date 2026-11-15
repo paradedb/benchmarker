@@ -21,6 +21,7 @@ import (
 // DriverConfig holds backend-specific configuration.
 type DriverConfig struct {
 	VersionInfoField string // "build_flavor" for ES, "distribution" for OS
+	APIKey           string // Optional encoded Elasticsearch API key
 }
 
 // Driver implements the drivers.Driver interface for Elasticsearch/OpenSearch.
@@ -33,15 +34,35 @@ type Driver struct {
 // New creates a new Elasticsearch/OpenSearch driver.
 func New(address string, config DriverConfig) (drivers.Driver, error) {
 	transport := &http.Transport{}
+	client := &http.Client{Timeout: 15 * time.Minute, Transport: transport}
+	if config.APIKey != "" {
+		u, err := url.Parse(address)
+		if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+			return nil, fmt.Errorf("elasticsearch: API key authentication requires an HTTPS endpoint")
+		}
+		// Match Turbopuffer: authenticated requests must not follow redirects.
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
 	return &Driver{
 		address: strings.TrimSuffix(address, "/"),
-		client:  &http.Client{Timeout: 15 * time.Minute, Transport: transport},
+		client:  client,
 		config:  config,
 	}, nil
 }
 
 // Close is a no-op.
 func (d *Driver) Close() error { return nil }
+
+func (d *Driver) newRequest(ctx context.Context, method, address string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, address, body)
+	if err != nil {
+		return nil, err
+	}
+	if d.config.APIKey != "" {
+		req.Header.Set("Authorization", "ApiKey "+d.config.APIKey)
+	}
+	return req, nil
+}
 
 // Exec executes JSON configuration (create index, update settings, etc).
 func (d *Driver) Exec(ctx context.Context, statements string) error {
@@ -67,12 +88,15 @@ func (d *Driver) Exec(ctx context.Context, statements string) error {
 
 func (d *Driver) createIndex(ctx context.Context, index string, config map[string]interface{}) error {
 	// Delete existing index
-	req, _ := http.NewRequestWithContext(ctx, "DELETE", fmt.Sprintf("%s/%s", d.address, index), nil)
+	req, err := d.newRequest(ctx, "DELETE", fmt.Sprintf("%s/%s", d.address, index), nil)
+	if err != nil {
+		return err
+	}
 	resp, err := d.client.Do(req)
 	if err == nil && resp != nil {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
-		if resp.StatusCode >= 400 && resp.StatusCode != http.StatusNotFound {
+		if resp.StatusCode >= 300 && resp.StatusCode != http.StatusNotFound {
 			return fmt.Errorf("delete index failed with status %d", resp.StatusCode)
 		}
 	}
@@ -82,7 +106,10 @@ func (d *Driver) createIndex(ctx context.Context, index string, config map[strin
 
 	// Create with settings
 	body, _ := json.Marshal(config)
-	req, _ = http.NewRequestWithContext(ctx, "PUT", fmt.Sprintf("%s/%s", d.address, index), bytes.NewReader(body))
+	req, err = d.newRequest(ctx, "PUT", fmt.Sprintf("%s/%s", d.address, index), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err = d.client.Do(req)
@@ -91,7 +118,7 @@ func (d *Driver) createIndex(ctx context.Context, index string, config map[strin
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("create index failed: %s", string(body))
 	}
@@ -146,7 +173,10 @@ func (d *Driver) execOperations(ctx context.Context, operations []map[string]int
 			bodyReader = bytes.NewReader(bodyBytes)
 		}
 
-		req, _ := http.NewRequestWithContext(ctx, method, opURL, bodyReader)
+		req, err := d.newRequest(ctx, method, opURL, bodyReader)
+		if err != nil {
+			return err
+		}
 		if bodyReader != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
@@ -168,7 +198,7 @@ func (d *Driver) execOperations(ctx context.Context, operations []map[string]int
 		if err != nil {
 			return err
 		}
-		if resp.StatusCode >= 400 {
+		if resp.StatusCode >= 300 {
 			respBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			return fmt.Errorf("operation %s %s failed: %s", method, opURL, string(respBody))
@@ -248,8 +278,11 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 		}
 	}
 
-	req, _ := http.NewRequestWithContext(ctx, "POST",
+	req, err := d.newRequest(ctx, "POST",
 		fmt.Sprintf("%s/%s/_search?request_cache=false", d.address, index), bytes.NewReader(jsonBody))
+	if err != nil {
+		return 0, err
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := d.client.Do(req)
@@ -258,7 +291,7 @@ func (d *Driver) Query(ctx context.Context, query string, args ...any) (int, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return 0, fmt.Errorf("search failed: %s", string(body))
 	}
@@ -340,7 +373,10 @@ func (d *Driver) Insert(ctx context.Context, index string, cols []string, rows [
 		return 0, err
 	}
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/_bulk", d.address), strings.NewReader(body))
+	req, err := d.newRequest(ctx, "POST", fmt.Sprintf("%s/_bulk", d.address), strings.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
 	req.Header.Set("Content-Type", "application/x-ndjson")
 
 	resp, err := d.client.Do(req)
@@ -349,7 +385,7 @@ func (d *Driver) Insert(ctx context.Context, index string, cols []string, rows [
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(resp.Body)
 		return 0, fmt.Errorf("bulk insert failed: %s", string(respBody))
 	}
@@ -418,7 +454,10 @@ func (d *Driver) Update(ctx context.Context, index string, keyCols []string, col
 		body.WriteByte('\n')
 	}
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/_bulk", d.address), strings.NewReader(body.String()))
+	req, err := d.newRequest(ctx, "POST", fmt.Sprintf("%s/_bulk", d.address), strings.NewReader(body.String()))
+	if err != nil {
+		return 0, err
+	}
 	req.Header.Set("Content-Type", "application/x-ndjson")
 
 	resp, err := d.client.Do(req)
@@ -427,7 +466,7 @@ func (d *Driver) Update(ctx context.Context, index string, keyCols []string, col
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(resp.Body)
 		return 0, fmt.Errorf("bulk update failed: %s", string(respBody))
 	}
@@ -462,7 +501,11 @@ func (d *Driver) Update(ctx context.Context, index string, keyCols []string, col
 func (d *Driver) CaptureConfig(ctx context.Context, backendName string) {
 	config := make(map[string]interface{})
 
-	req, _ := http.NewRequestWithContext(ctx, "GET", d.address, nil)
+	req, err := d.newRequest(ctx, "GET", d.address, nil)
+	if err != nil {
+		fmt.Printf("[%s] config capture failed: %v\n", backendName, err)
+		return
+	}
 	resp, err := d.client.Do(req)
 	if err != nil {
 		fmt.Printf("[%s] config capture failed: %v\n", backendName, err)

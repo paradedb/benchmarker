@@ -163,6 +163,33 @@ export MONGODB_URL="mongodb://localhost:27017"
 
 When using the Docker Compose profiles, the defaults work out of the box - no environment variables needed.
 
+### Elasticsearch API keys (cloud)
+
+Like Turbopuffer, Elasticsearch reads its API key from an environment variable
+for both the loader and k6:
+
+```bash
+export ELASTICSEARCH_URL="https://your-elasticsearch-endpoint:9243"
+export ELASTICSEARCH_API_KEY="your-encoded-api-key"
+
+make loader k6
+./bin/loader load --backend elasticsearch ./datasets/sample
+```
+
+Use your endpoint's actual port and the **encoded** Elasticsearch API key
+(`base64(id:api_key)`, or the `encoded` value returned when creating a key).
+The driver sends `Authorization: ApiKey <encoded-key>` on every request.
+Keep the key out of URLs and scripts. API key connections require HTTPS, verify
+the server certificate, and do not follow redirects.
+
+The key is optional: unset or blank values preserve unauthenticated local
+connections and username/password authentication in `ELASTICSEARCH_URL`.
+When set, the API key takes precedence over URL username/password credentials.
+It does not affect OpenSearch. For remote k6 backends, set `container: ""`
+in the backend configuration to skip Docker metrics.
+
+### S3 credentials
+
 For S3 pulls, the AWS SDK uses its standard credential chain (environment variables, `~/.aws/credentials`, IAM role, etc.). You can set `AWS_REGION` and `AWS_PROFILE` to control which region and profile are used. Use `--anonymous` for public buckets.
 
 ## Data Source Support

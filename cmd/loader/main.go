@@ -169,6 +169,7 @@ Environment Variables:
   PARADEDB_URL       ParadeDB connection string
   POSTGRES_URL       PostgreSQL connection string
   ELASTICSEARCH_URL  Elasticsearch address
+  ELASTICSEARCH_API_KEY  Encoded Elasticsearch API key (optional; requires HTTPS)
   OPENSEARCH_URL     OpenSearch address
   CLICKHOUSE_URL     ClickHouse connection string
   MONGODB_URL        MongoDB connection string
