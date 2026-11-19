@@ -97,6 +97,48 @@ func TestGetSummaryUsesQueryWindowForQPS(t *testing.T) {
 	}
 }
 
+func TestQueryActivityResumesRunAfterInactivity(t *testing.T) {
+	registry := k6metrics.NewRegistry()
+	duration, err := registry.NewMetric("query_duration", k6metrics.Trend, k6metrics.Time)
+	if err != nil {
+		t.Fatalf("create query duration metric: %v", err)
+	}
+
+	backend := "resumed-run"
+	tags := registry.RootTagSet().With("backend", backend).With("query", "search")
+	o := &Output{
+		data: &DashboardData{
+			StartTime:  time.Unix(0, 0),
+			Runs:       make(map[string]*RunMetrics),
+			Containers: make(map[string]*ContainerMetrics),
+		},
+	}
+	push := func(at time.Time) {
+		o.AddMetricSamples([]k6metrics.SampleContainer{k6metrics.Samples{{
+			TimeSeries: k6metrics.TimeSeries{Metric: duration, Tags: tags},
+			Time:       at,
+			Value:      100,
+		}}})
+		o.flush()
+	}
+
+	push(time.UnixMilli(1_000))
+	run := o.data.Runs[backend]
+	if run.EndTime != 1_000 {
+		t.Fatalf("expected inactive run to end at 1000, got %d", run.EndTime)
+	}
+
+	resumedAt := time.Now().Add(time.Second)
+	push(resumedAt)
+
+	if run.LastUpdateTime != resumedAt.UnixMilli() {
+		t.Fatalf("last update = %d, want %d", run.LastUpdateTime, resumedAt.UnixMilli())
+	}
+	if run.EndTime != 0 {
+		t.Fatalf("resumed run retained stale end time %d", run.EndTime)
+	}
+}
+
 func TestGetSummaryEmitsTopLevelBackendsBlock(t *testing.T) {
 	metrics.RegisterBackendOptions("paradedb", &metrics.BackendOptions{
 		Container: "paradedb",

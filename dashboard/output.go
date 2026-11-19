@@ -106,6 +106,17 @@ type RunMetrics struct {
 	UpdateMetrics   *UpdateMetrics            `json:"-"`
 }
 
+func (rm *RunMetrics) recordActivity(sampleTime int64) {
+	if sampleTime <= rm.LastUpdateTime {
+		return
+	}
+	rm.LastUpdateTime = sampleTime
+	// An end inferred from inactivity is provisional until activity resumes.
+	if rm.EndTime > 0 && sampleTime > rm.EndTime {
+		rm.EndTime = 0
+	}
+}
+
 // QueryMetrics holds metrics for a specific query type within a run.
 type QueryMetrics struct {
 	Name      string          `json:"name"`
@@ -598,9 +609,7 @@ func (o *Output) flush() {
 				if rm.StartTime == 0 {
 					rm.StartTime = sampleTime
 				}
-				if sampleTime > rm.LastUpdateTime {
-					rm.LastUpdateTime = sampleTime
-				}
+				rm.recordActivity(sampleTime)
 
 				// Track per-query metrics
 				queryName := tags["query"]
@@ -670,9 +679,7 @@ func (o *Output) flush() {
 				if rm.StartTime == 0 {
 					rm.StartTime = sampleTime
 				}
-				if sampleTime > rm.LastUpdateTime {
-					rm.LastUpdateTime = sampleTime
-				}
+				rm.recordActivity(sampleTime)
 				point := TimeValue{Time: sampleTime, Value: value}
 				switch name {
 				case "update_duration":
@@ -731,9 +738,7 @@ func (o *Output) flush() {
 				if rm.StartTime == 0 {
 					rm.StartTime = sampleTime
 				}
-				if sampleTime > rm.LastUpdateTime {
-					rm.LastUpdateTime = sampleTime
-				}
+				rm.recordActivity(sampleTime)
 			}
 		}
 	}
